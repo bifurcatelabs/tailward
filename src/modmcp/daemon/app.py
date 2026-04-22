@@ -11,6 +11,7 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 
+from ..config import get_config
 from ..paths import (
     daemon_log_path,
     ensure_layout,
@@ -22,6 +23,7 @@ from ..paths import (
 )
 from ..schema.intent import Intent, load_intent, save_intent
 from ..storage.ledger import Ledger
+from .livebus import LiveBus
 from .state import StateStore
 from .watcher import TranscriptWatcher
 
@@ -50,6 +52,16 @@ class Daemon:
         self.audit = None
         self.surface = None
         self.qwen = None
+        # v1.1 failure-mode audit layer workers.
+        self.constraints = None
+        self.scope = None
+        self.rubric = None
+        self.session_close = None
+        # Live event bus; persister is attached after ledger connects.
+        cfg = get_config()
+        self.live = LiveBus(
+            max_subscribers_per_session=cfg.live_sse_max_subscribers_per_session,
+        )
 
 
 def create_app() -> FastAPI:
@@ -59,6 +71,13 @@ def create_app() -> FastAPI:
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         await daemon.ledger.connect()
+
+        async def _persist_live(ev) -> int:
+            return await daemon.ledger.record_live_event(
+                ev.session_id, ev.project_hash, ev.type, ev.to_json()
+            )
+
+        daemon.live.set_persister(_persist_live)
 
         async def on_event(ev, fs):
             # Drift only fires on assistant turns (we're judging the assistant's
@@ -74,6 +93,49 @@ def create_app() -> FastAPI:
                 and fs.session_id
             ):
                 await daemon.audit.enqueue(ev, fs)
+
+            # v1.1 failure-mode workers
+            if fs.session_id and fs.project_hash:
+                if daemon.constraints is not None and ev.kind in (
+                    "tool_use",
+                    "assistant_message",
+                ):
+                    await daemon.constraints.enqueue(ev, fs)
+                if daemon.scope is not None and ev.kind in (
+                    "tool_use",
+                    "assistant_message",
+                ):
+                    await daemon.scope.enqueue(ev, fs)
+                if daemon.rubric is not None and ev.kind == "assistant_message":
+                    await daemon.rubric.enqueue(ev, fs)
+
+            # Publish turn-level markers to the live bus so the web feed
+            # sees activity even without worker findings.
+            if fs.session_id and fs.project_hash and ev.kind == "assistant_message":
+                preview = (ev.text or "").strip().replace("\r", "")
+                if len(preview) > 280:
+                    preview = preview[:280] + "\u2026"
+                st = daemon.state.get(fs.session_id)
+                await daemon.live.publish(
+                    fs.session_id,
+                    fs.project_hash,
+                    "turn",
+                    {
+                        "turn_idx": st.turns_seen if st else 0,
+                        "text_preview": preview,
+                        "chars": len(ev.text or ""),
+                    },
+                )
+            if fs.session_id and fs.project_hash and ev.kind == "tool_use" and ev.tool_name:
+                await daemon.live.publish(
+                    fs.session_id,
+                    fs.project_hash,
+                    "tool_call",
+                    {
+                        "tool": ev.tool_name,
+                        "input_preview": _shorten_tool_input(ev.tool_input),
+                    },
+                )
 
         daemon.watcher = TranscriptWatcher(daemon.state, daemon.ledger, on_event=on_event)
         await daemon.watcher.start()
@@ -105,7 +167,35 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning("surfacer unavailable: %s", e)
 
-        log.info("modmcp daemon started")
+        try:
+            from .constraints_worker import ConstraintsWorker
+            daemon.constraints = ConstraintsWorker(daemon)
+            await daemon.constraints.start()
+        except Exception as e:
+            log.warning("constraints worker unavailable: %s", e)
+
+        try:
+            from .scope_worker import ScopeWorker
+            daemon.scope = ScopeWorker(daemon)
+            await daemon.scope.start()
+        except Exception as e:
+            log.warning("scope worker unavailable: %s", e)
+
+        try:
+            from .rubric_worker import RubricWorker
+            daemon.rubric = RubricWorker(daemon)
+            await daemon.rubric.start()
+        except Exception as e:
+            log.warning("rubric worker unavailable: %s", e)
+
+        try:
+            from .session_close import SessionCloseDetector
+            daemon.session_close = SessionCloseDetector(daemon)
+            await daemon.session_close.start()
+        except Exception as e:
+            log.warning("session-close detector unavailable: %s", e)
+
+        log.info("modmcp daemon started (mode=%s)", get_config().warden_mode)
         try:
             yield
         finally:
@@ -115,6 +205,14 @@ def create_app() -> FastAPI:
                 await daemon.drift.stop()
             if daemon.audit:
                 await daemon.audit.stop()
+            if daemon.constraints:
+                await daemon.constraints.stop()
+            if daemon.scope:
+                await daemon.scope.stop()
+            if daemon.rubric:
+                await daemon.rubric.stop()
+            if daemon.session_close:
+                await daemon.session_close.stop()
             await daemon.ledger.close()
             log.info("modmcp daemon stopped")
 
@@ -136,6 +234,12 @@ def create_app() -> FastAPI:
         session_id = payload.get("session_id") or payload.get("sessionId")
         raw_prompt = payload.get("prompt") or ""
         if not cwd:
+            return JSONResponse({})
+
+        # Passive mode: daemon still receives the POST (so Claude Code
+        # doesn't error on hook configuration) but injects nothing. All
+        # observability goes through the web UI instead.
+        if get_config().warden_mode == "passive":
             return JSONResponse({})
         try:
             ip = intent_path(cwd)
@@ -295,3 +399,19 @@ def _snapshot(intent_file: Path) -> None:
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     target = archive / f"intent-{ts}.md"
     target.write_bytes(intent_file.read_bytes())
+
+
+def _shorten_tool_input(tool_input: dict[str, Any] | None) -> str:
+    """Compact preview of tool args for the live feed (no full file bodies)."""
+    if not tool_input:
+        return ""
+    pieces: list[str] = []
+    for key in ("file_path", "path", "command", "pattern", "query", "url"):
+        val = tool_input.get(key)
+        if isinstance(val, str) and val:
+            pieces.append(f"{key}={val[:120]}")
+            break
+    if not pieces:
+        keys = ", ".join(sorted(tool_input.keys())[:4])
+        pieces.append(f"keys=[{keys}]")
+    return " ".join(pieces)

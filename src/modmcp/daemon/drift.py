@@ -148,6 +148,23 @@ class DriftWorker:
             fs.session_id, fs.project_hash, "drift", verdict.severity, action_taken, verdict.detail
         )
 
+        if getattr(self._daemon, "live", None) is not None:
+            try:
+                await self._daemon.live.publish(
+                    fs.session_id,
+                    fs.project_hash,
+                    "drift",
+                    {
+                        "severity": verdict.severity,
+                        "detail": verdict.detail,
+                        "corrective": verdict.corrective,
+                        "pattern_score": round(verdict.score, 3),
+                        "action_taken": action_taken,
+                    },
+                )
+            except Exception:
+                log.exception("live publish failed (drift)")
+
         # Decrement handled by hook endpoint when the next UserPromptSubmit fires,
         # but we also nudge here to make zero-hook scenarios still terminate.
         save_intent(intent, ip)

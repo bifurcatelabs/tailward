@@ -179,6 +179,21 @@ class AuditWorker:
             await self._daemon.ledger.record_claim(
                 fs.session_id, fs.project_hash, claim.text, status, evidence
             )
+            if getattr(self._daemon, "live", None) is not None:
+                try:
+                    await self._daemon.live.publish(
+                        fs.session_id,
+                        fs.project_hash,
+                        "claim",
+                        {
+                            "status": status,
+                            "text": claim.text,
+                            "evidence": evidence,
+                            "candidates": claim.candidates,
+                        },
+                    )
+                except Exception:
+                    log.exception("live publish failed (claim)")
             if status == "contradicted" and self._daemon.surface is not None:
                 try:
                     await self._daemon.surface.surface(

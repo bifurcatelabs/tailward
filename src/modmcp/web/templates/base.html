@@ -94,6 +94,22 @@
         .status-contradicted { color: var(--err); }
         .status-unverifiable { color: var(--warn); }
         .muted { color: var(--muted); font-size: 12px; }
+        .pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 10px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+            border: 1px solid #2a2e38;
+        }
+        .pill-passive { background: #1a1d24; color: var(--muted); }
+        .pill-active  { background: #2b3a55; color: var(--accent); border-color: var(--accent); }
+        .proj-nav { display: inline-flex; gap: 12px; margin-left: 12px; }
+        .proj-nav a { color: var(--muted); font-size: 13px; }
+        .proj-nav a:hover { color: var(--fg); }
+        header nav { flex: 1; }
     </style>
 </head>
 <body>
@@ -101,7 +117,18 @@
         <h1><a href="/">modmcp</a></h1>
         <nav>
             <a href="/">projects</a>
+            {% if ph is defined %}
+            <span class="proj-nav">
+                <a href="/p/{{ ph }}">intent</a>
+                <a href="/p/{{ ph }}/live">live</a>
+                <a href="/p/{{ ph }}/violations">violations</a>
+                <a href="/p/{{ ph }}/ledger">claims</a>
+                <a href="/p/{{ ph }}/drift">drift</a>
+                <a href="/p/{{ ph }}/trends">trends</a>
+            </span>
+            {% endif %}
         </nav>
+        <span style="margin-left:auto" class="pill pill-{{ warden_mode }}">{{ warden_mode }}</span>
     </header>
     <main>
         {% block content %}{% endblock %}

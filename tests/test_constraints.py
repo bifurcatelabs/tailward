@@ -1,0 +1,132 @@
+"""Active Rules parsing + policy matching + worker end-to-end."""
+
+from __future__ import annotations
+
+import asyncio
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+
+from modmcp.daemon.app import create_app
+from modmcp.paths import intent_path, project_hash
+from modmcp.schema.constraints import default_policy, parse_active_rules
+from modmcp.schema.events import TranscriptEvent
+from modmcp.schema.intent import empty_intent, save_intent
+
+
+def test_parse_active_rules_immutable_paths() -> None:
+    body = "- do not edit pyproject.toml\n- no force push\n"
+    policy = parse_active_rules(body)
+    assert any("pyproject.toml" in p for p in policy.immutable.paths)
+
+
+def test_parse_active_rules_allow_only() -> None:
+    body = "- only edit files under src/\n"
+    policy = parse_active_rules(body)
+    assert any("src" in pat for pat in policy.path.allow)
+
+
+def test_parse_active_rules_forbidden_bash() -> None:
+    body = "- no force push\n- skip tests is forbidden\n"
+    policy = parse_active_rules(body)
+    assert policy.bash.patterns, "expected bash patterns from force-push hint"
+
+
+def test_default_policy_blocks_force_push() -> None:
+    policy = default_policy()
+    assert policy.bash.violation_for("git push --force origin main") is not None
+
+
+def test_default_policy_blocks_rm_rf_root() -> None:
+    policy = default_policy()
+    assert policy.bash.violation_for("rm -rf /") is not None
+
+
+def test_path_policy_allow_only_denies_outside() -> None:
+    from modmcp.schema.constraints import PathPolicy
+    p = PathPolicy(allow=["src/**"])
+    assert p.violation_for("tests/foo.py") is not None
+    assert p.violation_for("src/a/b.py") is None
+
+
+def test_immutable_glob_match() -> None:
+    from modmcp.schema.constraints import ImmutableFiles
+    i = ImmutableFiles(paths=["pyproject.toml", ".github/workflows/**"])
+    assert i.violation_for("pyproject.toml") == "pyproject.toml"
+    assert i.violation_for(".github/workflows/ci.yml") is not None
+    assert i.violation_for("src/foo.py") is None
+
+
+def _seed_intent(project_path: str, rules_body: str) -> None:
+    intent = empty_intent(project_path, Path(project_path).name)
+    intent.set("Active Rules", rules_body)
+    save_intent(intent, intent_path(project_path))
+
+
+@pytest.mark.asyncio
+async def test_constraints_worker_fires_on_force_push(tmp_path: Path) -> None:
+    proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_intent(str(proj), "- no force push\n")
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+        # Drive a tool_use event synthetically.
+        ev = TranscriptEvent(
+            raw={"id": "t1"}, kind="tool_use", session_id="s-constraint",
+            timestamp=None, text="",
+            tool_name="Bash", tool_input={"command": "git push --force origin main"},
+        )
+        class _FS:
+            session_id = "s-constraint"
+            project_path = str(proj)
+            project_hash = project_hash(str(proj))
+        fs = _FS()
+        await daemon.ledger.upsert_session(fs.session_id, fs.project_hash, fs.project_path)
+
+        assert daemon.constraints is not None
+        await daemon.constraints.enqueue(ev, fs)
+
+        async def _check():
+            for _ in range(40):
+                rows = await daemon.ledger.recent_violations(fs.project_hash)
+                if rows:
+                    return rows
+                await asyncio.sleep(0.1)
+            return []
+
+        rows = await _check()
+        assert rows, "constraints worker did not record a violation"
+        assert any("forbidden-bash" in r["rule_id"] for r in rows)
+
+
+@pytest.mark.asyncio
+async def test_constraints_worker_flags_immutable_write(tmp_path: Path) -> None:
+    proj = tmp_path / "proj_imm"
+    proj.mkdir()
+    _seed_intent(str(proj), "- do not edit pyproject.toml\n")
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+        ev = TranscriptEvent(
+            raw={"id": "t2"}, kind="tool_use", session_id="s-imm",
+            timestamp=None, text="",
+            tool_name="Edit",
+            tool_input={"file_path": "pyproject.toml", "old_string": "a", "new_string": "b"},
+        )
+        class _FS:
+            session_id = "s-imm"
+            project_path = str(proj)
+            project_hash = project_hash(str(proj))
+        fs = _FS()
+        await daemon.ledger.upsert_session(fs.session_id, fs.project_hash, fs.project_path)
+        await daemon.constraints.enqueue(ev, fs)
+
+        for _ in range(40):
+            rows = await daemon.ledger.recent_violations(fs.project_hash)
+            if rows:
+                break
+            await asyncio.sleep(0.1)
+        assert rows, "immutable-file violation not recorded"
+        assert any(r["rule_id"].startswith("immutable:") for r in rows)

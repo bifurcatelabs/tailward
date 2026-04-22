@@ -92,4 +92,117 @@ SCHEMA_STATEMENTS: list[str] = [
         created_at TEXT NOT NULL
     );
     """,
+    # ---- v1.1 failure-mode audit layer ----
+    """
+    CREATE TABLE IF NOT EXISTS constraint_violations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        project_hash TEXT NOT NULL,
+        tool_call_id TEXT,
+        rule_id TEXT NOT NULL,
+        rule_text TEXT NOT NULL,
+        evidence TEXT,
+        severity TEXT NOT NULL CHECK(severity IN ('low','med','high')),
+        status TEXT NOT NULL DEFAULT 'new'
+            CHECK(status IN ('new','acknowledged','dismissed')),
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_violations_session
+        ON constraint_violations(session_id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_violations_project
+        ON constraint_violations(project_hash);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS scope_snapshots (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        project_hash TEXT NOT NULL,
+        turn_idx INTEGER NOT NULL,
+        files_touched_count INTEGER NOT NULL,
+        diff_bytes INTEGER NOT NULL,
+        tool_kinds_json TEXT NOT NULL,
+        is_creep INTEGER NOT NULL DEFAULT 0,
+        baseline INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_scope_session
+        ON scope_snapshots(session_id);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS rubric_scores (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        project_hash TEXT NOT NULL,
+        turn_idx INTEGER NOT NULL,
+        dim_name TEXT NOT NULL,
+        score REAL NOT NULL,
+        evidence TEXT,
+        suggestion TEXT,
+        model_used TEXT,
+        trigger TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_rubric_session
+        ON rubric_scores(session_id);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS rubric_feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        rubric_score_id INTEGER NOT NULL,
+        verdict TEXT NOT NULL CHECK(verdict IN ('agree','disagree')),
+        note TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS session_reports (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        project_hash TEXT NOT NULL,
+        mode_id INTEGER NOT NULL,
+        mode_name TEXT NOT NULL,
+        score REAL NOT NULL,
+        evidence_json TEXT,
+        suggestion TEXT,
+        model_used TEXT,
+        created_at TEXT NOT NULL,
+        UNIQUE(session_id, mode_id)
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_session_reports_project
+        ON session_reports(project_hash);
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS session_close (
+        session_id TEXT PRIMARY KEY,
+        project_hash TEXT NOT NULL,
+        closed_at TEXT NOT NULL,
+        consolidation_status TEXT NOT NULL
+            CHECK(consolidation_status IN ('pending','running','done','error')),
+        error TEXT
+    );
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS live_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        project_hash TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_live_events_session
+        ON live_events(session_id, id);
+    """,
 ]

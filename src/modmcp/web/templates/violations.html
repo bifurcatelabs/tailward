@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}violations{% endblock %}
+{% block content %}
+<h2>Constraint violations</h2>
+<p class="muted">Rule-based audits against <code>Active Rules</code> policy. Acknowledge a row to keep the ledger clean; dismiss to silence recurrences.</p>
+<table>
+    <thead>
+        <tr><th>When</th><th>Sev</th><th>Rule</th><th>Evidence</th><th>Session</th><th>Status</th><th></th></tr>
+    </thead>
+    <tbody id="violations-body">
+    {% for r in rows %}
+        <tr id="row-{{ r.id }}" data-id="{{ r.id }}">
+            <td class="muted">{{ r.created_at }}</td>
+            <td class="sev-{{ r.severity }}">{{ r.severity }}</td>
+            <td>{{ r.rule_text }}</td>
+            <td class="muted">{{ r.evidence or "" }}</td>
+            <td class="muted">{{ r.session_id[:8] }}</td>
+            <td>{{ r.status }}</td>
+            <td>
+                <button class="btn" onclick="setStatus({{ r.id }}, 'ack')">ack</button>
+                <button class="btn" onclick="setStatus({{ r.id }}, 'dismiss')">dismiss</button>
+            </td>
+        </tr>
+    {% endfor %}
+    </tbody>
+</table>
+<style>
+    .btn { background: transparent; border: 1px solid #2a2e38; color: var(--muted); padding: 2px 10px; font-size: 11px; cursor: pointer; border-radius: 3px; }
+    .btn:hover { color: var(--fg); border-color: var(--fg); }
+</style>
+<script>
+    async function setStatus(id, kind) {
+        const url = `/p/{{ ph }}/violations/${id}/${kind === 'ack' ? 'ack' : 'dismiss'}`;
+        const r = await fetch(url, { method: 'POST' });
+        if (r.ok) {
+            const data = await r.json();
+            const row = document.getElementById('row-' + id);
+            if (row) row.querySelector('td:nth-child(6)').textContent = data.status;
+        }
+    }
+</script>
+{% endblock %}

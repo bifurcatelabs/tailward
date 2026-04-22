@@ -18,7 +18,7 @@ from ..config import get_config
 
 log = logging.getLogger(__name__)
 
-CallKind = Literal["synth", "drift", "query"]
+CallKind = Literal["synth", "drift", "query", "rubric", "consolidator"]
 
 
 class QwenClient:
@@ -36,6 +36,8 @@ class QwenClient:
             "synth": cfg.qwen_max_tokens_synth,
             "drift": cfg.qwen_max_tokens_drift,
             "query": cfg.qwen_max_tokens_query,
+            "rubric": cfg.qwen_max_tokens_rubric,
+            "consolidator": cfg.qwen_max_tokens_consolidator,
         }[kind]
 
     def _thinking_for(self, kind: CallKind) -> bool:
@@ -44,6 +46,8 @@ class QwenClient:
             "synth": cfg.qwen_enable_thinking_synth,
             "drift": cfg.qwen_enable_thinking_drift,
             "query": cfg.qwen_enable_thinking_query,
+            "rubric": cfg.qwen_enable_thinking_rubric,
+            "consolidator": cfg.qwen_enable_thinking_consolidator,
         }[kind]
 
     def _model_for(self, kind: CallKind) -> str:
@@ -52,8 +56,13 @@ class QwenClient:
             "synth": cfg.qwen_model_synth,
             "drift": cfg.qwen_model_drift,
             "query": cfg.qwen_model_query,
+            "rubric": cfg.qwen_model_rubric,
+            "consolidator": cfg.qwen_model_consolidator,
         }[kind]
         return override or cfg.qwen_model
+
+    def resolve_model(self, kind: CallKind) -> str:
+        return self._model_for(kind)
 
     async def complete(
         self,

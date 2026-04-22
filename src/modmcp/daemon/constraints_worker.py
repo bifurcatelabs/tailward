@@ -1,0 +1,203 @@
+"""Rule-based constraint audit.
+
+Tails ``tool_use`` events, resolves the current session's
+:class:`~modmcp.schema.constraints.CompiledPolicy` (recompiled whenever
+``Active Rules`` changes), and writes each violation to the ledger
+``constraint_violations`` table. Every violation is also pushed onto the
+:class:`~modmcp.daemon.livebus.LiveBus` so the web UI sees it within a
+watcher tick.
+
+Covers failure modes 1 (constraint-respecting), 5 (fails-loudly via
+forbidden bash), and 10 (doesn't-game-targets via immutable files like CI
+configs).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import logging
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
+from ..paths import intent_path
+from ..schema.constraints import (
+    CompiledPolicy,
+    default_policy,
+    merge,
+    parse_active_rules,
+)
+from ..schema.events import TranscriptEvent, bash_command, target_paths
+from ..schema.intent import load_intent
+
+if TYPE_CHECKING:
+    from .app import Daemon
+
+log = logging.getLogger(__name__)
+
+
+@dataclass
+class _PolicyCache:
+    policy: CompiledPolicy
+    rules_digest: str
+
+
+class ConstraintsWorker:
+    def __init__(self, daemon: Daemon) -> None:
+        self._daemon = daemon
+        self._q: asyncio.Queue[tuple[TranscriptEvent, object]] = asyncio.Queue()
+        self._task: asyncio.Task | None = None
+        self._stop = asyncio.Event()
+        self._policies: dict[str, _PolicyCache] = {}
+        self._seen_violations: dict[str, set[tuple[str, str]]] = {}
+
+    async def enqueue(self, ev: TranscriptEvent, fs) -> None:
+        await self._q.put((ev, fs))
+
+    async def start(self) -> None:
+        self._stop.clear()
+        self._task = asyncio.create_task(self._run(), name="constraints-worker")
+
+    async def stop(self) -> None:
+        self._stop.set()
+        if self._task:
+            self._task.cancel()
+            try:
+                await self._task
+            except (asyncio.CancelledError, Exception):
+                pass
+
+    async def _run(self) -> None:
+        while not self._stop.is_set():
+            try:
+                ev, fs = await asyncio.wait_for(self._q.get(), timeout=1.0)
+            except TimeoutError:
+                continue
+            try:
+                await self._process(ev, fs)
+            except Exception:
+                log.exception("constraints processing failed")
+
+    def _compute_policy(self, project_path: str) -> CompiledPolicy:
+        try:
+            intent = load_intent(intent_path(project_path))
+        except Exception:
+            return default_policy()
+        rules_body = intent.sections.get("Active Rules", "") or ""
+        digest = hashlib.sha1(rules_body.encode("utf-8")).hexdigest()
+        cached = self._policies.get(project_path)
+        if cached and cached.rules_digest == digest:
+            return cached.policy
+        policy = merge(default_policy(), parse_active_rules(rules_body))
+        self._policies[project_path] = _PolicyCache(policy, digest)
+        return policy
+
+    async def _process(self, ev: TranscriptEvent, fs) -> None:
+        if ev.kind != "tool_use" or not fs.project_path or not fs.session_id:
+            return
+        policy = self._compute_policy(fs.project_path)
+        if policy.is_empty():
+            return
+
+        violations: list[tuple[str, str, str, str]] = []
+
+        for path in target_paths(ev):
+            pat = policy.immutable.violation_for(path)
+            if pat:
+                violations.append((
+                    "immutable",
+                    pat,
+                    f"{ev.tool_name} touched immutable path {path}",
+                    self._lookup_rule(policy, "immutable", pat),
+                ))
+            pat = policy.path.violation_for(path)
+            if pat:
+                violations.append((
+                    "path-policy",
+                    pat,
+                    f"{ev.tool_name} targeted disallowed path {path} (matched {pat})",
+                    self._lookup_rule(policy, "path", pat),
+                ))
+
+        cmd = bash_command(ev)
+        if cmd:
+            pat = policy.bash.violation_for(cmd)
+            if pat:
+                violations.append((
+                    "forbidden-bash",
+                    pat,
+                    f"Bash command matched forbidden pattern: {cmd[:200]}",
+                    self._lookup_rule(policy, "bash", pat),
+                ))
+
+        if not violations:
+            return
+
+        seen = self._seen_violations.setdefault(fs.session_id, set())
+
+        for kind, pat, evidence, rule_text in violations:
+            key = (kind, pat)
+            if key in seen:
+                continue
+            seen.add(key)
+            rule_id = f"{kind}:{_short_hash(pat)}"
+            severity = "high" if kind in ("immutable", "forbidden-bash") else "med"
+            vid = await self._daemon.ledger.record_constraint_violation(
+                fs.session_id,
+                fs.project_hash,
+                tool_call_id=str(ev.raw.get("id") or ""),
+                rule_id=rule_id,
+                rule_text=rule_text,
+                evidence=evidence,
+                severity=severity,
+            )
+            log.info(
+                "constraint violation session=%s rule=%s path_or_cmd=%s",
+                fs.session_id,
+                rule_id,
+                pat,
+            )
+            if getattr(self._daemon, "live", None) is not None:
+                try:
+                    await self._daemon.live.publish(
+                        fs.session_id,
+                        fs.project_hash,
+                        "constraint_violation",
+                        {
+                            "id": vid,
+                            "rule_id": rule_id,
+                            "rule_text": rule_text,
+                            "evidence": evidence,
+                            "severity": severity,
+                            "tool": ev.tool_name,
+                        },
+                    )
+                except Exception:
+                    log.exception("live publish failed (constraint)")
+            if self._daemon.surface is not None:
+                try:
+                    await self._daemon.surface.surface(
+                        fs.session_id,
+                        fs.project_hash,
+                        kind="constraint",
+                        severity=severity,
+                        text=f"{rule_text}\n{evidence}",
+                    )
+                except Exception:
+                    log.exception("constraint surfacing failed")
+
+    def _lookup_rule(self, policy: CompiledPolicy, kind: str, pat: str) -> str:
+        for rid, text in policy.rule_texts.items():
+            if pat and pat.lower() in text.lower():
+                return text
+        if kind == "immutable":
+            return f"Immutable path: {pat}"
+        if kind == "path":
+            return f"Path policy: {pat}"
+        if kind == "bash":
+            return f"Forbidden bash pattern: {pat}"
+        return pat
+
+
+def _short_hash(s: str) -> str:
+    return hashlib.sha1(s.encode("utf-8")).hexdigest()[:8]

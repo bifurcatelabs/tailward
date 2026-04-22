@@ -4,13 +4,21 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import asdict, dataclass
-from typing import Any
+from typing import Any, Literal
 
 from .paths import atomic_write_text, config_path, ensure_layout
+
+WardenMode = Literal["passive", "active"]
 
 
 @dataclass
 class Config:
+    # Warden active-participation mode. ``passive`` is the default in v1.1:
+    # no preamble injection and no MCP tool usage influences context, the
+    # daemon only observes and audits. Flip to ``active`` to re-enable the
+    # UserPromptSubmit preamble + drift-corrective queue.
+    warden_mode: WardenMode = "passive"
+
     # Qwen / llama.cpp OpenAI-compatible endpoint.
     qwen_endpoint: str = "http://127.0.0.1:8080/v1"
     qwen_model: str = "qwen2.5-8b-instruct"
@@ -23,6 +31,8 @@ class Config:
     qwen_model_synth: str = ""
     qwen_model_drift: str = ""
     qwen_model_query: str = ""
+    qwen_model_rubric: str = ""
+    qwen_model_consolidator: str = ""
 
     # Sampling (Qwen3 thinking-mode defaults).
     qwen_temperature: float = 0.6
@@ -36,9 +46,11 @@ class Config:
     qwen_context_tokens: int = 32768
 
     # Per-call-type output budgets. Thinking models need generous headroom.
-    qwen_max_tokens_synth: int = 6000     # Phase 1 synthesis
-    qwen_max_tokens_drift: int = 1500     # per-turn drift verdict
-    qwen_max_tokens_query: int = 1500     # query_intent answer
+    qwen_max_tokens_synth: int = 6000         # Phase 1 synthesis
+    qwen_max_tokens_drift: int = 1500         # per-turn drift verdict
+    qwen_max_tokens_query: int = 1500         # query_intent answer
+    qwen_max_tokens_rubric: int = 2500        # per-sample 4-dimension rubric
+    qwen_max_tokens_consolidator: int = 8000  # end-of-session 8-mode report card
 
     # Qwen3 thinking mode, per call-type. Synth benefits from deep reasoning;
     # drift/query are fast-path structured tasks where thinking just burns
@@ -46,6 +58,8 @@ class Config:
     qwen_enable_thinking_synth: bool = True
     qwen_enable_thinking_drift: bool = False
     qwen_enable_thinking_query: bool = False
+    qwen_enable_thinking_rubric: bool = True
+    qwen_enable_thinking_consolidator: bool = True
 
     # Daemon HTTP (hook IPC + web UI) on localhost.
     http_host: str = "127.0.0.1"
@@ -65,6 +79,29 @@ class Config:
 
     # Hook behavior.
     hook_timeout_ms: int = 400
+
+    # Failure-mode audit layer (v1.1).
+    # Rubric sampling: Qwen-judged rubric every N assistant turns, plus
+    # triggered runs on scope creep and first-person completion claims.
+    rubric_turn_interval: int = 5
+    rubric_min_text_chars: int = 80     # skip trivially short turns
+
+    # Scope tracking: files-touched baseline comes from the rolling median
+    # of the previous N completed sessions for the same project. Creep
+    # fires when files_touched > baseline * creep_factor OR absolute floor.
+    scope_baseline_window: int = 5
+    scope_creep_factor: float = 2.0
+    scope_creep_floor: int = 12         # files-touched below this never fires
+
+    # Session close (Phase 4): idle threshold after which the consolidator
+    # runs; detector polls at the specified cadence.
+    session_idle_seconds: float = 600.0
+    session_close_poll_seconds: float = 60.0
+
+    # Live UI transport: SSE endpoint caps + replay window.
+    live_sse_max_subscribers_per_session: int = 4
+    live_sse_replay_events: int = 200
+    live_sse_keepalive_seconds: float = 20.0
 
     @classmethod
     def default(cls) -> Config:

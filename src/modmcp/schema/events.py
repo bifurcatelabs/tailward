@@ -146,3 +146,52 @@ def parse_line(line: str) -> TranscriptEvent | None:
         tool_output=tool_output,
         cwd=str(cwd) if cwd else None,
     )
+
+
+_EDIT_TOOLS = {"Edit", "Write", "MultiEdit", "Update", "NotebookEdit", "Create"}
+_PATH_KEYS = ("file_path", "path", "notebook_path", "target_file", "filePath")
+
+
+def target_paths(ev: TranscriptEvent) -> list[str]:
+    """Extract file paths targeted by an Edit/Write/MultiEdit-style tool call.
+
+    Returns an empty list for reads, searches, bash, or any tool we don't
+    classify as a filesystem mutation. Callers should still check whether a
+    Bash command happens to be mutating (see :func:`bash_command`).
+    """
+    if ev.tool_input is None:
+        return []
+
+    paths: list[str] = []
+
+    if ev.tool_name in _EDIT_TOOLS:
+        for key in _PATH_KEYS:
+            val = ev.tool_input.get(key)
+            if isinstance(val, str) and val:
+                paths.append(val)
+                break
+        edits = ev.tool_input.get("edits")
+        if isinstance(edits, list):
+            for edit in edits:
+                if isinstance(edit, dict):
+                    for key in _PATH_KEYS:
+                        v = edit.get(key)
+                        if isinstance(v, str) and v and v not in paths:
+                            paths.append(v)
+
+    if ev.tool_name == "Write" or ev.tool_name == "Create":
+        pass
+
+    return paths
+
+
+def bash_command(ev: TranscriptEvent) -> str | None:
+    """Return the ``command`` string of a Bash tool call, if applicable."""
+    if ev.tool_input is None:
+        return None
+    if ev.tool_name not in {"Bash", "Shell", "run_shell"}:
+        return None
+    cmd = ev.tool_input.get("command") or ev.tool_input.get("cmd")
+    if isinstance(cmd, str) and cmd.strip():
+        return cmd
+    return None
