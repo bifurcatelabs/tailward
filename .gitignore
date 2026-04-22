@@ -34,3 +34,7 @@ Thumbs.db
 
 # modmcp local state (should live in ~/.modmcp/, not in-repo, but guard anyway)
 .modmcp/
+
+# Claude Code per-project config (local-only, may contain machine paths / hook wiring)
+.claude/
+.mcp.json
