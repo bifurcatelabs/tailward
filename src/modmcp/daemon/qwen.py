@@ -38,6 +38,23 @@ class QwenClient:
             "query": cfg.qwen_max_tokens_query,
         }[kind]
 
+    def _thinking_for(self, kind: CallKind) -> bool:
+        cfg = self._cfg
+        return {
+            "synth": cfg.qwen_enable_thinking_synth,
+            "drift": cfg.qwen_enable_thinking_drift,
+            "query": cfg.qwen_enable_thinking_query,
+        }[kind]
+
+    def _model_for(self, kind: CallKind) -> str:
+        cfg = self._cfg
+        override = {
+            "synth": cfg.qwen_model_synth,
+            "drift": cfg.qwen_model_drift,
+            "query": cfg.qwen_model_query,
+        }[kind]
+        return override or cfg.qwen_model
+
     async def complete(
         self,
         system: str,
@@ -76,10 +93,13 @@ class QwenClient:
             "top_k": cfg.qwen_top_k,
             "min_p": cfg.qwen_min_p,
             "repetition_penalty": cfg.qwen_repetition_penalty,
+            "chat_template_kwargs": {
+                "enable_thinking": self._thinking_for(kind),
+            },
         }
 
         kwargs: dict[str, Any] = dict(
-            model=cfg.qwen_model,
+            model=self._model_for(kind),
             temperature=temp,
             top_p=cfg.qwen_top_p,
             presence_penalty=cfg.qwen_presence_penalty,
@@ -101,10 +121,12 @@ class QwenClient:
         # preamble and return empty content with finish_reason="length". Make
         # that failure mode loud and actionable.
         if not content and choice.finish_reason == "length":
+            thinking = self._thinking_for(kind)
             raise RuntimeError(
                 "Qwen returned empty content with finish_reason=length; "
-                "the thinking preamble consumed the whole budget. "
-                f"Raise max_tokens (currently {mt})."
+                f"the {'thinking preamble' if thinking else 'output'} consumed the whole budget. "
+                f"Raise qwen_max_tokens_{kind} (currently {mt})"
+                + (f" or set qwen_enable_thinking_{kind}=false." if thinking else ".")
             )
         return content
 

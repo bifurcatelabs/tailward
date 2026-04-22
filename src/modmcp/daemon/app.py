@@ -61,10 +61,18 @@ def create_app() -> FastAPI:
         await daemon.ledger.connect()
 
         async def on_event(ev, fs):
-            # Per-turn hooks for drift/audit are enqueued here starting at M6/M7.
+            # Drift only fires on assistant turns (we're judging the assistant's
+            # trajectory). Audit fires on BOTH user and assistant turns — user
+            # turns often carry strong first-person claims about external
+            # state ("I just deleted X") that Warden should check against the
+            # actual repo before that context shapes the next assistant turn.
             if daemon.drift is not None and ev.kind == "assistant_message" and fs.session_id:
                 await daemon.drift.enqueue(ev, fs)
-            if daemon.audit is not None and ev.kind == "assistant_message" and fs.session_id:
+            if (
+                daemon.audit is not None
+                and ev.kind in ("assistant_message", "user_message")
+                and fs.session_id
+            ):
                 await daemon.audit.enqueue(ev, fs)
 
         daemon.watcher = TranscriptWatcher(daemon.state, daemon.ledger, on_event=on_event)

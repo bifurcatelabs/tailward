@@ -16,6 +16,14 @@ class Config:
     qwen_model: str = "qwen2.5-8b-instruct"
     qwen_api_key: str = "not-needed"
 
+    # Per-call-kind model overrides (empty = fall back to qwen_model). Useful
+    # when the same endpoint serves multiple quants or sizes: e.g. route
+    # drift at a higher-quality quant than synth if rubric classification
+    # degrades under heavy quantization.
+    qwen_model_synth: str = ""
+    qwen_model_drift: str = ""
+    qwen_model_query: str = ""
+
     # Sampling (Qwen3 thinking-mode defaults).
     qwen_temperature: float = 0.6
     qwen_top_p: float = 0.95
@@ -32,6 +40,13 @@ class Config:
     qwen_max_tokens_drift: int = 1500     # per-turn drift verdict
     qwen_max_tokens_query: int = 1500     # query_intent answer
 
+    # Qwen3 thinking mode, per call-type. Synth benefits from deep reasoning;
+    # drift/query are fast-path structured tasks where thinking just burns
+    # tokens. Routed via ``extra_body.chat_template_kwargs.enable_thinking``.
+    qwen_enable_thinking_synth: bool = True
+    qwen_enable_thinking_drift: bool = False
+    qwen_enable_thinking_query: bool = False
+
     # Daemon HTTP (hook IPC + web UI) on localhost.
     http_host: str = "127.0.0.1"
     http_port: int = 7878
@@ -43,7 +58,7 @@ class Config:
     phase2_turns_default: int = 8
     drift_threshold: float = 0.35  # pattern-score above which LLM check runs
     per_turn_budget_seconds: float = 3.0
-    per_turn_hard_cap_seconds: float = 10.0
+    per_turn_hard_cap_seconds: float = 30.0  # thinking-mode Qwen calls can run 3-10s
 
     # Claim verification.
     claim_grep_budget: int = 200  # max files scanned per claim

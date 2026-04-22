@@ -10,6 +10,7 @@ user sees something regardless.
 from __future__ import annotations
 
 import logging
+import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -20,10 +21,17 @@ if TYPE_CHECKING:
 
 log = logging.getLogger(__name__)
 
+# Minimum seconds between OS toasts for the same (session, kind) pair. Ledger
+# rows and the surfacings/ file artifacts are still written every time — we
+# only debounce the user-visible notification so a noisy stretch doesn't
+# spam.
+_NOTIFY_DEBOUNCE_SECONDS = 90.0
+
 
 class Surfacer:
     def __init__(self, daemon: Daemon) -> None:
         self._daemon = daemon
+        self._last_notified: dict[tuple[str, str], float] = {}
 
     async def surface(
         self,
@@ -49,9 +57,17 @@ class Surfacer:
                 f"# {kind} ({severity})\n\n{text}\n", encoding="utf-8"
             )
 
-        self._notify(kind, severity, text)
+        self._notify(session_id, kind, severity, text)
 
-    def _notify(self, kind: str, severity: str, text: str) -> None:
+    def _notify(self, session_id: str, kind: str, severity: str, text: str) -> None:
+        key = (session_id, kind)
+        now = time.monotonic()
+        last = self._last_notified.get(key, 0.0)
+        if now - last < _NOTIFY_DEBOUNCE_SECONDS:
+            log.info("notification debounced for %s/%s", session_id, kind)
+            return
+        self._last_notified[key] = now
+
         try:
             from plyer import notification  # type: ignore
 

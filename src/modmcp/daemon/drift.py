@@ -112,6 +112,14 @@ class DriftWorker:
         if intent.front.phase2_turns_remaining <= 0:
             return
 
+        # Skip turns with no meaningful prose (pure tool-call events, empty
+        # text, or trivially short responses). Claude often emits several
+        # assistant events per response (one per tool invocation + one for
+        # prose); analyzing each would amplify noise.
+        text = (ev.text or "").strip()
+        if len(text) < 40:
+            return
+
         verdict = await asyncio.wait_for(
             self._analyze(ev, intent), timeout=cfg.per_turn_hard_cap_seconds
         )
@@ -173,13 +181,30 @@ class DriftWorker:
             return DriftVerdict(severity, pattern_score, "heuristic-only", corrective)
 
         system = (
-            "You audit a single assistant turn from a coding session against the captured intent. "
-            "Return JSON: {\"severity\":\"low|med|high\", \"detail\":\"one sentence\", "
-            "\"corrective\":\"<= 25 words or empty\"}. Only escalate severity when the turn "
-            "meaningfully departs from the active goal or session mode."
+            "You score whether ONE assistant turn is on-track for the active goal. "
+            "DEFAULT answer is \"low\" (on-track). Most turns are low. "
+            "Escalate ONLY with clear evidence.\n"
+            "\n"
+            "low  — turn advances the goal OR an open thread; asks a clarifying "
+            "       question about the goal; verifies a claim; explains a design "
+            "       decision relevant to the goal; refuses an off-goal request; "
+            "       runs a tool that supports the goal. Cautious / slow / "
+            "       analytical turns are LOW, not higher.\n"
+            "med  — turn does useful work but on something clearly outside all "
+            "       open threads (tangential refactor, unrelated topic).\n"
+            "high — turn makes a false completion claim, contradicts an Active "
+            "       Rule, or pivots entirely to an unrelated goal without "
+            "       explicit scope-change from the user.\n"
+            "\n"
+            "Return JSON only: "
+            "{\"severity\":\"low|med|high\",\"detail\":\"one short sentence naming "
+            "the specific evidence\",\"corrective\":\"<=25 words or empty\"}. "
+            "If severity is low, corrective MUST be empty."
         )
         user = (
-            f"Active Goal:\n{goal}\n\nOpen Threads:\n{threads}\n\n"
+            f"Active Goal:\n{goal}\n\n"
+            f"Open Threads:\n{threads}\n\n"
+            f"Active Rules:\n{intent.sections.get('Active Rules', '')}\n\n"
             f"Session mode: {intent.front.session_mode}\n\n"
             f"Assistant turn:\n{ev.text[:4000]}"
         )
