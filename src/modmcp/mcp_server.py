@@ -11,6 +11,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
+from collections import Counter
 from datetime import UTC, datetime
 
 from mcp.server.fastmcp import FastMCP
@@ -87,17 +89,69 @@ def query_intent(question: str) -> str:
     except Exception as e:
         log.info("qwen unavailable for query_intent (%s); keyword fallback", e)
 
-    # Keyword fallback: return sections whose words overlap the question.
-    q_words = {w.lower() for w in question.split() if len(w) > 3}
-    hits: list[str] = []
-    for s in SECTIONS:
-        body = intent.sections.get(s, "")
+    return _keyword_fallback(question, intent)
+
+
+# --- keyword ranker ---------------------------------------------------------
+
+# Split on anything that isn't an ASCII letter or digit. Critically, this
+# splits identifier tokens like ``active_rules`` into ``active`` + ``rules``,
+# so a body mention of the identifier contributes to queries about either
+# concept. We lowercase everything and drop tokens shorter than 3 chars.
+_TOKEN_RE = re.compile(r"[a-zA-Z0-9]+")
+
+# Question words and determiners that should not contribute to scoring.
+# Deliberately small: we'd rather keep a noisy content word (false-positive
+# overlap that a heading match will dominate anyway) than drop a real one.
+_QUERY_STOP = frozenset({
+    "what", "when", "where", "which", "who", "why", "how",
+    "the", "are", "and", "for", "not", "but", "this", "that",
+    "these", "those", "there", "here", "now", "currently",
+    "right", "any", "some", "our", "its",
+})
+
+
+def _tokens(text: str) -> list[str]:
+    return [m.group(0).lower() for m in _TOKEN_RE.finditer(text or "") if len(m.group(0)) >= 3]
+
+
+# Heading hits are worth far more than body hits. Section bodies frequently
+# omit the words that name them — the *Active Rules* body lists gitignore /
+# hook rules, none of which repeat "active" or "rules". Without heading
+# weighting a ranker picks whichever section happens to mention the query
+# tokens in passing, which is exactly the bug we're fixing.
+_HEADING_WEIGHT = 5
+_BODY_WEIGHT = 1
+_TOP_K = 3
+
+
+def _keyword_fallback(question: str, intent) -> str:  # noqa: ANN001
+    q_tokens = {t for t in _tokens(question) if t not in _QUERY_STOP}
+    if not q_tokens:
+        return "no matching sections found."
+
+    scored: list[tuple[float, int, str, str]] = []
+    for idx, name in enumerate(SECTIONS):
+        body = intent.sections.get(name, "") or ""
         if not body.strip():
             continue
-        body_words = {w.lower() for w in body.split()}
-        if q_words & body_words:
-            hits.append(f"## {s}\n{body.strip()}")
-    return "\n\n".join(hits) if hits else "no matching sections found."
+        heading_tokens = set(_tokens(name))
+        body_counts = Counter(_tokens(body))
+        score = 0.0
+        for q in q_tokens:
+            if q in heading_tokens:
+                score += _HEADING_WEIGHT
+            score += body_counts.get(q, 0) * _BODY_WEIGHT
+        if score > 0:
+            # Tie-break by canonical section order so output is deterministic.
+            scored.append((score, idx, name, body))
+
+    if not scored:
+        return "no matching sections found."
+
+    scored.sort(key=lambda r: (-r[0], r[1]))
+    top = scored[:_TOP_K]
+    return "\n\n".join(f"## {name}\n{body.strip()}" for _, _, name, body in top)
 
 
 @mcp_app.tool()
