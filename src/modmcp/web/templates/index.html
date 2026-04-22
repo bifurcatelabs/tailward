@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}modmcp — projects{% endblock %}
+{% block content %}
+<h2>Projects</h2>
+{% if projects %}
+<table>
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Path</th>
+            <th>Mode</th>
+            <th>Phase 2 turns</th>
+            <th>Updated</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for p in projects %}
+        <tr>
+            <td><a href="/p/{{ p.hash }}">{{ p.name }}</a></td>
+            <td class="muted">{{ p.path }}</td>
+            <td>{{ p.mode }}</td>
+            <td>{{ p.phase2 }}</td>
+            <td class="muted">{{ p.updated }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">No projects yet. Run <code>modmcp handoff</code> in a project root.</p>
+{% endif %}
+{% endblock %}

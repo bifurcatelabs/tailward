@@ -1,0 +1,6 @@
+{"type": "user", "sessionId": "demo-001", "cwd": "/tmp/example", "timestamp": "2026-04-22T10:00:00Z", "message": {"role": "user", "content": "Let's refactor the transcript parser to use pydantic."}}
+{"type": "assistant", "sessionId": "demo-001", "timestamp": "2026-04-22T10:00:05Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "I'll start by reading the parser and its tests."}, {"type": "tool_use", "name": "Read", "input": {"path": "src/parser.py"}}]}}
+{"type": "tool_result", "sessionId": "demo-001", "timestamp": "2026-04-22T10:00:06Z", "content": "class Parser:\n    def parse(self, s): return s"}
+{"type": "assistant", "sessionId": "demo-001", "timestamp": "2026-04-22T10:00:15Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Adding pydantic models and wiring them through. I've refactored Parser to return pydantic objects and kept the public API stable. I removed all the old dict returns."}]}}
+{"type": "user", "sessionId": "demo-001", "cwd": "/tmp/example", "timestamp": "2026-04-22T10:01:00Z", "message": {"role": "user", "content": "Don't add tests unless asked. Also stay minimal."}}
+{"type": "assistant", "sessionId": "demo-001", "timestamp": "2026-04-22T10:01:05Z", "message": {"role": "assistant", "content": [{"type": "text", "text": "Understood. Minimal-change rule, no unprompted tests."}]}}

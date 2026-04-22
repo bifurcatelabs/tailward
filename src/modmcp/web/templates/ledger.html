@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}ledger — {{ ph }}{% endblock %}
+{% block content %}
+<p><a href="/p/{{ ph }}">&larr; back to intent</a></p>
+<h2>Verification ledger</h2>
+{% if rows %}
+<table>
+    <thead>
+        <tr>
+            <th>When</th>
+            <th>Status</th>
+            <th>Claim</th>
+            <th>Evidence</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rows %}
+        <tr>
+            <td class="muted">{{ r.ran_at }}</td>
+            <td class="status-{{ r.status }}">{{ r.status }}</td>
+            <td>{{ r.claim_text }}</td>
+            <td class="muted">{{ r.evidence or '' }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="muted">No claims audited yet.</p>
+{% endif %}
+{% endblock %}
