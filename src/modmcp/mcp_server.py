@@ -8,7 +8,6 @@ back to keyword section-matching.
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import re
@@ -54,10 +53,18 @@ def get_active_rules() -> str:
 
 
 @mcp_app.tool()
-def query_intent(question: str) -> str:
+async def query_intent(question: str) -> str:
     """Answer a question about the captured intent.
 
     Uses Qwen if reachable; otherwise falls back to keyword matching.
+
+    Implementation note: this handler is ``async`` on purpose. FastMCP runs
+    tool handlers inside its own asyncio loop, so the previous approach of
+    wrapping the Qwen call in ``asyncio.run()`` raised "cannot be called
+    from a running event loop" and silently fell back to keyword matching.
+    Every live Claude Code session quietly bypassed the LLM path because of
+    it. Making the handler async lets us await the coroutine directly on
+    the existing loop.
     """
     path = intent_path(_current_project())
     if not path.exists():
@@ -74,18 +81,8 @@ def query_intent(question: str) -> str:
             "Be concise. If the document does not contain the answer, say so explicitly."
         )
         user = f"Captured intent:\n{body}\n\nQuestion: {question}"
-
-        async def _run() -> str:
-            return await qwen.complete(system, user, kind="query")
-
-        try:
-            return asyncio.run(_run()).strip()
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            try:
-                return loop.run_until_complete(_run()).strip()
-            finally:
-                loop.close()
+        answer = await qwen.complete(system, user, kind="query")
+        return answer.strip()
     except Exception as e:
         log.info("qwen unavailable for query_intent (%s); keyword fallback", e)
 

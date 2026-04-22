@@ -6,6 +6,8 @@ FastMCP decorator stores the callable on the ``fn`` attribute of the tool.
 
 from __future__ import annotations
 
+import asyncio
+import inspect
 import os
 from pathlib import Path
 
@@ -22,9 +24,15 @@ from modmcp.schema.intent import empty_intent, load_intent, save_intent
 
 
 def _call(tool, /, *args, **kw):
-    """FastMCP tools expose the underlying callable on .fn in recent SDKs."""
+    """FastMCP tools expose the underlying callable on .fn in recent SDKs.
+
+    Transparently awaits async handlers so callers can stay sync.
+    """
     fn = getattr(tool, "fn", None) or getattr(tool, "__wrapped__", None) or tool
-    return fn(*args, **kw)
+    result = fn(*args, **kw)
+    if inspect.iscoroutine(result):
+        return asyncio.run(result)
+    return result
 
 
 def _seed(project_path: str) -> None:
@@ -142,6 +150,53 @@ def test_query_intent_heading_outscores_body_mention(
         assert out.index("## Active Rules") < out.index(
             "## Known Agent Drift Patterns"
         ), "heading-matching section must rank above body-mention section"
+
+
+def test_query_intent_async_handler_works_inside_running_loop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Regression: for months the MCP ``query_intent`` handler silently
+    fell back to keyword matching in every live Claude Code session
+    because it wrapped the Qwen call in ``asyncio.run()``, which raises
+    "cannot be called from a running event loop" when FastMCP invokes
+    the tool from within its own loop. The handler must be ``async``
+    and work when awaited from inside an already-running loop.
+    """
+    proj = tmp_path / "proj_async"
+    proj.mkdir()
+    project_dir(str(proj)).mkdir(parents=True, exist_ok=True)
+    intent = empty_intent(str(proj), "demo")
+    intent.append_list_item("Active Rules", "no in-repo writes")
+    save_intent(intent, intent_path(str(proj)))
+    monkeypatch.setenv("MODMCP_PROJECT", str(proj))
+
+    # Stub QwenClient so the test never hits the network.
+    from modmcp.daemon import qwen as qwen_mod
+
+    class _FakeQwen:
+        def __init__(self, *a, **kw) -> None: ...
+
+        async def complete(self, system: str, user: str, kind: str = "query") -> str:
+            assert kind == "query"
+            return "qwen-synthesized answer: no in-repo writes"
+
+    monkeypatch.setattr(qwen_mod, "QwenClient", _FakeQwen)
+
+    # Simulate FastMCP's invocation pattern: call the async tool from
+    # inside a running event loop. If the handler is still sync-wrapping
+    # asyncio.run internally, this will raise or return fallback text.
+    from modmcp.mcp_server import query_intent
+
+    fn = getattr(query_intent, "fn", query_intent)
+
+    async def _invoke_from_running_loop() -> str:
+        return await fn("what are the active rules?")
+
+    result = asyncio.run(_invoke_from_running_loop())
+    assert result == "qwen-synthesized answer: no in-repo writes", (
+        "Qwen path should be used when handler is awaited from a running "
+        f"loop; got {result!r}"
+    )
 
 
 def test_query_intent_heading_only_section_still_returned(
