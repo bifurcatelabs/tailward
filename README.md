@@ -106,6 +106,21 @@ Stop with `modmcp daemon stop`.
 
 You only need this if you want the `UserPromptSubmit` preamble and the MCP tools (`get_captured_intent`, etc.). Neither is required for the audit layer.
 
+**0. Find the absolute path to your `modmcp` executable.** Claude Code spawns hook and MCP commands with the `PATH` it inherited at launch. For a venv install (`pip install -e .` inside `.venv`) that `PATH` almost never includes `.venv/Scripts` / `.venv/bin`, so a bare `command: "modmcp"` will silently fail to resolve. The preferred shape is the absolute path to the launcher `pip` / `pipx` created:
+
+```bash
+# Windows (inside the activated venv, or from anywhere if on PATH)
+where modmcp
+# -> C:\path\to\.venv\Scripts\modmcp.exe
+
+# macOS / Linux
+which modmcp
+# -> /path/to/.venv/bin/modmcp          (venv install)
+# -> /home/you/.local/bin/modmcp        (pipx install)
+```
+
+Use that path verbatim in the snippets below. Bare `modmcp` works too **if** its install dir is on the user/system `PATH` that Claude Code inherits at launch (typical for `pipx install` after `pipx ensurepath`, plus a Claude Code restart). The absolute form survives PATH changes, venv activations, and ambiguous multi-install setups, so it's the recommended shape.
+
 **1. Register the hook.** Edit `~/.claude/settings.json`:
 
 ```json
@@ -114,13 +129,18 @@ You only need this if you want the `UserPromptSubmit` preamble and the MCP tools
     "UserPromptSubmit": [
       {
         "hooks": [
-          { "type": "command", "command": "modmcp hook userpromptsubmit" }
+          {
+            "type": "command",
+            "command": "C:\\path\\to\\.venv\\Scripts\\modmcp.exe hook userpromptsubmit"
+          }
         ]
       }
     ]
   }
 }
 ```
+
+On macOS / Linux the `command` becomes `"/path/to/.venv/bin/modmcp hook userpromptsubmit"`. Note the doubled backslashes in the Windows form — `settings.json` is JSON, so `\` must be escaped.
 
 The hook has a hard ≤400 ms budget and silently passes your prompt through on any failure, so it can never block you. In `warden_mode = "passive"` the daemon returns an empty response — the hook fires but injects nothing.
 
@@ -130,7 +150,7 @@ The hook has a hard ≤400 ms budget and silently passes your prompt through on 
 {
   "mcpServers": {
     "modmcp": {
-      "command": "modmcp",
+      "command": "C:\\path\\to\\.venv\\Scripts\\modmcp.exe",
       "args": ["mcp"],
       "env": { "MODMCP_PROJECT": "${workspaceFolder}" }
     }
@@ -138,7 +158,7 @@ The hook has a hard ≤400 ms budget and silently passes your prompt through on 
 }
 ```
 
-If `MODMCP_PROJECT` isn't set, the MCP server falls back to its current working directory.
+Same substitution on POSIX: `"command": "/path/to/.venv/bin/modmcp"`. If `MODMCP_PROJECT` isn't set, the MCP server falls back to its current working directory.
 
 **3. Flip the mode.** Edit `~/.modmcp/config.toml`:
 
