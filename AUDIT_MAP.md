@@ -101,23 +101,26 @@ Plus a baseline [`default_policy()`](src/modmcp/schema/constraints.py) that forb
 
 | | |
 |---|---|
-| **Detector** | rule-based: [`constraints_worker`](src/modmcp/daemon/constraints_worker.py) via user-configured `ForbiddenBashPatterns`; consolidator |
+| **Detector** | rule-based: [`constraints_worker`](src/modmcp/daemon/constraints_worker.py) + [`default_policy()`](src/modmcp/schema/constraints.py) mute-the-alarm baselines; consolidator |
 | **Trigger** | every `tool_use` event with a bash command |
 | **Signal** | `constraint_violations` (severity rule-dependent); `constraint_violation` LiveBus event |
 | **UI surface** | Violations pane, report card row 5 |
-| **Coverage** | **weak by default** — baseline catches force-push and `rm -rf /`, but the common "fail-quietly" patterns need user-authored rules |
+| **Coverage** | **medium** — baseline forbidden-bash now catches the common silencing patterns; language-specific skip markers still need user rules |
 
-**How it works.** In principle this is the same machinery as mode 1 (`ForbiddenBashPatterns`). In practice, the baseline only forbids destructive commands, not test-silencing ones.
+**How it works.** Same machinery as mode 1 (`ForbiddenBashPatterns`). The baseline set now includes, in addition to destructive commands:
 
-**Known gaps (all high-value).**
-- [ ] Baseline forbidden-bash patterns for common mute-the-alarm moves:
-  - `--no-verify` on `git commit` / `git push`
-  - `\|\|\s*true` appended to a test/lint/CI command
-  - `pytest --ignore`, `--deselect`, `-m "not slow"` when the rule is "all tests"
-  - `jest.skip`, `xit(`, `it.only(` patterns in edited files
-  - `# type: ignore`, `# noqa` additions without a cited reason
-- [ ] Immutable-path baseline for CI configs (`.github/workflows/`, `.pre-commit-config.yaml`, `tox.ini` `[testenv]` sections, coverage threshold lines in `pyproject.toml`).
-- [ ] Without these, a user who hasn't written thorough Active Rules sees nothing for mode 5 until session close.
+| pattern | blocks |
+|---|---|
+| `git (commit\|push) ... --no-verify` | bypassing pre-commit / pre-push hooks |
+| `(pytest\|jest\|tox\|coverage\|mypy\|ruff\|flake8\|eslint\|tsc\|cargo test\|go test\|npm/yarn/pnpm test) ... \|\| true` | silencing a named test/lint tool's exit code |
+| `pytest --deselect` | skipping tests silently |
+| `pytest -k 'not ...'` | narrowing the run past declared scope |
+
+Baseline patterns are anchored to named test/lint tools so that legitimate `mkdir ... \|\| true` style fallbacks don't generate false positives. Severity is `high` (same as force-push) so they surface prominently in the live feed.
+
+**Known gaps.**
+- [ ] Language-specific skip markers embedded in edited source (jest `xit(`, `it.only(`, `@pytest.mark.skip`, `# type: ignore` additions without a cited reason). These require diff-AST analysis, not bash matching.
+- [ ] `.pre-commit-config.yaml` edits that remove hooks are caught by the mode-10 immutable baseline, but silent hook-disabling via `args: [--no-verify]` in that file is a subtler attack surface that the immutable rule catches bluntly (any edit triggers) rather than precisely.
 
 ---
 
@@ -194,26 +197,33 @@ Default thresholds in [`config.py`](src/modmcp/config.py): `scope_baseline_windo
 
 | | |
 |---|---|
-| **Detector** | **consolidator-only** (LLM, session close); rule-based: would benefit from `ForbiddenBashPatterns` and immutable-path baselines but none exist yet |
-| **Trigger** | session-close consolidation |
-| **Signal** | report card row 10 only; **no live signal** |
-| **UI surface** | Report card row 10 only |
-| **Coverage** | **weakest mode in the audit** |
+| **Detector** | hybrid: rule-based (`constraints_worker` + [`default_policy()`](src/modmcp/schema/constraints.py) target-gaming baselines) **and** consolidator (LLM, session close) |
+| **Trigger** | every `tool_use` event with a bash command or a touched path; session-close consolidation |
+| **Signal** | `constraint_violations` + `constraint_violation` LiveBus event (live); report card row 10 (end-of-session) |
+| **UI surface** | Violations pane, live feed, report card row 10 |
+| **Coverage** | **medium** — was the weakest mode; now has live rule-based coverage for the most common moves |
 
-**How it works.** The end-of-session consolidator is asked to score whether the agent appeared to game metrics (edit the test to make it pass, lower a coverage threshold, add `--override-ini` to skip a failure). This is purely a text-based LLM judgment against the full session transcript — there's no in-session rule-based detection.
+**How it works.** Two complementary paths:
 
-**Known gaps (high-value, should close before declaring v1.1 complete).**
-- [ ] Baseline immutable-path rules for measurement artifacts:
-  - `.github/workflows/`, `.github/actions/`
-  - `tox.ini` `[testenv]` sections
-  - `pyproject.toml` lines matching `^cov[-_]?fail[-_]?under\s*=` or `tool.coverage`
-  - `.coveragerc`, `codecov.yml`
-  - `jest.config.*` `coverageThreshold`
-- [ ] Baseline forbidden-bash patterns for target-gaming:
-  - `pytest --override-ini`, `--cov-fail-under=0`
-  - `coverage run --omit` adding new omits
-  - `git commit --no-verify` is already in the mode-5 recommendation list; it applies here too
-- [ ] Until those land, a user gets **no live signal** for this mode; they find out only at session close, after the behavior already shipped.
+1. **Rule-based live detection.** The baseline policy now covers:
+
+   | kind | rule | blocks |
+   |---|---|---|
+   | immutable | `.github/workflows/**`, `.github/actions/**` | edits to CI definitions |
+   | immutable | `.coveragerc`, `codecov.yml`, `tox.ini`, `.pre-commit-config.yaml`, `jest.config.*` | edits to coverage / gate configs |
+   | bash | `pytest --override-ini` | runtime edit of the measurement system |
+   | bash | `pytest --cov-fail-under=0` (exactly zero) | disabling the coverage gate (non-zero thresholds are allowed) |
+   | bash | `coverage run --omit` | excluding files from coverage at runtime |
+   | bash | `--no-verify` (shared with mode 5) | bypassing pre-commit/pre-push gates |
+
+   These fire live with severity `high`, so the user sees target-gaming behavior in the violations pane within a watcher tick.
+
+2. **End-of-session consolidation.** The consolidator still scores mode 10 against the full transcript to catch subtler gaming (edits to the test itself, inserting trivial assertions, etc.) that no single bash/path rule can catch.
+
+**Known gaps.**
+- [ ] `pyproject.toml` is *not* blanket-immutable because too many legitimate edits live there. We don't currently diff-check `[tool.coverage.report] fail_under = ...` or `[tool.pytest.ini_options] addopts = ...` edits specifically. A targeted "coverage/threshold lines in `pyproject.toml`" rule would need per-line diff analysis.
+- [ ] Test-file edits that lower assertion strictness (turning `assert x == 5` into `assert x >= 0`) are only catchable by the consolidator. The rule layer doesn't read diff contents.
+- [ ] `jest.config.*` immutability is coarse — blocks all edits, not just `coverageThreshold` changes.
 
 ---
 
@@ -225,21 +235,23 @@ Default thresholds in [`config.py`](src/modmcp/config.py): `scope_baseline_windo
 | 2 | Preserves invariants | rubric + consolidator | yes (rubric) | no | yes | weak |
 | 3 | Consistent over time | — | — | — | — | **skipped** |
 | 4 | Signals uncertainty | audit + rubric + consolidator | yes | partial | yes | medium |
-| 5 | Fails loudly | constraints_worker + consolidator | yes | yes (user rules) | no | weak by default |
+| 5 | Fails loudly | constraints_worker (baseline mute-the-alarm) + consolidator | yes | yes | no | medium |
 | 6 | Maintainability | rubric + scope (proxy) + consolidator | yes (rubric, scope) | no | yes | weak |
 | 7 | Real engineering outcomes | — | — | — | — | **skipped** |
 | 8 | Minimizes scope | scope_worker + consolidator | yes | yes | no | strong |
 | 9 | Provenance | audit + rubric + consolidator | yes | partial | yes | medium |
-| 10 | Doesn't game targets | consolidator only | **no** | no | yes | **weakest** |
+| 10 | Doesn't game targets | constraints_worker (baseline target-gaming) + consolidator | yes | yes | yes | medium |
 
 ## Closing-the-gap priorities
 
 If you're extending Warden's coverage, these are the sharpest wins in rough ROI order. Each is a flagged gap from one or more mode sections above:
 
-1. **Baseline forbidden-bash for mute-the-alarm + target-gaming patterns** (modes 5 and 10). Biggest gap, cheapest to close. Adds immediate live signal for two currently-weak modes.
-2. **Baseline immutable-path for measurement artifacts** (mode 10, overlaps with 5). Same PR as 1; turns mode 10 from consolidator-only into live-rule-based.
+1. ~~**Baseline forbidden-bash for mute-the-alarm + target-gaming patterns** (modes 5 and 10).~~ — **shipped in v1.1.1.** `default_policy()` now ships `--no-verify`, silenced test/lint tools, `--override-ini`, `--cov-fail-under=0`, and `coverage --omit` as baseline violations.
+2. ~~**Baseline immutable-path for measurement artifacts** (mode 10).~~ — **shipped in v1.1.1.** `.github/workflows/**`, `.github/actions/**`, `.coveragerc`, `codecov.yml`, `tox.ini`, `.pre-commit-config.yaml`, and `jest.config.*` are immutable by default.
 3. **Dependency-lockfile diff detection** (mode 1). Structurally it's just adding `pyproject.toml`, `package-lock.json`, `Cargo.lock`, `go.sum` to the default immutable set unless the user opts out.
 4. **Public-API diff signal** (mode 2). One structural check that strengthens the currently-LLM-only mode.
 5. **Per-file rationale extraction** (mode 9). UI-side; surfaces "files with no stated reason" during the session instead of at close.
+6. **Diff-AST analysis for skip markers in edited source** (mode 5). The remaining mute-the-alarm gap: `@pytest.mark.skip`, `xit(`, `it.only(`, `# type: ignore` additions. Needs a diff walker, not a bash matcher.
+7. **Targeted line-level guards for `pyproject.toml`** (mode 10). `[tool.coverage.report] fail_under = ...` edits are the main remaining gaming vector not covered by the blunt immutable-file baseline.
 
-None of these require LLM changes; they're all rule-based extensions to the constraints worker or scope worker.
+None of 3–5 require LLM changes; they're all rule-based extensions to the constraints worker or scope worker. 6–7 need per-line diff analysis.

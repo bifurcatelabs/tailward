@@ -43,6 +43,106 @@ def test_default_policy_blocks_rm_rf_root() -> None:
     assert policy.bash.violation_for("rm -rf /") is not None
 
 
+# ---- mute-the-alarm baselines (failure mode 5) --------------------------
+
+
+def test_default_policy_blocks_no_verify() -> None:
+    policy = default_policy()
+    assert policy.bash.violation_for("git commit --no-verify -m wip") is not None
+    assert policy.bash.violation_for("git push --no-verify origin main") is not None
+
+
+def test_default_policy_blocks_test_command_or_true_silence() -> None:
+    policy = default_policy()
+    assert policy.bash.violation_for("pytest -q || true") is not None
+    assert policy.bash.violation_for("npm test || true") is not None
+    assert policy.bash.violation_for("cargo test || true") is not None
+
+
+def test_default_policy_allows_unrelated_or_true() -> None:
+    """A bare ``cmd || true`` on a non-test command must not trip the baseline.
+
+    Regression guard: the mute-the-alarm pattern is anchored to named
+    test/lint tools so that legitimate fallbacks (``mkdir -p foo || true``)
+    don't generate noise.
+    """
+    policy = default_policy()
+    assert policy.bash.violation_for("mkdir -p tmp || true") is None
+    assert policy.bash.violation_for("grep foo bar.txt || true") is None
+
+
+def test_default_policy_blocks_pytest_deselect_and_negated_k() -> None:
+    policy = default_policy()
+    assert policy.bash.violation_for("pytest --deselect tests/test_slow.py") is not None
+    assert policy.bash.violation_for("pytest -k 'not integration'") is not None
+
+
+# ---- target-gaming baselines (failure mode 10) --------------------------
+
+
+def test_default_policy_blocks_override_ini() -> None:
+    policy = default_policy()
+    assert policy.bash.violation_for("pytest --override-ini addopts=''") is not None
+
+
+def test_default_policy_blocks_cov_fail_under_zero() -> None:
+    policy = default_policy()
+    assert policy.bash.violation_for("pytest --cov-fail-under=0") is not None
+    assert policy.bash.violation_for("pytest --cov-fail-under = 0") is not None
+
+
+def test_default_policy_allows_cov_fail_under_nonzero() -> None:
+    """Raising the bar (``--cov-fail-under=80``) is legitimate; only = 0 is gaming."""
+    policy = default_policy()
+    assert policy.bash.violation_for("pytest --cov-fail-under=80") is None
+    assert policy.bash.violation_for("pytest --cov-fail-under=50") is None
+
+
+def test_default_policy_blocks_coverage_omit_at_runtime() -> None:
+    policy = default_policy()
+    assert policy.bash.violation_for("coverage run --omit='src/risky/*' -m pytest") is not None
+
+
+# ---- immutable measurement artifacts (failure mode 10) -----------------
+
+
+def test_default_policy_marks_ci_workflows_immutable() -> None:
+    policy = default_policy()
+    assert policy.immutable.violation_for(".github/workflows/ci.yml") is not None
+    assert policy.immutable.violation_for(".github/actions/setup/action.yml") is not None
+
+
+def test_default_policy_marks_coverage_configs_immutable() -> None:
+    policy = default_policy()
+    assert policy.immutable.violation_for(".coveragerc") is not None
+    assert policy.immutable.violation_for("codecov.yml") is not None
+    assert policy.immutable.violation_for("tox.ini") is not None
+    assert policy.immutable.violation_for(".pre-commit-config.yaml") is not None
+
+
+def test_default_policy_leaves_regular_source_alone() -> None:
+    policy = default_policy()
+    assert policy.immutable.violation_for("src/foo/bar.py") is None
+    assert policy.immutable.violation_for("tests/test_x.py") is None
+
+
+# ---- rule_text rendering ------------------------------------------------
+
+
+def test_default_policy_rule_texts_are_human_readable() -> None:
+    """Violations should render a human sentence, not a raw regex."""
+    policy = default_policy()
+    # Keyed by the exact pattern; the worker's _lookup_rule falls back here.
+    force_push_pat = next(
+        p for p in policy.bash.patterns if "force" in p
+    )
+    assert "force-push" in policy.rule_texts[force_push_pat]
+    override_ini_pat = next(
+        p for p in policy.bash.patterns if "override-ini" in p
+    )
+    assert "measurement" in policy.rule_texts[override_ini_pat].lower()
+
+
 def test_path_policy_allow_only_denies_outside() -> None:
     from modmcp.schema.constraints import PathPolicy
     p = PathPolicy(allow=["src/**"])

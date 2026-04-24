@@ -210,14 +210,92 @@ def _extract_path_tokens(text: str) -> list[str]:
 
 
 def default_policy() -> CompiledPolicy:
-    """Baseline guardrails that apply even with an empty Active Rules section."""
+    """Baseline guardrails that apply even with an empty Active Rules section.
+
+    These close three failure-mode audit gaps by default:
+
+    * **Destructive commands** — failure mode 1/5: force-push, ``rm -rf /``,
+      fork-bomb syntax. Present since v1.1.0.
+    * **Mute-the-alarm** — failure mode 5: ``--no-verify``, ``|| true``
+      appended to named test/lint tools, and ``pytest`` flags that skip or
+      deselect tests. Added in v1.1.1.
+    * **Target-gaming** — failure mode 10: commands that edit the measurement
+      system to make a failing check pass, plus a baseline immutable-path
+      set for common CI / coverage / pre-commit config files.
+
+    Each baseline rule has an entry in ``rule_texts`` keyed by the exact
+    pattern or path so :class:`ConstraintsWorker` can render a
+    self-explaining rule text in the UI instead of the raw regex.
+    """
+    # Pattern → (severity hint, human-readable rule text). The bash severity
+    # is ignored here (the worker treats all forbidden-bash as "high"); path
+    # severity is used for `immutable` mapping.
+    bash_rules: list[tuple[str, str]] = [
+        # ---- destructive ----
+        (
+            r"git\s+push\s+(?:--force|-f\b)",
+            "Baseline: never force-push (git push --force / -f)",
+        ),
+        (
+            r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+/",
+            "Baseline: never recursively delete from root (rm -rf /)",
+        ),
+        (
+            r":\(\)\{\s*:\|:&",
+            "Baseline: fork-bomb syntax is forbidden",
+        ),
+        # ---- mute-the-alarm (failure mode 5) ----
+        (
+            r"git\s+(?:commit|push)\b[^|&;]*--no-verify\b",
+            "Baseline: never bypass git hooks with --no-verify (mutes pre-commit / pre-push checks)",
+        ),
+        (
+            r"\b(?:pytest|jest|tox|coverage|mypy|ruff|flake8|eslint|tsc|cargo\s+test|go\s+test|npm\s+test|yarn\s+test|pnpm\s+test)\b"
+            r"[^|&;]*\|\|\s*true\b",
+            "Baseline: do not silence a test/lint command with '|| true'",
+        ),
+        (
+            r"pytest\b[^|&;]*\s--deselect\b",
+            "Baseline: pytest --deselect skips tests silently",
+        ),
+        (
+            r"pytest\b[^|&;]*\s-k\s+['\"][^'\"]*\bnot\b",
+            "Baseline: pytest -k 'not ...' narrows the run past the declared scope",
+        ),
+        # ---- target-gaming (failure mode 10) ----
+        (
+            r"pytest\b[^|&;]*\s--override-ini\b",
+            "Baseline: pytest --override-ini edits the measurement system at runtime",
+        ),
+        (
+            r"pytest\b[^|&;]*\s--cov-fail-under\s*=?\s*0\b",
+            "Baseline: --cov-fail-under=0 disables the coverage gate",
+        ),
+        (
+            r"coverage\s+run\b[^|&;]*\s--omit\b",
+            "Baseline: coverage --omit added at runtime excludes files from the gate",
+        ),
+    ]
+
+    # Glob → human-readable rule text. These are measurement / gating
+    # artifacts: editing them to make a check pass is failure mode 10.
+    immutable_rules: list[tuple[str, str]] = [
+        (".github/workflows/**", "Baseline: CI workflow files are measurement artifacts"),
+        (".github/actions/**",   "Baseline: CI action definitions are measurement artifacts"),
+        (".pre-commit-config.yaml", "Baseline: pre-commit config gates local pushes"),
+        (".coveragerc",          "Baseline: coveragerc defines the coverage gate"),
+        ("codecov.yml",          "Baseline: codecov.yml defines the coverage gate"),
+        ("tox.ini",              "Baseline: tox.ini defines the test matrix"),
+        ("jest.config.*",        "Baseline: jest config defines the coverage gate"),
+    ]
+
     policy = CompiledPolicy()
-    policy.bash = ForbiddenBashPatterns([
-        r"git\s+push\s+(?:--force|-f\b)",
-        r"\brm\s+-[a-zA-Z]*r[a-zA-Z]*f[a-zA-Z]*\s+/",
-        r":\(\)\{\s*:\|:&",
-    ])
-    policy.rule_texts["baseline-01"] = "Baseline: no force-push or rm -rf /"
+    policy.bash = ForbiddenBashPatterns([pat for pat, _ in bash_rules])
+    policy.immutable = ImmutableFiles([path for path, _ in immutable_rules])
+    for pat, text in bash_rules:
+        policy.rule_texts[pat] = text
+    for path, text in immutable_rules:
+        policy.rule_texts[path] = text
     return policy
 
 

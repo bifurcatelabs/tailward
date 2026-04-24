@@ -187,7 +187,16 @@ class ConstraintsWorker:
                     log.exception("constraint surfacing failed")
 
     def _lookup_rule(self, policy: CompiledPolicy, kind: str, pat: str) -> str:
-        for rid, text in policy.rule_texts.items():
+        # 1. Exact-key lookup: default_policy() stores rule_texts keyed by the
+        #    literal pattern/path, so baseline violations render their own
+        #    human-readable description instead of a raw regex.
+        direct = policy.rule_texts.get(pat)
+        if direct:
+            return direct
+        # 2. Substring fallback: parse_active_rules() keeps each bullet under a
+        #    "rule-NN" id; we pick the first rule whose wording mentions the
+        #    triggering token.
+        for _rid, text in policy.rule_texts.items():
             if pat and pat.lower() in text.lower():
                 return text
         if kind == "immutable":
