@@ -46,7 +46,13 @@ Both are legitimate trust dimensions — they just need a different tool.
 - `ImmutableFiles` (a convenience alias around `PathPolicy.deny`)
 - `ForbiddenBashPatterns` (regexes matched against `bash_command(tool_call)`)
 
-Plus a baseline [`default_policy()`](src/modmcp/schema/constraints.py) that forbids `git push --force`, `rm -rf /`, and fork-bomb syntax regardless of what's in Active Rules.
+Plus a baseline [`default_policy()`](src/modmcp/schema/constraints.py) that applies regardless of what's in Active Rules. It ships three categories of guardrails:
+
+- **Destructive commands** — `git push --force`, `rm -rf /`, fork-bomb syntax.
+- **Mute-the-alarm** (overlaps with mode 5) — `--no-verify`, named test/lint tools piped to `|| true`, `pytest --deselect`, `pytest -k 'not ...'`.
+- **Target-gaming** (overlaps with mode 10) — `pytest --override-ini`, `pytest --cov-fail-under=0` (exact zero), `coverage run --omit`, plus immutable-path guards on CI configs (`.github/workflows/**`, `.github/actions/**`), pre-commit config, and coverage / test-matrix configs (`.coveragerc`, `codecov.yml`, `tox.ini`, `jest.config.*`).
+
+See Mode 5 and Mode 10 below for the full mapping.
 
 **Known gaps.**
 - [ ] Dependency-lockfile diff detection (prevent silent `pyproject.toml` / `package.json` edits unless explicitly allowed). Today only catches it if the user adds `pyproject.toml` to immutable files.

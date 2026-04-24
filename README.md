@@ -15,7 +15,7 @@ See [`V1 Proposal.md`](V1%20Proposal.md) for the original design, [`failure mode
 **v1.1 — failure-mode audit layer (passive by default)**
 
 - **LiveBus + SSE web UI.** Every assistant turn, tool call, violation, scope snapshot, and rubric score streams in real time to a localhost browser view. Polling fallback when SSE is unavailable.
-- **Constraints worker.** Parses "Active Rules" from `intent.md` into path-glob / immutable-file / forbidden-bash policies and flags violations against every `tool_use` event. Ack / dismiss from the UI.
+- **Constraints worker.** Parses "Active Rules" from `intent.md` into path-glob / immutable-file / forbidden-bash policies and flags violations against every `tool_use` event. Ack / dismiss from the UI. Ships a baseline policy out of the box covering destructive commands (force-push, `rm -rf /`), mute-the-alarm moves (`--no-verify`, test/lint tools silenced with `|| true`, `pytest --deselect`), target-gaming moves (`pytest --override-ini`, `--cov-fail-under=0`, `coverage --omit`), and immutable measurement artifacts (`.github/workflows/**`, `.coveragerc`, `codecov.yml`, `tox.ini`, `.pre-commit-config.yaml`, `jest.config.*`). See [`AUDIT_MAP.md`](AUDIT_MAP.md) for the full mapping.
 - **Scope worker.** Per-session counters (files touched, diff bytes, tool-kind breakdown) compared to a rolling baseline from the last N completed sessions. Emits `scope_creep` events when you blow past it.
 - **Rubric worker.** Sampled Qwen JSON scoring across four dimensions (invariants, uncertainty, maintainability, provenance) — triggered on cadence, scope creep, and first-person completion claims. "Disagree" button writes feedback back to the ledger.
 - **Session-close consolidator.** After configurable idle time, one Qwen call aggregates all collected signal into an 8-mode report card with a per-session permalink.
@@ -350,7 +350,7 @@ All workers are wired lazily in [`src/modmcp/daemon/app.py`](src/modmcp/daemon/a
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 83 tests, ~21s
+pytest -q          # 95 tests, ~22s
 ```
 
 Troubleshooting:
