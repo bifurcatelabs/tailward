@@ -144,12 +144,14 @@ def status() -> dict:
     pid = _read_pid()
     alive = bool(pid and _pid_alive(pid))
     healthy = ping() if alive else False
+    cfg = get_config()
     return {
         "pid": pid,
         "alive": alive,
         "healthy": healthy,
+        "mode": cfg.warden_mode,
         "log": str(daemon_log_path()),
-        "url": f"http://{get_config().http_host}:{get_config().http_port}",
+        "url": f"http://{cfg.http_host}:{cfg.http_port}",
     }
 
 

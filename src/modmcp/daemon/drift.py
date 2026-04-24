@@ -125,11 +125,19 @@ class DriftWorker:
         )
 
         action_taken = None
-        if verdict.severity == "med" and verdict.corrective:
+        # Correction enqueue is an active-mode affordance: the hook only
+        # drains corrections when warden_mode == "active". In passive we
+        # still compute and record the verdict (it's valuable UI signal on
+        # /p/<hash>/drift and the live feed) but skip the enqueue so the
+        # ledger doesn't accumulate rows that will never be consumed.
+        mode_active = cfg.warden_mode == "active"
+        if verdict.severity == "med" and verdict.corrective and mode_active:
             await self._daemon.ledger.enqueue_correction(
                 fs.session_id, fs.project_hash, verdict.corrective
             )
             action_taken = "queued_correction"
+        elif verdict.severity == "med" and verdict.corrective:
+            action_taken = "corrective_suppressed_passive"
         elif verdict.severity == "high":
             if self._daemon.surface is not None:
                 try:

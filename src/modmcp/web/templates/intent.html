@@ -20,8 +20,9 @@
             </select>
         </label>
         &nbsp;&nbsp;
-        <label>phase2_turns_remaining
-            <input type="number" name="phase2_turns_remaining" value="{{ intent.front.phase2_turns_remaining }}" min="0" style="width:80px">
+        <label title="Only applies in active mode. In passive mode the hook does not inject corrections, so this counter is inert.">phase2_turns_remaining
+            <input type="number" name="phase2_turns_remaining" value="{{ intent.front.phase2_turns_remaining }}" min="0" style="width:80px"{% if warden_mode == "passive" %} disabled{% endif %}>
+            {% if warden_mode == "passive" %}<span class="muted" style="font-size:11px">(active mode only)</span>{% endif %}
         </label>
     </div>
 

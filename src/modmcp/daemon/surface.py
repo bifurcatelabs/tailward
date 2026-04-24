@@ -1,10 +1,19 @@
 """Surfacing: notify the user of high-stakes drift or contradicted claims.
 
-MCP elicitation is the preferred channel, but it requires cooperation from
-the MCP session. Since the daemon doesn't own the MCP connection in v1, the
-MCP server process writes surfacings to the ledger; the agent (or a separate
-notification) picks them up. The OS-level fallback (plyer) guarantees the
-user sees something regardless.
+In the v1.1 passive-first world the **live web UI is the primary surface**:
+every high-severity event is published to :class:`~modmcp.daemon.livebus.LiveBus`
+and lands in the live session view + report card without touching the model's
+prompt. This module handles the two auxiliary channels for situations where
+the user isn't looking at the browser:
+
+1. An OS-level toast via ``plyer`` (works in both modes).
+2. MCP elicitation — only useful when ``warden_mode == "active"`` and the
+   MCP session is connected. The daemon doesn't own the MCP connection, so
+   the MCP server process reads surfacing rows from the ledger and relays
+   them on elicitation-capable clients.
+
+All three channels write the same surfacing row to the ledger; only the
+user-visible notification is debounced.
 """
 
 from __future__ import annotations

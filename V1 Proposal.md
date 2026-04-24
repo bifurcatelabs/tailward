@@ -1,5 +1,24 @@
 # modmcp v1 Implementation Proposal
 
+> **Historical / superseded design document.** This was the original v1 spec
+> in which Warden's primary mode of operation was injecting preambles and
+> drift corrections into Claude Code's prompt stream. Dogfooding surfaced an
+> observer-effect problem (any injected content shapes the next turn, which
+> makes the same daemon both the judge and the judged), and the project
+> pivoted to a **passive-first** posture in v1.1: observe, audit, and surface
+> signal in a web UI without injecting into the prompt by default. Active
+> mode from this proposal is still available as an opt-in (`warden_mode =
+> "active"` in `~/.modmcp/config.toml`), but is no longer the headline
+> experience.
+>
+> **For current behavior, modes, and setup, read [`README.md`](README.md).**
+> **For the audit-layer spec that drove the pivot, read
+> [`failure modes.md`](failure%20modes.md).**
+>
+> The rest of this file is preserved verbatim as design history.
+
+---
+
 ## 1. Overview
 
 modmcp is a session-handoff and accountability layer for Claude Code. It runs as a long-running local daemon, mediates the transition between Claude sessions when context fills up, and stays active through the early turns of the new session — restating context, enforcing rules, and auditing the new agent's claims against transcript and filesystem evidence.

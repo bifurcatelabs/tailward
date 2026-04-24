@@ -64,7 +64,11 @@ def daemon_start() -> None:
     except Exception as e:
         typer.echo(f"failed to start daemon: {e}", err=True)
         raise typer.Exit(code=1) from e
-    typer.echo(f"modmcp daemon started (pid={pid}, url={lifecycle.health_url()})")
+    typer.echo(
+        f"modmcp daemon started "
+        f"(pid={pid}, mode={get_config().warden_mode}, "
+        f"url={lifecycle.health_url()})"
+    )
 
 
 @daemon_app.command("stop")

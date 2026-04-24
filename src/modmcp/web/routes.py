@@ -88,11 +88,12 @@ def mount_web(app: FastAPI) -> None:
         mode = form.get("session_mode")
         if mode in ("build", "meta", "exploration"):
             intent.front.session_mode = mode  # type: ignore[assignment]
-        try:
-            turns = int(form.get("phase2_turns_remaining") or 0)
-            intent.front.phase2_turns_remaining = max(0, turns)
-        except ValueError:
-            pass
+        raw_turns = form.get("phase2_turns_remaining")
+        if raw_turns is not None and raw_turns != "":
+            try:
+                intent.front.phase2_turns_remaining = max(0, int(raw_turns))
+            except ValueError:
+                pass
         intent.front.updated = datetime.now(UTC)
         save_intent(intent, intent_file)
         return HTMLResponse(
