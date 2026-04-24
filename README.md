@@ -6,7 +6,7 @@ See [`V1 Proposal.md`](V1%20Proposal.md) for the original design, [`failure mode
 
 ## What it does
 
-**v1 — session handoff and continuity (opt-in via `active` mode)**
+**v1 — session handoff and continuity (opt-in via `active` mode — _WIP, see note below_)**
 
 - **Phase 1 (handoff):** `modmcp handoff` reads a Claude Code session's transcript and synthesizes a structured `intent.md` (active goal, open threads, active rules, known drift patterns, pending commitments, recent claims) for review in your editor.
 - **Phase 2 (continuity):** on the next session's first turn, a `UserPromptSubmit` hook injects the intent as a preamble; for the first N turns, drift against the goal queues a corrective injection on the next turn and strong claims ("I removed all X") are grepped against the repo and logged verified / contradicted / unverifiable.
@@ -25,10 +25,12 @@ See [`V1 Proposal.md`](V1%20Proposal.md) for the original design, [`failure mode
 
 Warden has one top-level knob: `warden_mode` in `~/.modmcp/config.toml`.
 
-| mode | hook preamble? | drift correctives? | auditing? | UI? |
-|---|---|---|---|---|
-| **`passive`** (default) | no | no | **yes** | yes |
-| `active` | yes | yes | yes | yes |
+| mode | hook preamble? | drift correctives? | auditing? | UI? | status |
+|---|---|---|---|---|---|
+| **`passive`** (default) | no | no | **yes** | yes | **supported** |
+| `active` | yes | yes | yes | yes | **WIP** — experimental, see below |
+
+> **`active` is work-in-progress.** The injection + drift-corrective path is the original v1 design; it functions but is deliberately de-emphasized pending the audit layer stabilizing. Expect rough edges: the corrective-queue UI surface is minimal, regression coverage is thinner than the passive-mode path, and the preamble contents are still being tuned against real handoffs. Treat `active` as "I know what I'm doing and I want to experiment with the continuity loop", not as a daily driver. The passive audit layer is the production surface.
 
 ### Why passive is the default
 
@@ -40,7 +42,7 @@ The whole point of this tool is to tell you whether your coding agent is behavin
 
 Passive mode moves the human (you) into the loop at a decision boundary — the web UI — instead of hotwiring corrections into the model's context. You still get every signal; you just decide what to do with it.
 
-Flip to `active` when you specifically want the agent to react to Warden's corrections in real time — typically at the start of a new session after a handoff, where the preamble is carrying context the agent genuinely needs. Flip back to `passive` after the first few turns.
+Flip to `active` when you specifically want to experiment with the agent reacting to Warden's corrections in real time — typically at the start of a new session after a handoff, where the preamble is carrying context the agent genuinely needs. Flip back to `passive` after the first few turns. **Active mode is WIP** (see table above); the passive audit layer is the supported surface.
 
 ### Why local-first
 
@@ -99,6 +101,8 @@ Click into your project → **Live** → you'll see turns and tool calls stream 
 Stop with `modmcp daemon stop`.
 
 ### Adding full Claude Code integration (only needed for `active` mode + MCP pull)
+
+> Heads up: `active` mode is **WIP**. The audit layer (passive) does not need anything in this section. Skip unless you specifically want to experiment with the preamble + drift-corrective loop.
 
 You only need this if you want the `UserPromptSubmit` preamble and the MCP tools (`get_captured_intent`, etc.). Neither is required for the audit layer.
 
