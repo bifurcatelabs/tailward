@@ -1,6 +1,6 @@
 # modmcp
 
-A passive-first session-audit layer for Claude Code. Long-running local daemon that tails Claude Code transcripts, runs rule-based + LLM-judged audits against 8 trust-breaking failure modes, and surfaces the signal in a localhost web UI — without injecting into the prompt by default.
+A local-first, passive-first session-audit layer for Claude Code. A long-running local daemon tails Claude Code transcripts, scores them against 8 trust-breaking failure modes using deterministic rule checks plus a **local LLM rubric**, and surfaces the signal in a localhost web UI. No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
 
 See [`V1 Proposal.md`](V1%20Proposal.md) for the original design, [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the v1.1 audit layer, and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which of those failure modes Warden currently detects and how.
 
@@ -41,6 +41,18 @@ The whole point of this tool is to tell you whether your coding agent is behavin
 Passive mode moves the human (you) into the loop at a decision boundary — the web UI — instead of hotwiring corrections into the model's context. You still get every signal; you just decide what to do with it.
 
 Flip to `active` when you specifically want the agent to react to Warden's corrections in real time — typically at the start of a new session after a handoff, where the preamble is carrying context the agent genuinely needs. Flip back to `passive` after the first few turns.
+
+### Why local-first
+
+An audit is only as trustworthy as its supply chain. If Warden shipped your prompts, tool calls, or code diffs to a SaaS scoring API, it would be asking you to trust a third party with the exact artifacts it's supposed to be auditing on your behalf. That undercuts the whole point of the tool and also makes it unusable on any codebase you can't legally egress.
+
+So Warden is local-first, top to bottom:
+
+- **Transcripts never leave the machine.** The watcher reads JSONL from `~/.claude/projects/`, the ledger writes to `~/.modmcp/ledger.db`, the HTTP server binds to `127.0.0.1`. No cloud writes, no telemetry, no opt-out required because there's nothing to opt out of.
+- **The scoring LLM is yours too.** Warden talks to an OpenAI-compatible endpoint at `http://127.0.0.1:<port>/v1` — llama.cpp, Ollama, LM Studio, vLLM, whatever you prefer. There is deliberately no fallback to a hosted API: if the endpoint is unreachable, Warden skips the LLM-judged checks and keeps the deterministic ones running.
+- **Deterministic first, LLM for depth.** The constraints worker (path / immutable-file / forbidden-bash), scope worker, and claim-grep path all run with zero LLM present — those are the load-bearing "is this session in bounds?" signals and they're regex-fast on CPU. The local model adds the softer trust dimensions (invariants awareness, uncertainty honesty, maintainability, provenance) and the end-of-session 8-mode consolidation. You can run Warden fully airgapped and still see live violations, scope creep, and claim verdicts; the rubric bar and report card just stay blank until a model comes online.
+
+The cost of this posture is one extra piece of infra (a local model server, eventually). The payoff is that the audit lives inside the same trust boundary as the thing being audited — and nothing you care about ends up in someone else's log pipeline.
 
 ## Getting started
 
@@ -259,12 +271,14 @@ Environment overrides:
 
 ## Qwen / local LLM endpoint
 
-Warden uses an OpenAI-compatible HTTP endpoint. Any of these work:
+Warden expects an OpenAI-compatible HTTP endpoint on `localhost` (see [Why local-first](#why-local-first) for the reasoning). Any of these work:
 
 - [llama.cpp server](https://github.com/ggml-org/llama.cpp) with an OpenAI-compat flag
 - [Ollama](https://ollama.com/) — set `qwen_endpoint = "http://127.0.0.1:11434/v1"`, `qwen_model = "qwen2.5:7b"`
 - LM Studio's local server
 - `vllm` with `--served-model-name`
+
+Pointing `qwen_endpoint` at a remote host isn't explicitly blocked, but it defeats the audit-integrity argument; Warden will happily send your transcripts wherever you tell it to.
 
 All LLM calls serialize through a single queue so Warden doesn't contend with other GPU workloads. Five distinct call kinds are routed with their own token budgets and thinking-mode settings:
 
