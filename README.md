@@ -2,7 +2,7 @@
 
 A passive-first session-audit layer for Claude Code. Long-running local daemon that tails Claude Code transcripts, runs rule-based + LLM-judged audits against 8 trust-breaking failure modes, and surfaces the signal in a localhost web UI — without injecting into the prompt by default.
 
-See [`V1 Proposal.md`](V1%20Proposal.md) for the original design and [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the v1.1 audit layer.
+See [`V1 Proposal.md`](V1%20Proposal.md) for the original design, [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the v1.1 audit layer, and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which of those failure modes Warden currently detects and how.
 
 ## What it does
 

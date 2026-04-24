@@ -1,5 +1,8 @@
 ## Instrument Trust in Coding Agents
 
+> **Warden v1.1 audits 8 of the 10 modes below.** For a per-mode mapping from each row to the specific detector, live signal, UI surface, coverage rating, and known gaps, see [`AUDIT_MAP.md`](AUDIT_MAP.md). Modes 3 (behaves consistently over time) and 7 (aligns with real engineering outcomes) are intentionally out of scope — they need a replay harness and a CI system respectively, both of which are a different kind of tool.
+
+
 | Behavior | Descriptive model behavior | Example observation of engineer | Result | Auditability (and how) |
 |---|---|---|---|---|
 | **Respects constraints once stated** | Treats explicit constraints (“don’t edit tests”, “no new deps”, “keep strict typing”, “only change X”) as hard rules; refuses or escalates if it can’t comply. | “It ‘fixed’ the issue but touched files I explicitly forbade / added a dependency / loosened typing.” | Engineers shift into defensive review, reduce delegation scope, or exclude the tool from sensitive paths. | **High** — diff guards (path allow/deny), dependency lock checks, config immutability, AST scans for forbidden constructs, policy-as-code in CI. |
