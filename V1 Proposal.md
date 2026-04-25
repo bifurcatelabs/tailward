@@ -15,7 +15,11 @@
 > **For the audit-layer spec that drove the pivot, read
 > [`failure modes.md`](failure%20modes.md).**
 >
-> The rest of this file is preserved verbatim as design history.
+> The rest of this file is preserved verbatim as design history. A few concrete
+> implementation choices diverged from the spec below — most notably the
+> UserPromptSubmit hook now talks to the daemon over HTTP on
+> `127.0.0.1:<http_port>` rather than a Unix socket / named pipe, and
+> `daemon.sock` does not exist in the shipped layout.
 
 ---
 

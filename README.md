@@ -364,25 +364,21 @@ Claude Code session
 │                                                     │
 │  TranscriptWatcher ──▶ on_event dispatch            │
 │                        │                            │
-│     ┌──────────────────┼──────────────────┐         │
-│     ▼                  ▼                  ▼         │
-│  constraints         scope             rubric       │
-│  worker              worker            worker       │
-│     │                  │                  │         │
-│     │  (active mode only:)                │         │
-│     │   drift worker ◀─┘                  │         │
-│     │   audit worker                      │         │
-│     │                                     │         │
-│     ▼                  ▼                  ▼         │
-│              LiveBus ◀─── session_close            │
-│     │                  │                  │         │
-│     ▼                  ▼                  ▼         │
-│          SQLite ledger         SSE ─▶ browser       │
+│     ┌───────────┬──────┼──────┬────────────┐        │
+│     ▼           ▼      ▼      ▼            ▼        │
+│  constraints  scope  rubric  audit        drift     │
+│  worker       worker worker  (claim-grep) worker    │
+│     │           │      │      │            │        │
+│     ▼           ▼      ▼      ▼            ▼        │
+│              LiveBus ◀─── session_close             │
+│                 │                  │                │
+│                 ▼                  ▼                │
+│          SQLite ledger     SSE ─▶ browser           │
 │                                                     │
 └─────────────────────────────────────────────────────┘
 ```
 
-All workers are wired lazily in [`src/modmcp/daemon/app.py`](src/modmcp/daemon/app.py) — each one is wrapped in a `try/except log.warning`, so a missing dependency or a config bug in one worker never brings down the others.
+All workers run in both `passive` and `active` modes; the only mode-gated behavior is drift's corrective-enqueue step, which is suppressed in passive (the verdict is still recorded for the UI). Workers are wired lazily in [`src/modmcp/daemon/app.py`](src/modmcp/daemon/app.py) — each one is wrapped in a `try/except log.warning`, so a missing dependency or a config bug in one worker never brings down the others.
 
 ## Development
 
