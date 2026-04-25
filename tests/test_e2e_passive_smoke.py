@@ -401,6 +401,16 @@ def test_logical_turn_coalescing_and_usage_capture(
             assert p.get("model") == "claude-opus-4-7", p
             assert "usage" in p and p["usage"]["output_tokens"] > 0, p
             assert "totals" in p, p
+        # The deferred-emit path must surface the actual prose in the
+        # preview — not an empty string from the leading thinking block
+        # and not the synthetic ``[tool_use:...]`` marker.
+        previews = [p.get("text_preview") for p in turn_payloads]
+        assert "Working on it now." in previews, (
+            f"text-bearing turn missing prose in preview: {previews}"
+        )
+        assert "Done; that file is large." in previews, (
+            f"second turn missing prose in preview: {previews}"
+        )
 
 
 RESTART_SESSION_ID = "session-restart-001"

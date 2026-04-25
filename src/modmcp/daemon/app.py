@@ -121,24 +121,38 @@ def create_app() -> FastAPI:
                     await daemon.rubric.enqueue(ev, fs)
 
             # Publish turn-level markers to the live bus so the web feed
-            # sees activity even without worker findings. Fires once per
-            # logical turn (start of a new message_id) \u2014 mid-turn content
-            # blocks (thinking / text / tool_use follow-ups) flow through
-            # for downstream workers but don't double the feed.
-            if (
+            # sees activity even without worker findings. Fires at most
+            # once per logical turn (per message_id), but deferred past
+            # any leading ``thinking`` blocks so the feed entry's
+            # preview reflects real prose or a tool action \u2014 not an
+            # empty header. Tool-only turns still fire (with empty
+            # preview) so the right-rail token totals advance.
+            st = daemon.state.get(fs.session_id) if fs.session_id else None
+            already_emitted = (
+                st.last_turn_emit_msg_id if st else None
+            )
+            should_publish_turn = (
                 fs.session_id
                 and fs.project_hash
                 and ev.kind == "assistant_message"
-                and ev.new_turn
-            ):
-                preview = (ev.text or "").strip().replace("\r", "")
+                and ev.message_id
+                and ev.message_id != already_emitted
+                and (_has_visible_text(ev) or ev.tool_name is not None)
+            )
+            if should_publish_turn:
+                # Pull text from ``text`` content blocks specifically so
+                # the preview never shows the synthetic
+                # "[tool_use:Edit]" marker that ``_extract_text`` emits
+                # for tool_use blocks.
+                visible = _visible_text(ev)
+                preview = visible.strip().replace("\r", "")
                 if len(preview) > 280:
                     preview = preview[:280] + "\u2026"
-                st = daemon.state.get(fs.session_id)
                 payload: dict[str, Any] = {
                     "turn_idx": st.turns_seen if st else 0,
                     "text_preview": preview,
-                    "chars": len(ev.text or ""),
+                    "chars": len(visible),
+                    "message_id": ev.message_id,
                 }
                 # Skip Claude Code's synthetic-model marker (compaction,
                 # system summarization) so the model badge tracks real
@@ -171,6 +185,8 @@ def create_app() -> FastAPI:
                     "turn",
                     payload,
                 )
+                if st is not None:
+                    st.last_turn_emit_msg_id = ev.message_id
             # User-prompt markers. Claude Code wraps tool *results* as
             # user_message events too (content blocks of type
             # ``tool_result``); those are tool output, not human prompts,
@@ -472,6 +488,35 @@ def _snapshot(intent_file: Path) -> None:
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     target = archive / f"intent-{ts}.md"
     target.write_bytes(intent_file.read_bytes())
+
+
+def _visible_text(ev) -> str:
+    """Concatenate ``text`` content blocks for an assistant/user event.
+
+    ``ev.text`` from :func:`parse_line` includes synthetic markers like
+    ``[tool_use:Edit]`` and the bodies of ``tool_result`` blocks, which
+    we do not want as user-facing previews. This helper pulls only the
+    real ``text`` blocks so the live feed shows actual prose.
+    """
+    raw_msg = ev.raw.get("message") if isinstance(ev.raw, dict) else None
+    if not isinstance(raw_msg, dict):
+        return ev.text or ""
+    content = raw_msg.get("content")
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if isinstance(block, dict) and block.get("type") == "text":
+            t = block.get("text") or ""
+            if t:
+                parts.append(t)
+    return "\n".join(parts)
+
+
+def _has_visible_text(ev) -> bool:
+    return bool(_visible_text(ev).strip())
 
 
 def _looks_like_human_prompt(ev) -> bool:

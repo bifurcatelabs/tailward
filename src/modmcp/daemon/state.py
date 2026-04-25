@@ -32,6 +32,12 @@ class SessionState:
     total_cache_read_tokens: int = 0
     total_cache_creation_tokens: int = 0
     last_model: str | None = None
+    # Tracks which logical turns we've already emitted a ``turn``
+    # LiveBus event for. We defer the emit past leading ``thinking``
+    # blocks so the feed entry's preview shows real prose / tool action,
+    # not an empty header. Each message_id gets at most one turn entry
+    # in the feed.
+    last_turn_emit_msg_id: str | None = None
 
     def record_tool_call(self, name: str, tool_input: dict[str, Any] | None) -> None:
         self.recent_tool_calls.append(
