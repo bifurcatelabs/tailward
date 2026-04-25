@@ -77,6 +77,22 @@
         font-size: 12px;
         white-space: pre-wrap;
         word-break: break-word;
+        max-height: 18em;
+        overflow: hidden;
+        position: relative;
+        cursor: pointer;
+    }
+    /* Fade the bottom edge so the user knows there's more behind the cap. */
+    .evidence:not(.expanded)::after {
+        content: '';
+        position: absolute;
+        bottom: 0; left: 0; right: 0; height: 2.5em;
+        background: linear-gradient(transparent, #0c0e13);
+        pointer-events: none;
+    }
+    .evidence.expanded {
+        max-height: none;
+        overflow: visible;
     }
     .btn-inline {
         background: transparent;

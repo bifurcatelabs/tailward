@@ -241,6 +241,15 @@
                 meta.lastElementChild.appendChild(sp);
             }
         }
+        // Click anywhere on a long ``.evidence`` block toggles its
+        // expanded class so the full text is visible. The 18em cap +
+        // gradient overlay (set in CSS) keeps the feed compact by
+        // default; this gives one click to drill in.
+        div.querySelectorAll('.evidence').forEach(el => {
+            el.addEventListener('click', () => {
+                el.classList.toggle('expanded');
+            });
+        });
         feed.insertBefore(div, feed.firstChild);
         while (feed.children.length > 200) feed.removeChild(feed.lastChild);
     }

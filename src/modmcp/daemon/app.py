@@ -145,9 +145,12 @@ def create_app() -> FastAPI:
                 # "[tool_use:Edit]" marker that ``_extract_text`` emits
                 # for tool_use blocks.
                 visible = _visible_text(ev)
-                preview = visible.strip().replace("\r", "")
-                if len(preview) > 280:
-                    preview = preview[:280] + "\u2026"
+                # Send full prose; the feed UI is the audit surface and
+                # truncating here defeats the point. CSS in live.html
+                # caps the rendered height with overflow:auto so a
+                # multi-screen response doesn't blow out the feed
+                # column \u2014 the data is still all there.
+                preview = visible.replace("\r", "").rstrip()
                 payload: dict[str, Any] = {
                     "turn_idx": st.turns_seen if st else 0,
                     "text_preview": preview,
@@ -197,10 +200,8 @@ def create_app() -> FastAPI:
                 and ev.kind == "user_message"
                 and _looks_like_human_prompt(ev)
             ):
-                preview = (ev.text or "").strip().replace("\r", "")
-                if len(preview) > 280:
-                    preview = preview[:280] + "…"
-                if preview:
+                preview = (ev.text or "").replace("\r", "").rstrip()
+                if preview.strip():
                     await daemon.live.publish(
                         fs.session_id,
                         fs.project_hash,
