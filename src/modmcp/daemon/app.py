@@ -140,7 +140,10 @@ def create_app() -> FastAPI:
                     "text_preview": preview,
                     "chars": len(ev.text or ""),
                 }
-                if ev.model:
+                # Skip Claude Code's synthetic-model marker (compaction,
+                # system summarization) so the model badge tracks real
+                # assistant turns only.
+                if ev.model and ev.model != "<synthetic>":
                     payload["model"] = ev.model
                 if ev.stop_reason:
                     payload["stop_reason"] = ev.stop_reason

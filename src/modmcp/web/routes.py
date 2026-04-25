@@ -32,7 +32,17 @@ def mount_web(app: FastAPI) -> None:
         return {"warden_mode": get_config().warden_mode}
 
     if _STATIC_DIR.exists():
-        app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
+        # Disable caching on static assets so live.js / CSS edits land
+        # without forcing a hard reload. The dev/local-first posture
+        # makes this preferable to a cache-busting build step; the cost
+        # is one extra GET on each navigation.
+        class _NoCacheStatic(StaticFiles):
+            async def get_response(self, path, scope):
+                resp = await super().get_response(path, scope)
+                resp.headers["Cache-Control"] = "no-store"
+                return resp
+
+        app.mount("/static", _NoCacheStatic(directory=str(_STATIC_DIR)), name="static")
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request) -> HTMLResponse:
@@ -136,6 +146,17 @@ def mount_web(app: FastAPI) -> None:
         if session is None or session["project_hash"] != ph:
             raise HTTPException(404)
         close_status = await daemon.ledger.session_close_status(session_id)
+        # The session_close row records when the consolidator ran, but the
+        # session may resume writing afterwards (long-idle then back).
+        # Treat the close status as stale if last_seen_at is newer than
+        # the consolidation timestamp; show "active" in that case so the
+        # badge reflects current liveness, not yesterday's report state.
+        if close_status == "done":
+            close_row = await daemon.ledger.session_close_row(session_id)
+            last_seen = session.get("last_seen_at") if session else None
+            closed_at = close_row.get("closed_at") if close_row else None
+            if last_seen and closed_at and str(last_seen) > str(closed_at):
+                close_status = "active"
         report_rows = await daemon.ledger.session_report(session_id)
         return templates.TemplateResponse(
             request,

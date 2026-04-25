@@ -446,6 +446,16 @@ class Ledger:
             row = await cur.fetchone()
         return str(row["consolidation_status"]) if row else None
 
+    async def session_close_row(self, session_id: str) -> dict | None:
+        """Full session_close row (closed_at, status, error). Used by the
+        live view to detect a session that has resumed past the close."""
+        async with self.conn.execute(
+            "SELECT * FROM session_close WHERE session_id=?",
+            (session_id,),
+        ) as cur:
+            row = await cur.fetchone()
+        return dict(row) if row else None
+
     async def sessions_needing_consolidation(self) -> list[dict]:
         async with self.conn.execute(
             """SELECT sc.session_id, sc.project_hash, ss.project_path

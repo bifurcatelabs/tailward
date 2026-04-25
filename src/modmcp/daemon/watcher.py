@@ -210,7 +210,11 @@ class TranscriptWatcher:
                         st.total_cache_creation_tokens += int(
                             ev.usage.get("cache_creation_input_tokens") or 0
                         )
-                    if ev.model:
+                    # Claude Code uses ``<synthetic>`` for compaction /
+                    # system summarization passes; those aren't real model
+                    # invocations and should not overwrite the displayed
+                    # model identity.
+                    if ev.model and ev.model != "<synthetic>":
                         st.last_model = ev.model
                 if ev.text:
                     st.last_assistant_text = ev.text
