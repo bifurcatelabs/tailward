@@ -37,19 +37,42 @@ def test_health(client: TestClient) -> None:
     assert body["ok"] is True
 
 
-def test_hook_returns_preamble_on_first_call(tmp_path: Path, client: TestClient) -> None:
+def test_hook_returns_preamble_on_first_call(
+    active_mode: Path, tmp_path: Path
+) -> None:
+    """Preamble injection is an active-mode affordance. Passive mode returns
+    an empty response body regardless of intent state — covered in
+    ``test_hook_returns_empty_in_passive_mode``."""
     proj = tmp_path / "proj"
+    proj.mkdir()
+    _seed_project(str(proj), goal="refactor the parser")
+
+    with TestClient(create_app()) as client:
+        r = client.post(
+            "/hook/userpromptsubmit",
+            json={"session_id": "s1", "cwd": str(proj), "prompt": "hello"},
+        )
+    assert r.status_code == 200
+    body = r.json()
+    assert "Warden preamble" in body["additionalContext"]
+    assert "refactor the parser" in body["additionalContext"]
+
+
+def test_hook_returns_empty_in_passive_mode(
+    tmp_path: Path, client: TestClient
+) -> None:
+    """Passive mode (the default) suppresses all hook injection even when an
+    ``intent.md`` exists for the project."""
+    proj = tmp_path / "proj_passive"
     proj.mkdir()
     _seed_project(str(proj), goal="refactor the parser")
 
     r = client.post(
         "/hook/userpromptsubmit",
-        json={"session_id": "s1", "cwd": str(proj), "prompt": "hello"},
+        json={"session_id": "s_passive", "cwd": str(proj), "prompt": "hello"},
     )
     assert r.status_code == 200
-    body = r.json()
-    assert "Warden preamble" in body["additionalContext"]
-    assert "refactor the parser" in body["additionalContext"]
+    assert r.json() == {}
 
 
 def test_hook_returns_empty_when_no_intent(tmp_path: Path, client: TestClient) -> None:

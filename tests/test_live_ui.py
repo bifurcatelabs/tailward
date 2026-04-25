@@ -34,9 +34,9 @@ def test_mode_pill_renders_in_header(tmp_path: Path) -> None:
     with TestClient(create_app()) as client:
         r = client.get(f"/p/{ph}")
         assert r.status_code == 200
-        # conftest sets the default to active.
-        assert "pill-active" in r.text
-        assert ">active<" in r.text
+        # conftest defaults to passive (the supported product surface).
+        assert "pill-passive" in r.text
+        assert ">passive<" in r.text
 
 
 def test_live_index_redirects_to_latest_session(tmp_path: Path) -> None:

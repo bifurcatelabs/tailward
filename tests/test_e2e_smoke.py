@@ -1,4 +1,4 @@
-"""End-to-end smoke test exercising the full modmcp pipeline.
+"""End-to-end smoke test for the opt-in **active** continuity loop.
 
 Boots the daemon via FastAPI TestClient (which runs the lifespan, so watcher
 + drift + audit workers are live), then drives it with a synthetic JSONL
@@ -10,8 +10,13 @@ session. Validates:
 4. UserPromptSubmit hook delivers the preamble on first call.
 5. UserPromptSubmit hook delivers the queued corrective on a subsequent call.
 
+Active mode is an opt-in, user-owned path (see the README). The canonical
+regression test for the supported passive audit layer lives in
+``test_e2e_passive_smoke.py``; this file stays only to guard against active
+mode breaking silently.
+
 Runs entirely offline — Qwen is nulled out so all LLM paths fall back to
-heuristics. This is the reusable regression test for the end-to-end loop.
+heuristics.
 """
 
 from __future__ import annotations
@@ -106,7 +111,10 @@ def _assistant_event(text: str) -> dict:
 
 
 def test_full_pipeline_smoke(
-    fake_project: Path, seeded_intent: Path, jsonl_path: Path
+    active_mode: Path,
+    fake_project: Path,
+    seeded_intent: Path,
+    jsonl_path: Path,
 ) -> None:
     cwd = str(fake_project)
     ph = project_hash(cwd)
