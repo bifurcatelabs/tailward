@@ -32,6 +32,7 @@ log = logging.getLogger(__name__)
 EVENT_TYPES: frozenset[str] = frozenset(
     {
         "turn",
+        "user_turn",
         "tool_call",
         "constraint_violation",
         "scope_snapshot",

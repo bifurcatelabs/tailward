@@ -37,6 +37,10 @@
 
     // ------------ partial renderers per event type ------------
     const renderers = {
+        user_turn: (p) => `<div class="feed-meta"><span class="feed-kind kind-user_turn">user</span><span>${fmtTime()}</span></div>
+            <div>${p.chars ? p.chars + ' chars' : 'user prompt'}</div>
+            ${p.text_preview ? `<div class="evidence">${escape(p.text_preview)}</div>` : ''}`,
+
         turn: (p) => {
             const u = p.usage || {};
             const usageBits = [];

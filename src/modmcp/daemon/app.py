@@ -171,6 +171,30 @@ def create_app() -> FastAPI:
                     "turn",
                     payload,
                 )
+            # User-prompt markers. Claude Code wraps tool *results* as
+            # user_message events too (content blocks of type
+            # ``tool_result``); those are tool output, not human prompts,
+            # so filter them out before publishing.
+            if (
+                fs.session_id
+                and fs.project_hash
+                and ev.kind == "user_message"
+                and _looks_like_human_prompt(ev)
+            ):
+                preview = (ev.text or "").strip().replace("\r", "")
+                if len(preview) > 280:
+                    preview = preview[:280] + "…"
+                if preview:
+                    await daemon.live.publish(
+                        fs.session_id,
+                        fs.project_hash,
+                        "user_turn",
+                        {
+                            "text_preview": preview,
+                            "chars": len(ev.text or ""),
+                        },
+                    )
+
             # Tool-call markers fire whenever a tool_use is present, whether
             # the event is a bare ``tool_use`` or an assistant message that
             # wraps the block in its content list. Real Claude Code only
@@ -448,6 +472,39 @@ def _snapshot(intent_file: Path) -> None:
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     target = archive / f"intent-{ts}.md"
     target.write_bytes(intent_file.read_bytes())
+
+
+def _looks_like_human_prompt(ev) -> bool:
+    """True when an event's user_message wraps actual prompt text.
+
+    Claude Code reuses ``type=user`` for tool results — the content list
+    carries ``tool_result`` blocks rather than plain text. Those should
+    not appear in the live feed as if the human typed them. We treat an
+    event as a real prompt when its message.content has at least one
+    text block (or is a bare string), and isn't dominated by tool
+    results.
+    """
+    raw_msg = ev.raw.get("message") if isinstance(ev.raw, dict) else None
+    if not isinstance(raw_msg, dict):
+        return bool((ev.text or "").strip())
+    content = raw_msg.get("content")
+    if isinstance(content, str):
+        return bool(content.strip())
+    if not isinstance(content, list):
+        return False
+    has_text = False
+    has_tool_result = False
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        btype = block.get("type")
+        if btype == "text" and (block.get("text") or "").strip():
+            has_text = True
+        elif btype == "tool_result":
+            has_tool_result = True
+    if has_text:
+        return True
+    return not has_tool_result and bool((ev.text or "").strip())
 
 
 def _shorten_tool_input(tool_input: dict[str, Any] | None) -> str:

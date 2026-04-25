@@ -91,13 +91,26 @@ class ScopeWorker:
                     scope.diff_bytes += len(content.encode("utf-8", errors="ignore"))
             if bash_command(ev):
                 scope.tool_kinds["Bash"] += 1
-
-        if ev.kind == "assistant_message":
+            # Emit snapshot post-update so the values reflect this tool
+            # call. Earlier the snapshot was tied to the leading content
+            # block of an assistant_message (often a ``thinking`` block
+            # with no tool calls yet), so the displayed counters lagged
+            # by one turn — files_touched showed 0 even when the turn
+            # had clearly touched files.
             state = self._daemon.state.get(fs.session_id)
-            scope.turn_idx = state.turns_seen if state else scope.turn_idx + 1
-            if scope.turn_idx == scope.last_snapshot_turn:
+            scope.turn_idx = state.turns_seen if state else scope.turn_idx
+            await self._emit_snapshot(scope, fs)
+            return
+
+        if ev.kind == "assistant_message" and ev.new_turn:
+            # A turn that contained no tool calls still gets one snapshot
+            # so the timeline has a marker. Skip if a tool_use earlier in
+            # the same turn already emitted one (turn_idx already matches).
+            state = self._daemon.state.get(fs.session_id)
+            new_turn_idx = state.turns_seen if state else scope.turn_idx + 1
+            if new_turn_idx == scope.last_snapshot_turn:
                 return
-            scope.last_snapshot_turn = scope.turn_idx
+            scope.turn_idx = new_turn_idx
             await self._emit_snapshot(scope, fs)
 
     async def _emit_snapshot(self, scope: _SessionScope, fs) -> None:
