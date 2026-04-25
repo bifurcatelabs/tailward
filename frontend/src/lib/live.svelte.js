@@ -1,0 +1,290 @@
+// Reactive live-session store. Owns events, derived header stats,
+// SSE / polling lifecycle, and the bootstrap replay. Components read
+// from the singleton ``live`` and call ``live.connect(ph, sessionId)``
+// once on mount.
+//
+// Svelte 5 runes (``$state``) provide per-field reactivity; Svelte
+// rerenders any component touching a property of ``live`` when that
+// property is reassigned.
+
+import { humanizeDuration, toEpochSeconds } from './format.js';
+
+const KNOWN_EVENT_TYPES = new Set([
+  'turn',
+  'user_turn',
+  'tool_call',
+  'constraint_violation',
+  'scope_snapshot',
+  'scope_creep',
+  'rubric_in_flight',
+  'rubric_sample',
+  'rubric_done',
+  'report_progress',
+  'report_ready',
+  'drift',
+  'claim',
+  'session_closed',
+]);
+
+const FEED_CAP = 250;
+
+class LiveStore {
+  // Connection state -------------------------------------------------
+  conn = $state('init'); // 'init' | 'live' | 'polling' | 'offline'
+
+  // Events feed ------------------------------------------------------
+  events = $state([]);
+
+  // Header stats -----------------------------------------------------
+  turns = $state(0);
+  files = $state(0);
+  diffBytes = $state(0);
+  baseline = $state(null);
+  threshold = $state(null);
+  violations = $state(0);
+  rubricSamples = $state(0);
+  closeStatus = $state(null);
+  model = $state(null);
+  tokensIn = $state(0);
+  tokensOut = $state(0);
+  cacheRead = $state(0);
+  cacheCreate = $state(0);
+
+  // Rubric per-dimension rolling avg (keyed by dim name) ------------
+  rubricAvgs = $state({});
+
+  // End-of-session report card --------------------------------------
+  reportRows = $state([]);
+
+  // Session metadata mirrored back from /state ----------------------
+  startedAt = $state(null);
+
+  // Internals --------------------------------------------------------
+  #renderedIds = new Set();
+  #lastEventId = 0;
+  #lastEventAt = null;
+  #rubricBuffers = {};
+  #ph = '';
+  #sessionId = '';
+  #es = null;
+  #pollTimer = null;
+  #esFailures = 0;
+
+  push(id, eventType, payload, createdAt) {
+    if (this.#renderedIds.has(id)) return;
+    this.#renderedIds.add(id);
+    if (id > this.#lastEventId) this.#lastEventId = id;
+    if (!KNOWN_EVENT_TYPES.has(eventType)) return;
+
+    const tsSeconds = toEpochSeconds(createdAt);
+    let deltaText = '';
+    if (
+      this.#lastEventAt != null
+      && tsSeconds != null
+      && tsSeconds >= this.#lastEventAt
+    ) {
+      const dur = humanizeDuration(tsSeconds - this.#lastEventAt);
+      if (dur) deltaText = '+' + dur;
+    }
+    if (tsSeconds != null) this.#lastEventAt = tsSeconds;
+
+    this.events.push({
+      id,
+      eventType,
+      payload: payload || {},
+      createdAt,
+      deltaText,
+    });
+    if (this.events.length > FEED_CAP) {
+      this.events.splice(0, this.events.length - FEED_CAP);
+    }
+
+    this.#applySideEffect(eventType, payload || {});
+  }
+
+  #applySideEffect(eventType, p) {
+    switch (eventType) {
+      case 'turn':
+        if (p.turn_idx != null) this.turns = p.turn_idx;
+        if (p.model) this.model = p.model;
+        if (p.totals) {
+          if (p.totals.input_tokens != null) this.tokensIn = p.totals.input_tokens;
+          if (p.totals.output_tokens != null) this.tokensOut = p.totals.output_tokens;
+          if (p.totals.cache_read_input_tokens != null)
+            this.cacheRead = p.totals.cache_read_input_tokens;
+          if (p.totals.cache_creation_input_tokens != null)
+            this.cacheCreate = p.totals.cache_creation_input_tokens;
+        }
+        break;
+      case 'scope_snapshot':
+        if (p.files_touched != null) this.files = p.files_touched;
+        if (p.diff_bytes != null) this.diffBytes = p.diff_bytes;
+        if (p.baseline != null) this.baseline = p.baseline;
+        if (p.threshold != null) this.threshold = p.threshold;
+        break;
+      case 'constraint_violation':
+        this.violations += 1;
+        break;
+      case 'rubric_sample': {
+        this.rubricSamples += 1;
+        const dim = p.dim;
+        if (dim) {
+          const buf = (this.#rubricBuffers[dim] ||= []);
+          buf.push(Number(p.score));
+          while (buf.length > 3) buf.shift();
+          const avg = buf.reduce((a, b) => a + b, 0) / buf.length;
+          this.rubricAvgs = { ...this.rubricAvgs, [dim]: avg };
+        }
+        break;
+      }
+      case 'session_closed':
+        this.closeStatus = 'closed';
+        break;
+      case 'report_ready':
+        this.closeStatus = 'consolidated';
+        this.#refreshReportCard();
+        break;
+    }
+  }
+
+  async #refreshReportCard() {
+    try {
+      const r = await fetch(
+        `/p/${this.#ph}/live/${this.#sessionId}/state`,
+      );
+      if (!r.ok) return;
+      const data = await r.json();
+      if (Array.isArray(data.report_rows)) this.reportRows = data.report_rows;
+      if (data.close_status) this.closeStatus = data.close_status;
+    } catch (e) {
+      console.warn('refreshReportCard failed', e);
+    }
+  }
+
+  async ackViolation(id) {
+    await fetch(`/p/${this.#ph}/violations/${id}/ack`, { method: 'POST' });
+  }
+
+  async dismissViolation(id) {
+    await fetch(`/p/${this.#ph}/violations/${id}/dismiss`, { method: 'POST' });
+  }
+
+  async rubricFeedback(scoreId, verdict) {
+    await fetch(`/p/${this.#ph}/rubric/${scoreId}/feedback`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ verdict }),
+    });
+  }
+
+  async connect(ph, sessionId) {
+    this.#ph = ph;
+    this.#sessionId = sessionId;
+    await this.#bootstrap();
+    this.#attachSSE();
+  }
+
+  disconnect() {
+    if (this.#es) { this.#es.close(); this.#es = null; }
+    if (this.#pollTimer) { clearInterval(this.#pollTimer); this.#pollTimer = null; }
+  }
+
+  async #bootstrap() {
+    try {
+      const r = await fetch(`/p/${this.#ph}/live/${this.#sessionId}/replay`);
+      if (r.ok) {
+        const data = await r.json();
+        for (const ev of data.events) {
+          this.push(ev.id, ev.event_type, ev.payload, ev.created_at);
+        }
+        if (data.next_since) this.#lastEventId = data.next_since;
+      }
+    } catch (e) {
+      console.warn('replay failed', e);
+    }
+    // Pick up state that's not derivable from the event stream alone
+    // (close_status, initial report rows, dim averages from rubric history).
+    try {
+      const r = await fetch(`/p/${this.#ph}/live/${this.#sessionId}/state`);
+      if (r.ok) {
+        const data = await r.json();
+        if (data.close_status) this.closeStatus = data.close_status;
+        if (Array.isArray(data.report_rows)) this.reportRows = data.report_rows;
+        if (data.rubric_dim_avg && typeof data.rubric_dim_avg === 'object') {
+          this.rubricAvgs = { ...this.rubricAvgs, ...data.rubric_dim_avg };
+        }
+        if (data.session?.started_at) this.startedAt = data.session.started_at;
+      }
+    } catch {}
+  }
+
+  #attachSSE() {
+    if (typeof EventSource === 'undefined') {
+      this.#startPolling();
+      return;
+    }
+    try {
+      this.#es = new EventSource(
+        `/p/${this.#ph}/live/${this.#sessionId}/stream?since=${this.#lastEventId}`,
+      );
+    } catch {
+      this.#startPolling();
+      return;
+    }
+    this.#es.onopen = () => {
+      this.conn = 'live';
+      this.#esFailures = 0;
+    };
+    this.#es.onerror = () => {
+      this.conn = 'offline';
+      this.#esFailures += 1;
+      this.#es?.close();
+      this.#es = null;
+      if (this.#esFailures >= 2) this.#startPolling();
+      else setTimeout(() => this.#attachSSE(), 1500);
+    };
+    for (const t of KNOWN_EVENT_TYPES) {
+      this.#es.addEventListener(t, (evt) => {
+        try {
+          const data = JSON.parse(evt.data);
+          this.push(data.id, data.type, data.payload, data.created_at);
+        } catch (e) {
+          console.warn('SSE parse', e);
+        }
+      });
+    }
+    this.#es.addEventListener('saturated', () => {
+      this.conn = 'polling';
+      this.#es?.close();
+      this.#es = null;
+      this.#startPolling();
+    });
+  }
+
+  #startPolling() {
+    if (this.#pollTimer) return;
+    this.conn = 'polling';
+    this.#pollTimer = setInterval(() => this.#pollOnce(), 3000);
+  }
+
+  async #pollOnce() {
+    try {
+      const r = await fetch(
+        `/p/${this.#ph}/live/${this.#sessionId}/events?since=${this.#lastEventId}`,
+      );
+      if (!r.ok) {
+        this.conn = 'offline';
+        return;
+      }
+      this.conn = 'polling';
+      const data = await r.json();
+      for (const ev of data.events) {
+        this.push(ev.id, ev.event_type, ev.payload, ev.created_at);
+      }
+    } catch {
+      this.conn = 'offline';
+    }
+  }
+}
+
+export const live = new LiveStore();

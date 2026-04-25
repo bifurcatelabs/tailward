@@ -1,135 +1,95 @@
 <script>
-  // Chassis-only: this is the v0.2 entrypoint proving the build
-  // pipeline works end-to-end. The vanilla JS live page (live.js +
-  // live.html) stays the production surface; this v2 surface exists
-  // so subsequent commits can port the feed, header strip, charts,
-  // and new dashboards into Svelte components without taking the
-  // working v1.1 UI offline.
+  import { live } from './lib/live.svelte.js';
+  import HeaderBar from './lib/HeaderBar.svelte';
+  import StatStrip from './lib/StatStrip.svelte';
+  import Feed from './lib/Feed.svelte';
+  import Rail from './lib/Rail.svelte';
+
   let { ph = '', sessionId = '' } = $props();
 
-  let health = $state('checking…');
-  let healthDetail = $state(null);
-
   $effect(() => {
-    fetch('/health')
-      .then((r) => r.json())
-      .then((data) => {
-        health = data.ok ? 'ok' : 'unhealthy';
-        healthDetail = data;
-      })
-      .catch((err) => {
-        health = 'error';
-        healthDetail = { error: String(err) };
-      });
+    if (!ph || !sessionId) return;
+    live.connect(ph, sessionId);
+    return () => live.disconnect();
   });
 </script>
 
-<header>
-  <h1>warden</h1>
-  <p class="muted">v0.2 chassis · Svelte build pipeline</p>
-</header>
-
-<section class="card">
-  <h2>Mount context</h2>
-  <dl>
-    <dt>project hash</dt>
-    <dd>{ph || '(none)'}</dd>
-    <dt>session id</dt>
-    <dd>{sessionId || '(none)'}</dd>
-    <dt>daemon /health</dt>
-    <dd class="health-{health}">{health}</dd>
-  </dl>
-  {#if healthDetail}
-    <pre>{JSON.stringify(healthDetail, null, 2)}</pre>
-  {/if}
-</section>
-
-<section class="card">
-  <h2>Where this goes</h2>
-  <p>
-    Subsequent v0.2 commits port the live feed, header strip, scope
-    snapshots, and rubric bars into Svelte components, then add the
-    Reflection and Platform views.
-  </p>
-  <p>
-    The legacy live page is still at
-    <a href={`/p/${ph}/live/${sessionId}`}>/p/{ph}/live/{sessionId}</a>
-    and remains the production audit surface until this one fully
-    covers it.
-  </p>
-</section>
+<div class="app">
+  <HeaderBar {ph} {sessionId} />
+  <StatStrip />
+  <main class="layout">
+    <Feed />
+    <Rail />
+  </main>
+</div>
 
 <style>
+  /* ----- design tokens ------------------------------------------- */
+  :global(:root) {
+    --bg:           #0a0c10;
+    --surface:      #11141a;
+    --surface-2:    #161a23;
+    --surface-3:    #1c2230;
+    --border:       #1f2531;
+    --border-strong:#2c3342;
+    --text:         #e6e9ef;
+    --text-soft:    #b9c0cc;
+    --muted:        #7d8693;
+    --muted-deep:   #4d5562;
+    --accent:       #8b7ff5;
+    --accent-soft:  #a89dff;
+    --ok:           #5ec5b3;
+    --warn:         #e6a554;
+    --err:          #e87a7a;
+
+    --sans: "Inter", ui-sans-serif, system-ui, -apple-system,
+            "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular,
+            Menlo, Consolas, "Liberation Mono", monospace;
+  }
+
+  :global(*) { box-sizing: border-box; }
+
   :global(body) {
     margin: 0;
-    background: #0e0f13;
-    color: #d6dbe5;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI",
-      Roboto, sans-serif;
-    line-height: 1.5;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
   }
-  header {
-    padding: 24px 32px 8px;
-    border-bottom: 1px solid #1f232c;
+
+  :global(button) {
+    font-family: inherit;
   }
-  header h1 {
-    margin: 0;
-    font-size: 18px;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
+
+  :global(::-webkit-scrollbar) { width: 8px; height: 8px; }
+  :global(::-webkit-scrollbar-track) { background: transparent; }
+  :global(::-webkit-scrollbar-thumb) {
+    background: var(--border-strong);
+    border-radius: 4px;
   }
-  .muted {
-    color: #6b7382;
-    font-size: 12px;
-    margin: 4px 0 0;
+  :global(::-webkit-scrollbar-thumb:hover) { background: var(--muted-deep); }
+
+  /* ----- layout -------------------------------------------------- */
+  .app {
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
   }
-  .card {
-    background: #161922;
-    border: 1px solid #2a2e38;
-    border-radius: 8px;
-    margin: 16px 32px;
-    padding: 16px 20px;
-  }
-  .card h2 {
-    margin: 0 0 12px;
-    font-size: 13px;
-    color: #8a93a4;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-  }
-  dl {
+  .layout {
+    flex: 1;
     display: grid;
-    grid-template-columns: 140px 1fr;
-    gap: 6px 16px;
-    margin: 0;
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+    padding: 16px 24px 32px;
+    align-items: start;
   }
-  dt {
-    color: #8a93a4;
-    font-size: 12px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
-  }
-  dd {
-    margin: 0;
-    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-    font-size: 13px;
-  }
-  .health-ok {
-    color: #6fcf97;
-  }
-  .health-error,
-  .health-unhealthy {
-    color: #eb5757;
-  }
-  pre {
-    margin-top: 12px;
-    background: #0c0e13;
-    border-left: 2px solid #2a2e38;
-    padding: 8px 12px;
-    font-size: 12px;
-    overflow: auto;
-  }
-  a {
-    color: #6fa9ff;
+  @media (max-width: 1080px) {
+    .layout {
+      grid-template-columns: 1fr;
+    }
   }
 </style>
