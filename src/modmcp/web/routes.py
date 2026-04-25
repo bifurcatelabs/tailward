@@ -6,7 +6,6 @@ with a single SSE client for the live page. No build step.
 
 from __future__ import annotations
 
-import json
 from collections import defaultdict
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,7 +18,7 @@ from fastapi.templating import Jinja2Templates
 from ..config import get_config
 from ..paths import projects_dir
 from ..schema.intent import SECTIONS, load_intent, save_intent
-from .sse import poll_events, stream_for_session
+from .sse import poll_events, stream_for_session, unwrap_stored_payload
 
 _WEB_DIR = Path(__file__).parent
 _TEMPLATES_DIR = _WEB_DIR / "templates"
@@ -300,7 +299,7 @@ def mount_web(app: FastAPI) -> None:
                 {
                     "id": r["id"],
                     "event_type": r["event_type"],
-                    "payload": json.loads(r["payload"]) if r["payload"] else {},
+                    "payload": unwrap_stored_payload(r["payload"]),
                     "created_at": r["created_at"],
                 }
                 for r in rows

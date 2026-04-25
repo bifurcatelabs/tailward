@@ -73,8 +73,19 @@ def create_app() -> FastAPI:
         await daemon.ledger.connect()
 
         async def _persist_live(ev) -> int:
+            # Store only the inner payload; the envelope (session_id,
+            # project_hash, type, created_at, id) is reconstructed from the
+            # row's own columns when serving replays. ``ev.to_json()``
+            # bakes in ``ev.id=0`` here because the row id isn't known
+            # until after this insert, which broke SSE-replay dedup and
+            # the ack/dismiss buttons on the live page.
+            import json as _json
+
             return await daemon.ledger.record_live_event(
-                ev.session_id, ev.project_hash, ev.type, ev.to_json()
+                ev.session_id,
+                ev.project_hash,
+                ev.type,
+                _json.dumps(ev.payload, ensure_ascii=False, default=str),
             )
 
         daemon.live.set_persister(_persist_live)

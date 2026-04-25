@@ -69,12 +69,47 @@ def stream_for_session(request: Request, ph: str, session_id: str):
     )
 
 
+def unwrap_stored_payload(payload_str: str | None) -> dict:
+    """Return the inner payload for a ``live_events.payload`` row.
+
+    New rows (after the persister fix) store the inner payload directly.
+    Older rows stored the full :class:`~modmcp.daemon.livebus.LiveEvent`
+    envelope — detected by the presence of both ``type`` and a nested
+    ``payload`` field — and must be unwrapped before the client sees them,
+    or the live-view renderers show ``undefined`` for everything.
+    """
+    if not payload_str:
+        return {}
+    try:
+        data = json.loads(payload_str)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    if "type" in data and "session_id" in data and "payload" in data:
+        inner = data["payload"]
+        return inner if isinstance(inner, dict) else {}
+    return data
+
+
 def _frame_from_event(ev) -> str:
     return f"id: {ev.id}\nevent: {ev.type}\ndata: {ev.to_json()}\n\n"
 
 
 def _frame_from_row(row: dict) -> str:
-    return f"id: {row['id']}\nevent: {row['event_type']}\ndata: {row['payload']}\n\n"
+    inner = unwrap_stored_payload(row["payload"])
+    envelope = {
+        "id": row["id"],
+        "session_id": row["session_id"],
+        "project_hash": row["project_hash"],
+        "type": row["event_type"],
+        "payload": inner,
+        "created_at": row["created_at"],
+    }
+    return (
+        f"id: {row['id']}\nevent: {row['event_type']}\n"
+        f"data: {json.dumps(envelope, default=str)}\n\n"
+    )
 
 
 async def poll_events(request: Request, ph: str, session_id: str) -> PlainTextResponse:
@@ -92,7 +127,7 @@ async def poll_events(request: Request, ph: str, session_id: str) -> PlainTextRe
             {
                 "id": r["id"],
                 "event_type": r["event_type"],
-                "payload": json.loads(r["payload"]) if r["payload"] else {},
+                "payload": unwrap_stored_payload(r["payload"]),
                 "created_at": r["created_at"],
             }
             for r in rows
