@@ -16,6 +16,10 @@
         violations: document.getElementById('stat-violations'),
         rubric: document.getElementById('stat-rubric'),
         close: document.getElementById('stat-close'),
+        model: document.getElementById('stat-model'),
+        tokensIn: document.getElementById('stat-tokens-in'),
+        tokensOut: document.getElementById('stat-tokens-out'),
+        cacheRead: document.getElementById('stat-cache-read'),
     };
     const connState = document.getElementById('conn-state');
 
@@ -27,9 +31,20 @@
 
     // ------------ partial renderers per event type ------------
     const renderers = {
-        turn: (p) => `<div class="feed-meta"><span class="feed-kind kind-turn">turn</span><span>${fmtTime()}</span></div>
-            <div>assistant turn ${p.turn_idx} · ${p.chars} chars</div>
-            ${p.text_preview ? `<div class="evidence">${escape(p.text_preview)}</div>` : ''}`,
+        turn: (p) => {
+            const u = p.usage || {};
+            const usageBits = [];
+            if (u.input_tokens) usageBits.push(`${humanize(u.input_tokens)} in`);
+            if (u.output_tokens) usageBits.push(`${humanize(u.output_tokens)} out`);
+            if (u.cache_read_input_tokens) usageBits.push(`${humanize(u.cache_read_input_tokens)} cached`);
+            const usageLine = usageBits.length
+                ? `<div class="muted" style="margin-top:4px; font-size:11px">${usageBits.join(' · ')}${p.model ? ` · ${escape(p.model)}` : ''}${p.stop_reason ? ` · stop: ${escape(p.stop_reason)}` : ''}</div>`
+                : '';
+            return `<div class="feed-meta"><span class="feed-kind kind-turn">turn</span><span>${fmtTime()}</span></div>
+                <div>assistant turn ${p.turn_idx} · ${p.chars} chars</div>
+                ${p.text_preview ? `<div class="evidence">${escape(p.text_preview)}</div>` : ''}
+                ${usageLine}`;
+        },
 
         tool_call: (p) => `<div class="feed-meta"><span class="feed-kind kind-tool_call">tool</span><span>${fmtTime()}</span></div>
             <div>${escape(p.tool || '')} <span class="muted">${escape(p.input_preview || '')}</span></div>`,
@@ -90,7 +105,26 @@
 
     // ------------ side-effects on the right rail / stats ------------
     const sideEffects = {
-        turn: (p) => { if (stats.turns && p.turn_idx != null) stats.turns.textContent = p.turn_idx; },
+        turn: (p) => {
+            if (stats.turns && p.turn_idx != null) stats.turns.textContent = p.turn_idx;
+            if (stats.model && p.model) {
+                stats.model.textContent = p.model;
+                stats.model.title = p.model;
+            }
+            const t = p.totals || {};
+            if (stats.tokensIn && t.input_tokens != null) {
+                stats.tokensIn.textContent = humanize(t.input_tokens);
+                stats.tokensIn.title = `${t.input_tokens} input tokens`;
+            }
+            if (stats.tokensOut && t.output_tokens != null) {
+                stats.tokensOut.textContent = humanize(t.output_tokens);
+                stats.tokensOut.title = `${t.output_tokens} output tokens`;
+            }
+            if (stats.cacheRead && t.cache_read_input_tokens != null) {
+                stats.cacheRead.textContent = humanize(t.cache_read_input_tokens);
+                stats.cacheRead.title = `${t.cache_read_input_tokens} cache_read tokens`;
+            }
+        },
         scope_snapshot: (p) => {
             if (stats.files) stats.files.textContent = p.files_touched ?? '?';
             if (stats.diff) stats.diff.textContent = p.diff_bytes ?? 0;
@@ -157,6 +191,15 @@
     function fmtTime() {
         const d = new Date();
         return d.toLocaleTimeString();
+    }
+
+    function humanize(n) {
+        if (n == null || isNaN(n)) return '0';
+        const abs = Math.abs(n);
+        if (abs >= 1e9) return (n / 1e9).toFixed(1) + 'B';
+        if (abs >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+        if (abs >= 1e3) return (n / 1e3).toFixed(1) + 'k';
+        return String(n);
     }
 
     function prepend(html) {

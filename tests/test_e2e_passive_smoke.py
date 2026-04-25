@@ -116,6 +116,42 @@ def _assistant_event(text: str) -> dict:
     }
 
 
+def _multiblock_assistant(
+    cwd: str,
+    blocks: list[dict],
+    *,
+    message_id: str,
+    model: str = "claude-opus-4-7",
+    stop_reason: str = "end_turn",
+    usage: dict | None = None,
+) -> dict:
+    """Emit one JSONL line representing one block of a logical turn.
+
+    Real Claude Code splits a single response into multiple JSONL events
+    (thinking, text, tool_use, ...) — each is a separate line, but they
+    all share the same ``message.id`` (and duplicate the same ``usage``
+    and ``stop_reason``). The watcher coalesces on ``message_id``.
+    """
+    return {
+        "type": "assistant",
+        "sessionId": SESSION_ID,
+        "cwd": cwd,
+        "message": {
+            "id": message_id,
+            "role": "assistant",
+            "model": model,
+            "content": blocks,
+            "stop_reason": stop_reason,
+            "usage": usage or {
+                "input_tokens": 6,
+                "output_tokens": 143,
+                "cache_read_input_tokens": 19065,
+                "cache_creation_input_tokens": 10161,
+            },
+        },
+    }
+
+
 def _assistant_with_tool_use(
     cwd: str, name: str, tool_input: dict, tc_id: str
 ) -> dict:
@@ -215,3 +251,153 @@ def test_passive_pipeline_smoke(
             "passive mode must not return a preamble or corrections; "
             f"got: {r.json()}"
         )
+
+
+COALESCE_SESSION_ID = "session-coalesce-001"
+
+
+@pytest.fixture
+def coalesce_jsonl(tmp_path: Path) -> Path:
+    claude_root = Path(os.environ["CLAUDE_PROJECTS_ROOT"])
+    sess_dir = claude_root / "coalesce-project-sanitized"
+    sess_dir.mkdir(parents=True)
+    f = sess_dir / f"{COALESCE_SESSION_ID}.jsonl"
+    f.touch()
+    return f
+
+
+@pytest.fixture
+def coalesce_project(tmp_path: Path) -> Path:
+    proj = tmp_path / "coalesce-project"
+    proj.mkdir()
+    return proj
+
+
+def test_logical_turn_coalescing_and_usage_capture(
+    coalesce_project: Path, coalesce_jsonl: Path
+) -> None:
+    """One Claude response = one logical turn, regardless of block count.
+
+    Drives a four-event JSONL: three blocks (thinking, text, tool_use)
+    sharing message.id ``msg_A``, then one block (text) under message.id
+    ``msg_B``. Asserts:
+
+    1. ``state.turns_seen`` advances to 2, not 4.
+    2. Cumulative token totals reflect each msg_id once, not per-block.
+    3. The LiveBus emits two ``turn`` events, not four.
+    4. Each turn LiveBus payload carries ``model`` and ``usage``.
+    """
+    cwd = str(coalesce_project)
+    # A's three blocks all share msg_A. B is a single text block.
+    msg_a_usage = {
+        "input_tokens": 10,
+        "output_tokens": 200,
+        "cache_read_input_tokens": 5000,
+        "cache_creation_input_tokens": 100,
+    }
+    msg_b_usage = {
+        "input_tokens": 5,
+        "output_tokens": 50,
+        "cache_read_input_tokens": 5200,
+        "cache_creation_input_tokens": 0,
+    }
+
+    def _override_session_id(ev: dict) -> dict:
+        ev["sessionId"] = COALESCE_SESSION_ID
+        return ev
+
+    events = [
+        _override_session_id(_user_event(cwd, "go")),
+        _override_session_id(
+            _multiblock_assistant(
+                cwd,
+                [{"type": "thinking", "thinking": "let me think"}],
+                message_id="msg_A",
+                stop_reason="tool_use",
+                usage=msg_a_usage,
+            )
+        ),
+        _override_session_id(
+            _multiblock_assistant(
+                cwd,
+                [{"type": "text", "text": "Working on it now."}],
+                message_id="msg_A",
+                stop_reason="tool_use",
+                usage=msg_a_usage,
+            )
+        ),
+        _override_session_id(
+            _multiblock_assistant(
+                cwd,
+                [{
+                    "type": "tool_use",
+                    "id": "tc-A1",
+                    "name": "Read",
+                    "input": {"file_path": "README.md"},
+                }],
+                message_id="msg_A",
+                stop_reason="tool_use",
+                usage=msg_a_usage,
+            )
+        ),
+        _override_session_id(
+            _multiblock_assistant(
+                cwd,
+                [{"type": "text", "text": "Done; that file is large."}],
+                message_id="msg_B",
+                stop_reason="end_turn",
+                usage=msg_b_usage,
+            )
+        ),
+    ]
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+        daemon.qwen = None
+        _append_jsonl(coalesce_jsonl, events)
+
+        # Wait for the watcher to drain the jsonl.
+        assert _wait_until(
+            lambda: (daemon.state.get(COALESCE_SESSION_ID) is not None)
+            and daemon.state.get(COALESCE_SESSION_ID).turns_seen >= 2
+        ), (
+            "watcher did not advance turns_seen to 2; got: "
+            f"{getattr(daemon.state.get(COALESCE_SESSION_ID), 'turns_seen', None)}"
+        )
+
+        st = daemon.state.get(COALESCE_SESSION_ID)
+        assert st.turns_seen == 2, (
+            f"expected exactly 2 logical turns from 4 assistant events, "
+            f"got {st.turns_seen}"
+        )
+        # Cumulative tokens must count each message_id once, not per block.
+        assert st.total_input_tokens == msg_a_usage["input_tokens"] + msg_b_usage["input_tokens"], (
+            f"input tokens overcounted: {st.total_input_tokens}"
+        )
+        assert st.total_output_tokens == msg_a_usage["output_tokens"] + msg_b_usage["output_tokens"]
+        assert st.total_cache_read_tokens == (
+            msg_a_usage["cache_read_input_tokens"] + msg_b_usage["cache_read_input_tokens"]
+        )
+        assert st.last_model == "claude-opus-4-7"
+
+        # LiveBus turn events: exactly two (one per logical turn), each
+        # carrying model + usage.
+        def _turn_events() -> list[dict]:
+            rows = _run(daemon.ledger.live_events_for_session(COALESCE_SESSION_ID))
+            import json as _json
+            return [
+                _json.loads(r["payload"]) for r in rows
+                if r["event_type"] == "turn"
+            ]
+
+        assert _wait_until(lambda: len(_turn_events()) >= 2), (
+            f"expected 2 turn events, got: {_turn_events()}"
+        )
+        turn_payloads = _turn_events()
+        assert len(turn_payloads) == 2, (
+            f"too many turn events (mid-turn blocks leaked); got {len(turn_payloads)}"
+        )
+        for p in turn_payloads:
+            assert p.get("model") == "claude-opus-4-7", p
+            assert "usage" in p and p["usage"]["output_tokens"] > 0, p
+            assert "totals" in p, p

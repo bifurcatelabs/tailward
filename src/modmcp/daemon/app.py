@@ -121,21 +121,52 @@ def create_app() -> FastAPI:
                     await daemon.rubric.enqueue(ev, fs)
 
             # Publish turn-level markers to the live bus so the web feed
-            # sees activity even without worker findings.
-            if fs.session_id and fs.project_hash and ev.kind == "assistant_message":
+            # sees activity even without worker findings. Fires once per
+            # logical turn (start of a new message_id) \u2014 mid-turn content
+            # blocks (thinking / text / tool_use follow-ups) flow through
+            # for downstream workers but don't double the feed.
+            if (
+                fs.session_id
+                and fs.project_hash
+                and ev.kind == "assistant_message"
+                and ev.new_turn
+            ):
                 preview = (ev.text or "").strip().replace("\r", "")
                 if len(preview) > 280:
                     preview = preview[:280] + "\u2026"
                 st = daemon.state.get(fs.session_id)
+                payload: dict[str, Any] = {
+                    "turn_idx": st.turns_seen if st else 0,
+                    "text_preview": preview,
+                    "chars": len(ev.text or ""),
+                }
+                if ev.model:
+                    payload["model"] = ev.model
+                if ev.stop_reason:
+                    payload["stop_reason"] = ev.stop_reason
+                if ev.usage:
+                    payload["usage"] = {
+                        "input_tokens": int(ev.usage.get("input_tokens") or 0),
+                        "output_tokens": int(ev.usage.get("output_tokens") or 0),
+                        "cache_read_input_tokens": int(
+                            ev.usage.get("cache_read_input_tokens") or 0
+                        ),
+                        "cache_creation_input_tokens": int(
+                            ev.usage.get("cache_creation_input_tokens") or 0
+                        ),
+                    }
+                if st is not None:
+                    payload["totals"] = {
+                        "input_tokens": st.total_input_tokens,
+                        "output_tokens": st.total_output_tokens,
+                        "cache_read_input_tokens": st.total_cache_read_tokens,
+                        "cache_creation_input_tokens": st.total_cache_creation_tokens,
+                    }
                 await daemon.live.publish(
                     fs.session_id,
                     fs.project_hash,
                     "turn",
-                    {
-                        "turn_idx": st.turns_seen if st else 0,
-                        "text_preview": preview,
-                        "chars": len(ev.text or ""),
-                    },
+                    payload,
                 )
             # Tool-call markers fire whenever a tool_use is present, whether
             # the event is a bare ``tool_use`` or an assistant message that

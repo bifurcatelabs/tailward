@@ -18,6 +18,20 @@ class SessionState:
     last_assistant_at: datetime | None = None
     recent_tool_calls: list[dict[str, Any]] = field(default_factory=list)
     preamble_delivered: bool = False
+    # Last seen ``message.id`` from an assistant event. Claude Code splits
+    # a logical turn across multiple JSONL events (one per content block);
+    # all blocks of one turn share this id, so the watcher can recover
+    # the human-perceived turn count by comparing against this value.
+    last_message_id: str | None = None
+    # Cumulative token usage across the whole session. Sums apply once
+    # per logical turn (when message_id changes), not per content block,
+    # because Claude Code duplicates the usage block across all events
+    # of a turn.
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    total_cache_read_tokens: int = 0
+    total_cache_creation_tokens: int = 0
+    last_model: str | None = None
 
     def record_tool_call(self, name: str, tool_input: dict[str, Any] | None) -> None:
         self.recent_tool_calls.append(

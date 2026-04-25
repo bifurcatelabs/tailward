@@ -186,9 +186,36 @@ class TranscriptWatcher:
                 session_id, fs.project_path, fs.project_hash, str(fs.path)
             )
             if ev.kind == "assistant_message":
-                st.turns_seen += 1
-                st.last_assistant_text = ev.text
-                st.last_assistant_at = ev.timestamp
+                # Coalesce on message_id: every content block of one
+                # logical turn shares the same id. Synthetic events
+                # without an id (tests, future formats) fall back to
+                # one-turn-per-event behavior.
+                ev.new_turn = (
+                    ev.message_id is None
+                    or ev.message_id != st.last_message_id
+                )
+                if ev.new_turn:
+                    st.turns_seen += 1
+                    st.last_message_id = ev.message_id
+                    if ev.usage:
+                        st.total_input_tokens += int(
+                            ev.usage.get("input_tokens") or 0
+                        )
+                        st.total_output_tokens += int(
+                            ev.usage.get("output_tokens") or 0
+                        )
+                        st.total_cache_read_tokens += int(
+                            ev.usage.get("cache_read_input_tokens") or 0
+                        )
+                        st.total_cache_creation_tokens += int(
+                            ev.usage.get("cache_creation_input_tokens") or 0
+                        )
+                    if ev.model:
+                        st.last_model = ev.model
+                if ev.text:
+                    st.last_assistant_text = ev.text
+                if ev.timestamp:
+                    st.last_assistant_at = ev.timestamp
             elif ev.kind == "tool_use" and ev.tool_name:
                 st.record_tool_call(ev.tool_name, ev.tool_input)
 

@@ -132,11 +132,15 @@
      data-ph="{{ ph }}"
      data-session-id="{{ session_id }}">
     <div class="stat"><span class="label">session</span><span class="val" title="{{ session_id }}">{{ session_id[:8] }}</span></div>
+    <div class="stat"><span class="label">model</span><span class="val" id="stat-model" title="">—</span></div>
     <div class="stat"><span class="label">turns</span><span class="val" id="stat-turns">{{ session.turns_seen }}</span></div>
     <div class="stat"><span class="label">files</span><span class="val" id="stat-files">0</span></div>
     <div class="stat"><span class="label">diff bytes</span><span class="val" id="stat-diff">0</span></div>
     <div class="stat"><span class="label">baseline</span><span class="val" id="stat-baseline">-</span></div>
     <div class="stat"><span class="label">violations</span><span class="val" id="stat-violations">0</span></div>
+    <div class="stat"><span class="label">tokens in</span><span class="val" id="stat-tokens-in" title="cumulative input tokens">0</span></div>
+    <div class="stat"><span class="label">tokens out</span><span class="val" id="stat-tokens-out" title="cumulative output tokens">0</span></div>
+    <div class="stat"><span class="label">cache read</span><span class="val" id="stat-cache-read" title="cumulative cache_read_input_tokens">0</span></div>
     <div class="stat"><span class="label">rubric samples</span><span class="val" id="stat-rubric">0</span></div>
     <div class="stat"><span class="label">status</span><span class="val" id="stat-close">{{ close_status or "active" }}</span></div>
     <div class="stat"><span class="label">connection</span><span class="val"><span class="conn-state" id="conn-state">init</span></span></div>

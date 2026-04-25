@@ -29,6 +29,21 @@ class TranscriptEvent:
     tool_input: dict[str, Any] | None = None
     tool_output: str | None = None
     cwd: str | None = None
+    # Provenance from the underlying API response. Claude Code splits a
+    # single logical turn into multiple JSONL events (one per content
+    # block: thinking, text, tool_use, ...) — they all share the same
+    # ``message_id``, ``model``, and ``usage``. Coalescing on
+    # ``message_id`` is how the watcher recovers the human-perceived
+    # turn count from the per-block stream.
+    message_id: str | None = None
+    model: str | None = None
+    usage: dict[str, Any] | None = None
+    stop_reason: str | None = None
+    # Set by the watcher after comparing ``message_id`` against the
+    # session's last seen id. Downstream consumers (LiveBus turn publish,
+    # scope snapshot) use this to fire once per logical turn instead of
+    # once per content block. Not derived from the JSONL itself.
+    new_turn: bool = False
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -135,6 +150,24 @@ def parse_line(line: str) -> TranscriptEvent | None:
                     tool_input = block.get("input")
                     break
 
+    message_id = None
+    model = None
+    usage = None
+    stop_reason = None
+    if isinstance(message, dict):
+        mid = message.get("id")
+        if isinstance(mid, str):
+            message_id = mid
+        m = message.get("model")
+        if isinstance(m, str):
+            model = m
+        u = message.get("usage")
+        if isinstance(u, dict):
+            usage = u
+        sr = message.get("stop_reason")
+        if isinstance(sr, str):
+            stop_reason = sr
+
     return TranscriptEvent(
         raw=obj,
         kind=kind,
@@ -145,6 +178,10 @@ def parse_line(line: str) -> TranscriptEvent | None:
         tool_input=tool_input,
         tool_output=tool_output,
         cwd=str(cwd) if cwd else None,
+        message_id=message_id,
+        model=model,
+        usage=usage,
+        stop_reason=stop_reason,
     )
 
 
