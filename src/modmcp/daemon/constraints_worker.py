@@ -93,7 +93,13 @@ class ConstraintsWorker:
         return policy
 
     async def _process(self, ev: TranscriptEvent, fs) -> None:
-        if ev.kind != "tool_use" or not fs.project_path or not fs.session_id:
+        if not fs.project_path or not fs.session_id:
+            return
+        # Accept bare ``tool_use`` events and assistant messages that wrap
+        # a tool_use content block. Real Claude Code transcripts only
+        # ever emit the embedded shape; the bare shape exists in tests
+        # and is kept working for defense-in-depth.
+        if not ev.tool_name:
             return
         policy = self._compute_policy(fs.project_path)
         if policy.is_empty():

@@ -78,9 +78,12 @@ class ScopeWorker:
             return
         scope = self._by_session.setdefault(fs.session_id, _SessionScope())
 
-        if ev.kind == "tool_use":
-            if ev.tool_name:
-                scope.tool_kinds[ev.tool_name] += 1
+        # Tool-use signal can arrive in two shapes: a bare ``tool_use``
+        # event, or an assistant message whose content list contains a
+        # tool_use block. Real Claude Code transcripts only emit the
+        # embedded shape; gate on tool_name presence so both work.
+        if ev.tool_name:
+            scope.tool_kinds[ev.tool_name] += 1
             for p in target_paths(ev):
                 scope.files_touched.add(p)
                 content = (ev.tool_input or {}).get("content") or (ev.tool_input or {}).get("new_string")

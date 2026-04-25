@@ -116,14 +116,26 @@ def _assistant_event(text: str) -> dict:
     }
 
 
-def _tool_use_event(cwd: str, name: str, tool_input: dict, tc_id: str) -> dict:
+def _assistant_with_tool_use(
+    cwd: str, name: str, tool_input: dict, tc_id: str
+) -> dict:
+    """Emit a tool call in Claude Code's actual transcript shape.
+
+    Claude Code does not write bare ``{"type": "tool_use", ...}`` lines;
+    every tool call lands as an ``assistant`` message whose content list
+    contains a ``tool_use`` block. The watcher and workers must dispatch
+    on that shape, not just on a top-level ``tool_use`` type.
+    """
     return {
-        "type": "tool_use",
+        "type": "assistant",
         "sessionId": SESSION_ID,
         "cwd": cwd,
-        "name": name,
-        "input": tool_input,
-        "id": tc_id,
+        "message": {
+            "role": "assistant",
+            "content": [
+                {"type": "tool_use", "id": tc_id, "name": name, "input": tool_input},
+            ],
+        },
     }
 
 
@@ -141,13 +153,13 @@ def test_passive_pipeline_smoke(
             jsonl_path,
             [
                 _user_event(cwd, "please tidy up"),
-                _tool_use_event(
+                _assistant_with_tool_use(
                     cwd,
                     "Bash",
                     {"command": "git push --force origin main"},
                     tc_id="tc-bash-1",
                 ),
-                _tool_use_event(
+                _assistant_with_tool_use(
                     cwd,
                     "Edit",
                     {
@@ -172,16 +184,17 @@ def test_passive_pipeline_smoke(
         assert any(r.startswith("forbidden-bash:") for r in rule_ids), rule_ids
         assert any(r.startswith("immutable:") for r in rule_ids), rule_ids
 
-        # ---- Scope snapshot emitted on the assistant turn.
+        # ---- Scope snapshots emit on assistant turns; at least one must
+        # reflect the Edit's path landing in files_touched. Claude Code
+        # splits a logical turn into multiple assistant events (one per
+        # content block), so we assert the eventual state rather than
+        # the count of the first snapshot.
         def _snapshots() -> list[dict]:
             return _run(daemon.ledger.scope_snapshots_for_session(SESSION_ID))
 
-        assert _wait_until(lambda: len(_snapshots()) >= 1), (
-            "scope worker did not record a snapshot on the assistant turn"
-        )
-        snap = _snapshots()[0]
-        # The Edit targeted one path; the snapshot counter should reflect it.
-        assert snap["files_touched_count"] >= 1
+        assert _wait_until(
+            lambda: any(s["files_touched_count"] >= 1 for s in _snapshots())
+        ), f"no snapshot recorded files_touched >= 1; got: {_snapshots()}"
 
         # ---- LiveBus mirrored both detections.
         def _live_types() -> set[str]:

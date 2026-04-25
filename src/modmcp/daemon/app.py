@@ -137,7 +137,11 @@ def create_app() -> FastAPI:
                         "chars": len(ev.text or ""),
                     },
                 )
-            if fs.session_id and fs.project_hash and ev.kind == "tool_use" and ev.tool_name:
+            # Tool-call markers fire whenever a tool_use is present, whether
+            # the event is a bare ``tool_use`` or an assistant message that
+            # wraps the block in its content list. Real Claude Code only
+            # emits the latter.
+            if fs.session_id and fs.project_hash and ev.tool_name:
                 await daemon.live.publish(
                     fs.session_id,
                     fs.project_hash,
