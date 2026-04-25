@@ -308,13 +308,22 @@ def mount_web(app: FastAPI) -> None:
     @app.get("/p/{ph}/live/{session_id}/replay")
     async def live_replay(request: Request, ph: str, session_id: str) -> JSONResponse:
         daemon = request.app.state.daemon
+        cfg = get_config()
         try:
             since_id = int(request.query_params.get("since", "0") or 0)
         except ValueError:
             since_id = 0
-        rows = await daemon.ledger.live_events_for_session(
-            session_id, since_id=since_id, limit=500
-        )
+        # since_id == 0 (the page-load default) wants the tail of the
+        # session, not the prefix. Otherwise it's a forward catch-up
+        # (e.g. an SSE-fallback client paginating after a reconnect).
+        if since_id <= 0:
+            rows = await daemon.ledger.live_events_recent(
+                session_id, limit=cfg.live_sse_replay_events
+            )
+        else:
+            rows = await daemon.ledger.live_events_for_session(
+                session_id, since_id=since_id, limit=cfg.live_sse_replay_events
+            )
         return JSONResponse({
             "events": [
                 {

@@ -494,6 +494,13 @@ class Ledger:
     async def live_events_for_session(
         self, session_id: str, *, since_id: int = 0, limit: int = 500
     ) -> list[dict]:
+        """Forward catch-up: events with ``id > since_id``, oldest first.
+
+        Used by SSE backfill and the polling fallback to walk forward
+        from the client's last seen id. For initial page-load replay
+        callers should use :meth:`live_events_recent` instead — this
+        method returns the *prefix*, not the tail.
+        """
         async with self.conn.execute(
             """SELECT * FROM live_events
                WHERE session_id=? AND id > ?
@@ -502,6 +509,24 @@ class Ledger:
         ) as cur:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    async def live_events_recent(
+        self, session_id: str, *, limit: int = 100
+    ) -> list[dict]:
+        """Latest ``limit`` events for the session, returned chronologically.
+
+        The page-load replay wants recency — what just happened — not the
+        first N events recorded. ``ORDER BY id DESC LIMIT N`` selects the
+        tail, then we reverse so callers can render in arrival order.
+        """
+        async with self.conn.execute(
+            """SELECT * FROM live_events
+               WHERE session_id=?
+               ORDER BY id DESC LIMIT ?""",
+            (session_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return list(reversed([dict(r) for r in rows]))
 
     async def latest_session_for_project(self, project_hash: str) -> str | None:
         async with self.conn.execute(

@@ -98,9 +98,12 @@ class Config:
     session_idle_seconds: float = 600.0
     session_close_poll_seconds: float = 60.0
 
-    # Live UI transport: SSE endpoint caps + replay window.
+    # Live UI transport: SSE endpoint caps + replay window. The replay
+    # window applies to the page-load tail and the SSE backfill on
+    # reconnect; live.js caps the rendered DOM at 200 nodes regardless,
+    # so a smaller window here just trims initial paint cost.
     live_sse_max_subscribers_per_session: int = 4
-    live_sse_replay_events: int = 200
+    live_sse_replay_events: int = 100
     live_sse_keepalive_seconds: float = 20.0
 
     @classmethod

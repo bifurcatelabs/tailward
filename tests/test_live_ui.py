@@ -100,6 +100,48 @@ def test_live_replay_returns_recent_events(tmp_path: Path) -> None:
         assert "constraint_violation" in types
 
 
+def test_live_replay_returns_tail_not_prefix(tmp_path: Path) -> None:
+    """Bootstrap replay must return the most recent events, not the first N.
+
+    Regression: replay was returning ``ORDER BY id LIMIT 500``, i.e. the
+    *prefix* of the session. Long sessions never reached recent events
+    until SSE catch-up paginated forward — which silently broke things
+    like the post-fix usage/model fields not appearing on initial paint.
+    """
+    proj = tmp_path / "replay-tail"
+    proj.mkdir()
+    ph = _seed(proj)
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        async def _drive():
+            await daemon.ledger.upsert_session("s-tail", ph, str(proj))
+            # Publish one more than the default replay window to force
+            # the tail/prefix distinction.
+            for i in range(150):
+                await daemon.live.publish(
+                    "s-tail", ph, "turn",
+                    {"turn_idx": i, "chars": i, "marker": i},
+                )
+
+        _run(_drive())
+
+        r = client.get(f"/p/{ph}/live/s-tail/replay")
+        assert r.status_code == 200
+        body = r.json()
+        markers = [e["payload"]["marker"] for e in body["events"]]
+        # Latest event must be present; earliest must not.
+        assert 149 in markers, "replay missing the most recent event"
+        assert 0 not in markers, (
+            "replay returned the session prefix, not the tail; "
+            f"first marker was {markers[0]}"
+        )
+        # Order should be chronological so live.js renders correctly.
+        assert markers == sorted(markers), (
+            f"replay events not ordered chronologically: {markers[:5]}..."
+        )
+
+
 def test_violation_ack_and_dismiss(tmp_path: Path) -> None:
     proj = tmp_path / "violack"
     proj.mkdir()

@@ -281,7 +281,7 @@ session_close_poll_seconds = 60.0
 
 # Live UI transport.
 live_sse_max_subscribers_per_session = 4
-live_sse_replay_events = 200
+live_sse_replay_events = 100
 live_sse_keepalive_seconds = 20.0
 
 # Transcript watcher.
