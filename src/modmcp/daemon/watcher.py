@@ -103,9 +103,13 @@ class TranscriptWatcher:
                     if p.suffix != ".jsonl":
                         continue
                     await self._process_file(p)
-        except RuntimeError:
-            # watchfiles raises if root disappears; treat as shutdown.
-            pass
+        except RuntimeError as e:
+            # watchfiles raises if the watched root disappears mid-run; treat
+            # that as shutdown. Anything else is a real bug — log it so it
+            # doesn't vanish silently.
+            if self._stop.is_set() or not self._root.exists():
+                return
+            log.exception("transcript watcher exited on unexpected RuntimeError: %s", e)
 
     async def _prime_existing(self) -> None:
         for jsonl in self._root.rglob("*.jsonl"):
