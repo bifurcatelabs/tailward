@@ -401,3 +401,109 @@ def test_logical_turn_coalescing_and_usage_capture(
             assert p.get("model") == "claude-opus-4-7", p
             assert "usage" in p and p["usage"]["output_tokens"] > 0, p
             assert "totals" in p, p
+
+
+RESTART_SESSION_ID = "session-restart-001"
+
+
+@pytest.fixture
+def restart_jsonl(tmp_path: Path) -> Path:
+    claude_root = Path(os.environ["CLAUDE_PROJECTS_ROOT"])
+    sess_dir = claude_root / "restart-project-sanitized"
+    sess_dir.mkdir(parents=True)
+    f = sess_dir / f"{RESTART_SESSION_ID}.jsonl"
+    f.touch()
+    return f
+
+
+@pytest.fixture
+def restart_project(tmp_path: Path) -> Path:
+    proj = tmp_path / "restart-project"
+    proj.mkdir()
+    return proj
+
+
+def test_session_state_survives_daemon_restart(
+    restart_project: Path, restart_jsonl: Path
+) -> None:
+    """Cumulative counters reload from session_state across a daemon restart.
+
+    Drives a session through one logical turn, tears down the daemon,
+    spins up a fresh daemon against the same ``MODMCP_HOME``, and asserts
+    the watcher hydrates the in-memory ``SessionState`` from the
+    persisted columns instead of starting from zero. Without this, every
+    daemon restart visibly "resets" the live UI's turn count and token
+    totals, even though the session is still ongoing.
+    """
+    cwd = str(restart_project)
+    usage = {
+        "input_tokens": 7,
+        "output_tokens": 250,
+        "cache_read_input_tokens": 30000,
+        "cache_creation_input_tokens": 500,
+    }
+
+    def _override(ev: dict) -> dict:
+        ev["sessionId"] = RESTART_SESSION_ID
+        return ev
+
+    events = [
+        _override(_user_event(cwd, "go")),
+        _override(
+            _multiblock_assistant(
+                cwd,
+                [{"type": "text", "text": "Working."}],
+                message_id="msg_R1",
+                stop_reason="end_turn",
+                usage=usage,
+            )
+        ),
+    ]
+
+    # First boot: drive the session, let progress persist.
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+        daemon.qwen = None
+        _append_jsonl(restart_jsonl, events)
+
+        assert _wait_until(
+            lambda: (daemon.state.get(RESTART_SESSION_ID) is not None)
+            and daemon.state.get(RESTART_SESSION_ID).turns_seen == 1
+        ), "first-boot watcher did not record a logical turn"
+
+        # Confirm the persistence row landed before we tear down.
+        def _persisted() -> dict | None:
+            rows = _run(daemon.ledger.all_session_state())
+            return next(
+                (r for r in rows if r["session_id"] == RESTART_SESSION_ID),
+                None,
+            )
+
+        assert _wait_until(
+            lambda: (
+                _persisted() is not None
+                and (_persisted() or {}).get("turns_seen") == 1
+            )
+        ), f"session_state row not persisted: {_persisted()}"
+
+        persisted_row = _persisted()
+        assert persisted_row["last_message_id"] == "msg_R1"
+        assert persisted_row["total_output_tokens"] == usage["output_tokens"]
+        assert persisted_row["total_cache_read_tokens"] == usage["cache_read_input_tokens"]
+        assert persisted_row["last_model"] == "claude-opus-4-7"
+
+    # Second boot against the same MODMCP_HOME: hydration must restore.
+    with TestClient(create_app()) as client2:
+        daemon2 = client2.app.state.daemon
+
+        assert _wait_until(
+            lambda: daemon2.state.get(RESTART_SESSION_ID) is not None,
+            timeout=5.0,
+        ), "second-boot watcher never hydrated the session"
+
+        st2 = daemon2.state.get(RESTART_SESSION_ID)
+        assert st2.turns_seen == 1, f"turns_seen reset to {st2.turns_seen}"
+        assert st2.last_message_id == "msg_R1"
+        assert st2.total_output_tokens == usage["output_tokens"]
+        assert st2.total_cache_read_tokens == usage["cache_read_input_tokens"]
+        assert st2.last_model == "claude-opus-4-7"

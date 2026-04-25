@@ -89,6 +89,15 @@ class TranscriptWatcher:
             if self._stop.is_set():
                 return
 
+        # Hydrate in-memory SessionState from the persisted session_state
+        # rows so cumulative counters (turns_seen, totals, last_model,
+        # last_message_id) survive a daemon restart.
+        try:
+            for row in await self._ledger.all_session_state():
+                self._state.hydrate(row)
+        except Exception:
+            log.exception("session-state hydrate failed; continuing fresh")
+
         await self._prime_existing()
 
         try:
@@ -216,6 +225,25 @@ class TranscriptWatcher:
                     # model identity.
                     if ev.model and ev.model != "<synthetic>":
                         st.last_model = ev.model
+                    # Persist the cumulative-progress columns so a
+                    # daemon restart hydrates back to the same values
+                    # instead of resetting to zero.
+                    try:
+                        await self._ledger.update_session_progress(
+                            session_id,
+                            turns_seen=st.turns_seen,
+                            last_message_id=st.last_message_id,
+                            total_input_tokens=st.total_input_tokens,
+                            total_output_tokens=st.total_output_tokens,
+                            total_cache_read_tokens=st.total_cache_read_tokens,
+                            total_cache_creation_tokens=st.total_cache_creation_tokens,
+                            last_model=st.last_model,
+                        )
+                    except Exception:
+                        log.exception(
+                            "session-progress persist failed for %s",
+                            session_id,
+                        )
                 if ev.text:
                     st.last_assistant_text = ev.text
                 if ev.timestamp:

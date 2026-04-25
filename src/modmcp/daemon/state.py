@@ -61,6 +61,34 @@ class StateStore:
             self._by_session[session_id] = st
         return st
 
+    def hydrate(self, row: dict) -> SessionState | None:
+        """Restore a SessionState from a persisted ``session_state`` row.
+
+        Called by the watcher on daemon start so cumulative counters
+        (turns_seen, total_*_tokens, last_message_id, last_model)
+        survive a restart instead of resetting to zero. If the session
+        is already in memory (e.g. another caller raced ahead) we leave
+        the live copy untouched.
+        """
+        sid = row.get("session_id")
+        if not sid or sid in self._by_session:
+            return self._by_session.get(sid) if sid else None
+        st = SessionState(
+            session_id=sid,
+            project_path=row.get("project_path") or "",
+            project_hash=row.get("project_hash") or "",
+            jsonl_path="",  # filled by the watcher when the next event arrives
+            turns_seen=int(row.get("turns_seen") or 0),
+            last_message_id=row.get("last_message_id"),
+            total_input_tokens=int(row.get("total_input_tokens") or 0),
+            total_output_tokens=int(row.get("total_output_tokens") or 0),
+            total_cache_read_tokens=int(row.get("total_cache_read_tokens") or 0),
+            total_cache_creation_tokens=int(row.get("total_cache_creation_tokens") or 0),
+            last_model=row.get("last_model"),
+        )
+        self._by_session[sid] = st
+        return st
+
     def get(self, session_id: str) -> SessionState | None:
         return self._by_session.get(session_id)
 

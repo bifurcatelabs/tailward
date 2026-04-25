@@ -1,9 +1,29 @@
 """SQLite schema for the modmcp ledger.
 
 Idempotent. Called on daemon start-up (and by the test harness).
+
+``SCHEMA_STATEMENTS`` is the source of truth for fresh installs (every
+statement uses ``IF NOT EXISTS``). ``ADDITIVE_COLUMNS`` lists columns we
+have added to existing tables since the schema went live. Each entry is
+applied via ``ALTER TABLE ADD COLUMN`` and the duplicate-column error is
+caught so re-runs are no-ops. There is no ``schema_version`` machinery
+yet; once we need a destructive migration we'll introduce one.
 """
 
 from __future__ import annotations
+
+ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
+    # (table, column, type+default). Run on every connect; aiosqlite
+    # raises OperationalError("duplicate column name: ...") which the
+    # caller swallows.
+    ("session_state", "last_message_id", "TEXT"),
+    ("session_state", "total_input_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("session_state", "total_output_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("session_state", "total_cache_read_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("session_state", "total_cache_creation_tokens", "INTEGER NOT NULL DEFAULT 0"),
+    ("session_state", "last_model", "TEXT"),
+]
+
 
 SCHEMA_STATEMENTS: list[str] = [
     """
@@ -77,7 +97,13 @@ SCHEMA_STATEMENTS: list[str] = [
         turns_seen INTEGER NOT NULL DEFAULT 0,
         phase2_active INTEGER NOT NULL DEFAULT 1,
         started_at TEXT NOT NULL,
-        last_seen_at TEXT NOT NULL
+        last_seen_at TEXT NOT NULL,
+        last_message_id TEXT,
+        total_input_tokens INTEGER NOT NULL DEFAULT 0,
+        total_output_tokens INTEGER NOT NULL DEFAULT 0,
+        total_cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        total_cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+        last_model TEXT
     );
     """,
     """

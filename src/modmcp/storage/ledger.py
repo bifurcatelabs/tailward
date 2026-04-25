@@ -8,7 +8,7 @@ from pathlib import Path
 import aiosqlite
 
 from ..paths import ledger_path
-from .migrations import SCHEMA_STATEMENTS
+from .migrations import ADDITIVE_COLUMNS, SCHEMA_STATEMENTS
 
 
 def _now_iso() -> str:
@@ -29,6 +29,18 @@ class Ledger:
         await self._conn.execute("PRAGMA journal_mode=WAL")
         for stmt in SCHEMA_STATEMENTS:
             await self._conn.execute(stmt)
+        # Idempotent additive migrations for columns we've introduced
+        # since the schema first shipped. SQLite raises a duplicate-column
+        # OperationalError on re-runs; treat that as success so re-opens
+        # of an already-up-to-date DB are no-ops.
+        for table, col, definition in ADDITIVE_COLUMNS:
+            try:
+                await self._conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {col} {definition}"
+                )
+            except aiosqlite.OperationalError as e:
+                if "duplicate column" not in str(e).lower():
+                    raise
         await self._conn.commit()
 
     async def close(self) -> None:
@@ -472,6 +484,49 @@ class Ledger:
         ) as cur:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    async def update_session_progress(
+        self,
+        session_id: str,
+        *,
+        turns_seen: int,
+        last_message_id: str | None,
+        total_input_tokens: int,
+        total_output_tokens: int,
+        total_cache_read_tokens: int,
+        total_cache_creation_tokens: int,
+        last_model: str | None,
+    ) -> None:
+        """Persist the cumulative-progress columns for a session.
+
+        Called by the watcher on every logical-turn boundary so the
+        in-memory ``SessionState`` can be hydrated from the DB after a
+        daemon restart instead of starting fresh.
+        """
+        await self.conn.execute(
+            """UPDATE session_state SET
+                 turns_seen=?,
+                 last_message_id=?,
+                 total_input_tokens=?,
+                 total_output_tokens=?,
+                 total_cache_read_tokens=?,
+                 total_cache_creation_tokens=?,
+                 last_model=COALESCE(?, last_model),
+                 last_seen_at=?
+               WHERE session_id=?""",
+            (
+                turns_seen,
+                last_message_id,
+                total_input_tokens,
+                total_output_tokens,
+                total_cache_read_tokens,
+                total_cache_creation_tokens,
+                last_model,
+                _now_iso(),
+                session_id,
+            ),
+        )
+        await self.conn.commit()
 
     # ------- live_events (v1.1) -------
 

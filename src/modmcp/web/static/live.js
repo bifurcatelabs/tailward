@@ -28,6 +28,12 @@
     let violationCount = 0;
     let rubricSampleCount = 0;
     let rubricBuffers = {};
+    // Wall-clock of the most recently processed event (epoch seconds), used
+    // to render an inter-event delta on the next item. Captures both human
+    // idle time (gap between an assistant turn and the next user prompt)
+    // and assistant latency (gap between user prompt and assistant turn)
+    // because both show up as deltas between consecutive events.
+    let lastEventAt = null;
 
     // ------------ partial renderers per event type ------------
     const renderers = {
@@ -202,21 +208,60 @@
         return String(n);
     }
 
-    function prepend(html) {
+    function humanizeDuration(seconds) {
+        if (seconds == null || !isFinite(seconds) || seconds < 0) return '';
+        if (seconds < 1) return '<1s';
+        if (seconds < 60) return Math.round(seconds) + 's';
+        const m = Math.floor(seconds / 60);
+        const s = Math.round(seconds % 60);
+        if (m < 60) return s ? `${m}m${s}s` : `${m}m`;
+        const h = Math.floor(m / 60);
+        const mm = m % 60;
+        return mm ? `${h}h${mm}m` : `${h}h`;
+    }
+
+    function prepend(html, deltaText) {
         if (empty && empty.parentNode) empty.remove();
         const div = document.createElement('div');
         div.className = 'feed-item';
         div.innerHTML = html;
+        if (deltaText) {
+            // Inject the inter-event delta next to the time stamp in
+            // .feed-meta. Appending to the last span keeps the kind chip
+            // on the left and stamps "+12s" right after the time.
+            const meta = div.querySelector('.feed-meta');
+            if (meta && meta.lastElementChild) {
+                const sp = document.createElement('span');
+                sp.style.cssText = 'color: var(--muted); margin-left: 6px;';
+                sp.textContent = deltaText;
+                meta.lastElementChild.appendChild(sp);
+            }
+        }
         feed.insertBefore(div, feed.firstChild);
         while (feed.children.length > 200) feed.removeChild(feed.lastChild);
     }
 
-    function handleEvent(id, eventType, payload) {
+    function _toEpochSeconds(createdAt) {
+        if (createdAt == null) return null;
+        if (typeof createdAt === 'number') return createdAt;
+        // ISO string from /replay, /events, and SSE replay frames.
+        const ms = Date.parse(createdAt);
+        return isNaN(ms) ? null : ms / 1000;
+    }
+
+    function handleEvent(id, eventType, payload, createdAt) {
         if (renderedIds.has(id)) return;
         renderedIds.add(id);
         if (id > lastEventId) lastEventId = id;
         const renderer = renderers[eventType];
-        if (renderer) prepend(renderer(payload || {}, id));
+        let deltaText = '';
+        const tsSeconds = _toEpochSeconds(createdAt);
+        if (lastEventAt != null && tsSeconds != null && tsSeconds >= lastEventAt) {
+            const dur = humanizeDuration(tsSeconds - lastEventAt);
+            if (dur) deltaText = '+' + dur;
+        }
+        if (tsSeconds != null) lastEventAt = tsSeconds;
+        if (renderer) prepend(renderer(payload || {}, id), deltaText);
         const effect = sideEffects[eventType];
         if (effect) {
             try { effect(payload || {}); } catch (e) { console.warn(eventType, e); }
@@ -243,7 +288,7 @@
             if (r.ok) {
                 const data = await r.json();
                 for (const ev of data.events) {
-                    handleEvent(ev.id, ev.event_type, ev.payload);
+                    handleEvent(ev.id, ev.event_type, ev.payload, ev.created_at);
                 }
                 if (data.next_since) lastEventId = data.next_since;
             }
@@ -290,7 +335,7 @@
             es.addEventListener(type, (evt) => {
                 try {
                     const data = JSON.parse(evt.data);
-                    handleEvent(data.id, data.type, data.payload);
+                    handleEvent(data.id, data.type, data.payload, data.created_at);
                 } catch (e) { console.warn('SSE parse', e); }
             });
         }
@@ -312,7 +357,7 @@
             setConn('polling');
             const data = await r.json();
             for (const ev of data.events) {
-                handleEvent(ev.id, ev.event_type, ev.payload);
+                handleEvent(ev.id, ev.event_type, ev.payload, ev.created_at);
             }
         } catch (e) {
             setConn('offline');
