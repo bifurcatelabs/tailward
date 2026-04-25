@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}live v2 — {{ session_id[:8] }}{% endblock %}
+{% block content %}
+{#
+  v0.2 chassis surface. The Svelte bundle (built into
+  /static/dist/) takes over from #app and reads the project hash and
+  session id from the data attributes — same contract as live.html's
+  vanilla JS, just consumed by a different runtime.
+
+  This template stays minimal on purpose: any structural HTML belongs
+  in the Svelte components so the v2 surface owns its own DOM.
+#}
+<div id="app"
+     data-ph="{{ ph }}"
+     data-session-id="{{ session_id }}"></div>
+
+{# Vite emits a manifest.json mapping "index.html" -> the hashed
+   bundle. Try the manifest first; fall back to a build-time guess so
+   "things show up" even if the manifest hasn't been generated yet. #}
+{% if v2_bundle_js %}
+<script type="module" src="{{ v2_bundle_js }}"></script>
+{% if v2_bundle_css %}
+<link rel="stylesheet" href="{{ v2_bundle_css }}">
+{% endif %}
+{% else %}
+<p style="margin:32px;font-family:ui-monospace,monospace;color:#eb5757">
+  v0.2 bundle not built. Run <code>npm install &amp;&amp; npm run build</code>
+  inside <code>frontend/</code>, then reload.
+</p>
+{% endif %}
+{% endblock %}

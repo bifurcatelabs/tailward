@@ -23,6 +23,42 @@ from .sse import poll_events, stream_for_session, unwrap_stored_payload
 _WEB_DIR = Path(__file__).parent
 _TEMPLATES_DIR = _WEB_DIR / "templates"
 _STATIC_DIR = _WEB_DIR / "static"
+_DIST_DIR = _STATIC_DIR / "dist"
+
+
+def _resolve_v2_bundle() -> tuple[str | None, str | None]:
+    """Return (js_url, css_url) for the v0.2 Svelte bundle, or (None, None).
+
+    Vite writes ``dist/.vite/manifest.json`` (or ``dist/manifest.json``
+    depending on version) mapping the entry input to its hashed output
+    files. We prefer the manifest so cache-busted filenames are picked
+    up; fall back to ``None`` if the bundle hasn't been built yet so
+    the template can render a "run npm run build" hint instead of a
+    broken script tag.
+    """
+    import json as _json
+
+    manifest_candidates = [
+        _DIST_DIR / ".vite" / "manifest.json",
+        _DIST_DIR / "manifest.json",
+    ]
+    for mf in manifest_candidates:
+        if not mf.exists():
+            continue
+        try:
+            data = _json.loads(mf.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        # Vite keys the manifest by the input filename; we use index.html.
+        entry = data.get("index.html") or next(iter(data.values()), None)
+        if not isinstance(entry, dict):
+            continue
+        js_file = entry.get("file")
+        css_files = entry.get("css") or []
+        js_url = f"/static/dist/{js_file}" if js_file else None
+        css_url = f"/static/dist/{css_files[0]}" if css_files else None
+        return js_url, css_url
+    return None, None
 
 
 def mount_web(app: FastAPI) -> None:
@@ -168,6 +204,33 @@ def mount_web(app: FastAPI) -> None:
                 "session_id": session_id,
                 "close_status": close_status or ("idle" if session else None),
                 "report_rows": report_rows,
+            },
+        )
+
+    @app.get("/p/{ph}/live/{session_id}/v2", response_class=HTMLResponse)
+    async def live_session_v2(request: Request, ph: str, session_id: str) -> HTMLResponse:
+        """v0.2 chassis surface — Svelte bundle takes over from ``#app``.
+
+        Lives alongside ``/live/{session_id}`` (the production v1.1
+        surface) so v0.2 work doesn't disrupt active dogfooding. When
+        the v2 surface fully covers v1.1's features the legacy template
+        and ``live.js`` get retired in one pass.
+        """
+        daemon = request.app.state.daemon
+        session = await daemon.ledger.get_session(session_id)
+        if session is None or session["project_hash"] != ph:
+            raise HTTPException(404)
+        bundle_js, bundle_css = _resolve_v2_bundle()
+        return templates.TemplateResponse(
+            request,
+            "live_v2.html",
+            {
+                **_base_ctx(),
+                "ph": ph,
+                "session": session,
+                "session_id": session_id,
+                "v2_bundle_js": bundle_js,
+                "v2_bundle_css": bundle_css,
             },
         )
 
