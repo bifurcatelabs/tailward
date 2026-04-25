@@ -1,13 +1,44 @@
 <script>
   import { live } from './lib/live.svelte.js';
   import HeaderBar from './lib/HeaderBar.svelte';
-  import HeroStrip from './lib/HeroStrip.svelte';
-  import SessionTimeline from './lib/SessionTimeline.svelte';
-  import Feed from './lib/Feed.svelte';
-  import Rail from './lib/Rail.svelte';
+  import TabNav from './lib/TabNav.svelte';
+  import SessionView from './lib/SessionView.svelte';
+  import ReflectionView from './lib/ReflectionView.svelte';
+  import PlatformView from './lib/PlatformView.svelte';
 
   let { ph = '', sessionId = '' } = $props();
 
+  // Three top-level views. Hash sync so refresh / browser back-forward
+  // / bookmarks all land on the right tab without us pulling in a
+  // routing library.
+  const TABS = ['session', 'reflection', 'platform'];
+
+  function readHash() {
+    const h = (typeof window !== 'undefined' ? window.location.hash : '')
+      .replace(/^#/, '');
+    return TABS.includes(h) ? h : 'session';
+  }
+
+  let view = $state(readHash());
+
+  function setView(v) {
+    if (!TABS.includes(v)) return;
+    view = v;
+    if (typeof window !== 'undefined' && window.location.hash !== '#' + v) {
+      history.replaceState(null, '', '#' + v);
+    }
+  }
+
+  $effect(() => {
+    const onHash = () => { view = readHash(); };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  });
+
+  // Live store stays connected regardless of which tab is active —
+  // the Session view is where its data lands today, but the probe
+  // worker (next commit) will share the bus, so we keep the SSE
+  // stream open for the whole page session.
   $effect(() => {
     if (!ph || !sessionId) return;
     live.connect(ph, sessionId);
@@ -17,20 +48,19 @@
 
 <div class="app">
   <HeaderBar {ph} {sessionId} />
-  <HeroStrip />
-  <SessionTimeline />
-  <main class="layout">
-    <Feed />
-    <Rail />
-  </main>
+  <TabNav {view} {setView} />
+  {#if view === 'session'}
+    <SessionView />
+  {:else if view === 'reflection'}
+    <ReflectionView />
+  {:else if view === 'platform'}
+    <PlatformView />
+  {/if}
 </div>
 
 <style>
   /* ----- design tokens ------------------------------------------- */
   :global(:root) {
-    /* Slightly warm dark surfaces — pure #000-leaning blacks read as
-       server-room / terminal; this carries a small amount of warmth
-       so the page feels lived-in. */
     --bg:           #0b0c10;
     --surface:      #11141a;
     --surface-2:    #161a23;
@@ -43,16 +73,10 @@
     --muted:        #7a8290;
     --muted-deep:   #4d5462;
 
-    /* Copper / warm-ember as the brand accent. Distinctive against
-       the violet-saturated dev-tool palette; reserved for the brand
-       mark and a small number of emphasis spots. Per-event chips
-       keep their semantic colors. */
     --accent:       #e89968;
     --accent-soft:  #f5b58e;
     --accent-glow:  rgba(232,153,104,0.45);
 
-    /* Secondary brand violet — used for assistant turns / rubric so
-       that the copper doesn't get diluted carrying every meaning. */
     --violet:       #9690f8;
     --violet-soft:  #b3aeff;
 
@@ -99,21 +123,9 @@
   }
   :global(::-webkit-scrollbar-thumb:hover) { background: var(--muted-deep); }
 
-  /* ----- layout -------------------------------------------------- */
   .app {
     min-height: 100vh;
     display: flex;
     flex-direction: column;
-  }
-  .layout {
-    flex: 1;
-    display: grid;
-    grid-template-columns: 1fr 320px;
-    gap: 16px;
-    padding: 16px 24px 32px;
-    align-items: start;
-  }
-  @media (max-width: 1080px) {
-    .layout { grid-template-columns: 1fr; }
   }
 </style>
