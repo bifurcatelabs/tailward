@@ -101,7 +101,7 @@
   }
   .fill {
     height: 100%;
-    background: linear-gradient(90deg, var(--accent), var(--accent-soft));
+    background: linear-gradient(90deg, var(--violet), var(--violet-soft));
     transition: width 600ms cubic-bezier(0.22, 0.61, 0.36, 1);
   }
   .empty {

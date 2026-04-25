@@ -192,18 +192,18 @@
     border-radius: 999px;
     border: 1px solid transparent;
   }
-  .chip-turn         { background: rgba(139,127,245,0.10); color: var(--accent); border-color: rgba(139,127,245,0.25); }
-  .chip-user_turn    { background: rgba(94,197,179,0.10); color: var(--ok); border-color: rgba(94,197,179,0.25); }
+  .chip-turn         { background: rgba(150,144,248,0.10); color: var(--violet); border-color: rgba(150,144,248,0.25); }
+  .chip-user_turn    { background: rgba(95,195,167,0.10); color: var(--ok); border-color: rgba(95,195,167,0.25); }
   .chip-tool_call    { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
   .chip-constraint_violation { background: rgba(232,122,122,0.12); color: var(--err); border-color: rgba(232,122,122,0.30); }
-  .chip-scope_snapshot { background: rgba(94,197,179,0.06); color: var(--ok); border-color: rgba(94,197,179,0.18); }
-  .chip-scope_creep  { background: rgba(230,165,84,0.12); color: var(--warn); border-color: rgba(230,165,84,0.30); }
+  .chip-scope_snapshot { background: rgba(95,195,167,0.06); color: var(--ok); border-color: rgba(95,195,167,0.18); }
+  .chip-scope_creep  { background: rgba(230,192,84,0.12); color: var(--warn); border-color: rgba(230,192,84,0.30); }
   .chip-rubric_sample, .chip-rubric_in_flight, .chip-rubric_done {
-    background: rgba(139,127,245,0.06); color: var(--accent); border-color: rgba(139,127,245,0.18);
+    background: rgba(150,144,248,0.06); color: var(--violet); border-color: rgba(150,144,248,0.18);
   }
-  .chip-drift        { background: rgba(230,165,84,0.10); color: var(--warn); border-color: rgba(230,165,84,0.25); }
+  .chip-drift        { background: rgba(230,192,84,0.10); color: var(--warn); border-color: rgba(230,192,84,0.25); }
   .chip-claim        { background: rgba(232,122,122,0.10); color: var(--err); border-color: rgba(232,122,122,0.25); }
-  .chip-report_progress, .chip-report_ready { background: rgba(139,127,245,0.10); color: var(--accent); border-color: rgba(139,127,245,0.25); }
+  .chip-report_progress, .chip-report_ready { background: rgba(232,153,104,0.10); color: var(--accent); border-color: rgba(232,153,104,0.25); }
   .chip-session_closed { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
 
   .severity {
@@ -228,7 +228,7 @@
   .mono { font-family: var(--mono); font-size: 12px; }
   .dot { color: var(--muted-deep); }
   .usage { font-family: var(--mono); font-size: 12px; color: var(--muted); }
-  .score { font-family: var(--mono); font-size: 13px; color: var(--accent); font-weight: 600; }
+  .score { font-family: var(--mono); font-size: 13px; color: var(--violet); font-weight: 600; }
   .suggestion { margin-top: 4px; }
 
   /* Evidence: prose / quoted body. Cap height; click to expand. */

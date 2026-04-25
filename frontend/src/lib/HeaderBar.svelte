@@ -5,23 +5,39 @@
 
 <header class="bar">
   <div class="brand">
-    <span class="dot"></span>
+    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+      <!-- Stylized monogram: a "W" rendered as three rising chevrons,
+           lit from the left. Matches the copper accent. -->
+      <defs>
+        <linearGradient id="markFill" x1="0" y1="1" x2="1" y2="0">
+          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.55"/>
+          <stop offset="100%" stop-color="var(--accent-soft)" stop-opacity="1"/>
+        </linearGradient>
+      </defs>
+      <path
+        d="M3 9 L8 23 L13 13 L18 23 L23 9 M14 22 L19 12 L24 22"
+        fill="none"
+        stroke="url(#markFill)"
+        stroke-width="2.2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
     <span class="name">warden</span>
-    <span class="tag">v0.2</span>
+    <span class="version">0.2</span>
   </div>
 
   <div class="session">
     <span class="muted">session</span>
     <code title={sessionId}>{sessionId.slice(0, 8)}</code>
-    {#if live.model}
-      <span class="sep">·</span>
-      <code>{live.model}</code>
-    {/if}
+    <span class="muted">·</span>
+    <span class="muted">project</span>
+    <code class="thin" title={ph}>{ph.slice(0, 8)}</code>
   </div>
 
   <div class="conn conn-{live.conn}">
     <span class="pulse"></span>
-    {live.conn}
+    <span class="conn-label">{live.conn}</span>
   </div>
 </header>
 
@@ -30,33 +46,34 @@
     display: flex;
     align-items: center;
     gap: 24px;
-    padding: 14px 24px;
+    padding: 16px 24px;
     border-bottom: 1px solid var(--border);
-    background: linear-gradient(180deg, var(--surface) 0%, var(--bg) 100%);
+    backdrop-filter: blur(8px);
   }
   .brand {
     display: flex;
     align-items: center;
     gap: 10px;
   }
-  .dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 12px var(--accent);
+  .mark {
+    width: 22px;
+    height: 22px;
+    filter: drop-shadow(0 0 6px var(--accent-glow));
   }
   .name {
     font-weight: 600;
-    letter-spacing: 0.02em;
-    font-size: 14px;
+    letter-spacing: 0.01em;
+    font-size: 15px;
+    color: var(--text);
   }
-  .tag {
+  .version {
     color: var(--muted);
-    font-size: 11px;
+    font-size: 10px;
+    font-family: var(--mono);
     padding: 2px 6px;
     border: 1px solid var(--border);
     border-radius: 999px;
+    letter-spacing: 0.04em;
   }
   .session {
     flex: 1;
@@ -74,16 +91,26 @@
     color: var(--text);
     font-size: 11px;
   }
-  .muted { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; }
-  .sep { color: var(--muted-deep); }
+  .session code.thin {
+    background: transparent;
+    color: var(--muted);
+  }
+  .muted {
+    color: var(--muted);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+
   .conn {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     font-size: 11px;
     color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.08em;
+    font-weight: 600;
   }
   .pulse {
     width: 6px;
@@ -93,6 +120,7 @@
   }
   .conn-live .pulse {
     background: var(--ok);
+    box-shadow: 0 0 8px rgba(95,195,167,0.6);
     animation: pulse 2s ease-in-out infinite;
   }
   .conn-live { color: var(--ok); }
@@ -102,6 +130,6 @@
   .conn-offline { color: var(--err); }
   @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
-    50% { opacity: 0.55; transform: scale(1.4); }
+    50%      { opacity: 0.55; transform: scale(1.4); }
   }
 </style>

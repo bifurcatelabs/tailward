@@ -59,6 +59,18 @@ class LiveStore {
   // Session metadata mirrored back from /state ----------------------
   startedAt = $state(null);
 
+  // Time-series samples for in-page sparklines. Each is a bounded
+  // ring buffer of {t, v} points; the visual components don't need
+  // exact precision — just enough to show shape over the session.
+  tokenOutSeries = $state([]);
+  filesSeries = $state([]);
+  cacheSeries = $state([]);
+
+  // Compact arc of all events in the session, sorted by id, used to
+  // render the SessionTimeline strip. Each item is
+  // { id, type, t (epoch seconds) }.
+  arc = $state([]);
+
   // Internals --------------------------------------------------------
   #renderedIds = new Set();
   #lastEventId = 0;
@@ -99,6 +111,11 @@ class LiveStore {
       this.events.splice(0, this.events.length - FEED_CAP);
     }
 
+    // Mirror into the arc strip. Capped so a long session doesn't
+    // explode memory; render trims further if needed.
+    this.arc.push({ id, type: eventType, t: tsSeconds });
+    if (this.arc.length > 1000) this.arc.splice(0, this.arc.length - 1000);
+
     this.#applySideEffect(eventType, payload || {});
   }
 
@@ -109,15 +126,23 @@ class LiveStore {
         if (p.model) this.model = p.model;
         if (p.totals) {
           if (p.totals.input_tokens != null) this.tokensIn = p.totals.input_tokens;
-          if (p.totals.output_tokens != null) this.tokensOut = p.totals.output_tokens;
-          if (p.totals.cache_read_input_tokens != null)
+          if (p.totals.output_tokens != null) {
+            this.tokensOut = p.totals.output_tokens;
+            this.#sample('tokenOutSeries', p.totals.output_tokens);
+          }
+          if (p.totals.cache_read_input_tokens != null) {
             this.cacheRead = p.totals.cache_read_input_tokens;
+            this.#sample('cacheSeries', p.totals.cache_read_input_tokens);
+          }
           if (p.totals.cache_creation_input_tokens != null)
             this.cacheCreate = p.totals.cache_creation_input_tokens;
         }
         break;
       case 'scope_snapshot':
-        if (p.files_touched != null) this.files = p.files_touched;
+        if (p.files_touched != null) {
+          this.files = p.files_touched;
+          this.#sample('filesSeries', p.files_touched);
+        }
         if (p.diff_bytes != null) this.diffBytes = p.diff_bytes;
         if (p.baseline != null) this.baseline = p.baseline;
         if (p.threshold != null) this.threshold = p.threshold;
@@ -145,6 +170,12 @@ class LiveStore {
         this.#refreshReportCard();
         break;
     }
+  }
+
+  #sample(key, v) {
+    const series = this[key];
+    series.push(v);
+    if (series.length > 60) series.splice(0, series.length - 60);
   }
 
   async #refreshReportCard() {
