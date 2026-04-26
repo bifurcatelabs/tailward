@@ -115,6 +115,14 @@ class Config:
     probe_timeout_seconds: float = 5.0
     probe_enabled: bool = True
 
+    # OS-level toast notifications. Off by default: the live web UI is
+    # the primary surface, and an interactive coding session at the
+    # same machine doesn't need OS interrupts about events the user is
+    # already watching. Ledger rows and LiveBus events still fire — only
+    # the OS toast is suppressed. Flip to true if you want to walk away
+    # from the page and still get pinged on high-severity surfacings.
+    os_notifications_enabled: bool = False
+
     @classmethod
     def default(cls) -> Config:
         return cls()

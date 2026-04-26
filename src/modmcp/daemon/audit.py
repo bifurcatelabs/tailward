@@ -89,11 +89,37 @@ def _is_code_like(w: str) -> bool:
     return False
 
 
+# Strip regions of the assistant text that don't represent the model's
+# own first-person claims:
+#   * fenced code blocks (```...```)
+#   * inline backtick spans (`...`)
+#   * blockquote lines (lines starting with ``> ``)
+# These are where the assistant *quotes* something — a doc snippet, a
+# transcript excerpt, a meta-discussion of warden itself — rather than
+# asserting "I just removed X." Without this, a turn that says
+# ``the audit flagged my "I removed FooBar"`` becomes its own
+# contradicted-claim row, even though the model wasn't claiming
+# anything new.
+_FENCE_RE = re.compile(r"```.*?```", re.DOTALL)
+_BACKTICK_RE = re.compile(r"`[^`\n]*`")
+_BLOCKQUOTE_RE = re.compile(r"(?m)^\s{0,3}>.*$")
+
+
+def _strip_quoted_regions(text: str) -> str:
+    if not text:
+        return ""
+    text = _FENCE_RE.sub(" ", text)
+    text = _BACKTICK_RE.sub(" ", text)
+    text = _BLOCKQUOTE_RE.sub(" ", text)
+    return text
+
+
 def extract_claims(text: str) -> list[Claim]:
     out: list[Claim] = []
     seen: set[str] = set()
+    cleaned = _strip_quoted_regions(text)
     for pat in CLAIM_PATTERNS:
-        for m in pat.finditer(text or ""):
+        for m in pat.finditer(cleaned):
             snippet = m.group(0).strip()
             if snippet in seen:
                 continue
