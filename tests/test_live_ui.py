@@ -100,6 +100,61 @@ def test_live_replay_returns_recent_events(tmp_path: Path) -> None:
         assert "constraint_violation" in types
 
 
+def test_live_replay_before_paginates_backwards(tmp_path: Path) -> None:
+    """``?before=N`` returns the batch of events with id < N, in
+    chronological order. Lets a client pass the lowest id it currently
+    has rendered and receive the next-older window — the wire shape
+    the load-older affordance binds to."""
+    proj = tmp_path / "before-page"
+    proj.mkdir()
+    ph = _seed(proj)
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        async def _drive():
+            await daemon.ledger.upsert_session("s-bp", ph, str(proj))
+            for i in range(150):
+                await daemon.live.publish(
+                    "s-bp", ph, "turn",
+                    {"turn_idx": i, "chars": i, "marker": i},
+                )
+
+        _run(_drive())
+
+        # First fetch: page-load tail. Should be the latest 100 markers.
+        r = client.get(f"/p/{ph}/live/s-bp/replay")
+        assert r.status_code == 200
+        first = r.json()["events"]
+        assert len(first) == 100
+        first_markers = [e["payload"]["marker"] for e in first]
+        assert max(first_markers) == 149
+        oldest_id_seen = first[0]["id"]
+
+        # Second fetch: load older. before=oldest_id_seen returns the
+        # batch immediately before that — markers 0..49 in this case.
+        r2 = client.get(
+            f"/p/{ph}/live/s-bp/replay?before={oldest_id_seen}"
+        )
+        assert r2.status_code == 200
+        older = r2.json()["events"]
+        # 150 events written, 100 already seen → 50 older remain.
+        assert len(older) == 50
+        older_markers = [e["payload"]["marker"] for e in older]
+        assert older_markers == sorted(older_markers), (
+            "load-older batch must be chronological"
+        )
+        assert max(older_markers) < min(first_markers), (
+            "load-older batch must precede the initial tail"
+        )
+
+        # Third fetch: nothing older than the absolute first id.
+        r3 = client.get(
+            f"/p/{ph}/live/s-bp/replay?before={older[0]['id']}"
+        )
+        assert r3.status_code == 200
+        assert r3.json()["events"] == []
+
+
 def test_live_replay_returns_tail_not_prefix(tmp_path: Path) -> None:
     """Bootstrap replay must return the most recent events, not the first N.
 

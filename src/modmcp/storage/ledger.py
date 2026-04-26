@@ -583,6 +583,26 @@ class Ledger:
             rows = await cur.fetchall()
         return list(reversed([dict(r) for r in rows]))
 
+    async def live_events_before(
+        self, session_id: str, *, before_id: int, limit: int = 100
+    ) -> list[dict]:
+        """Events with ``id < before_id``, returning the most-recent
+        ``limit`` of those (i.e. paginating backwards). Returned in
+        chronological order so the caller can prepend without resorting.
+
+        Used by the live-feed "load older" affordance: the client
+        passes the lowest id it currently has rendered, and we hand
+        back the next-older batch.
+        """
+        async with self.conn.execute(
+            """SELECT * FROM live_events
+               WHERE session_id=? AND id < ?
+               ORDER BY id DESC LIMIT ?""",
+            (session_id, before_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
     # ------- turn_metrics (v0.2 inference path) -------
 
     async def record_turn_metric(

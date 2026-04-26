@@ -71,6 +71,15 @@ class LiveStore {
   // { id, type, t (epoch seconds) }.
   arc = $state([]);
 
+  // Load-older state. ``oldestEventId`` tracks the lowest event id
+  // we've rendered; ``hasMoreOlder`` is the optimistic guess used to
+  // decide whether to show the affordance — flipped to false when
+  // the server returns fewer rows than requested. ``loadingOlder``
+  // gates concurrent clicks.
+  oldestEventId = $state(0);
+  hasMoreOlder = $state(true);
+  loadingOlder = $state(false);
+
   // Internals --------------------------------------------------------
   #renderedIds = new Set();
   #lastEventId = 0;
@@ -109,6 +118,9 @@ class LiveStore {
     });
     if (this.events.length > FEED_CAP) {
       this.events.splice(0, this.events.length - FEED_CAP);
+    }
+    if (this.oldestEventId === 0 || id < this.oldestEventId) {
+      this.oldestEventId = id;
     }
 
     // Mirror into the arc strip. Capped so a long session doesn't
@@ -189,6 +201,62 @@ class LiveStore {
       if (data.close_status) this.closeStatus = data.close_status;
     } catch (e) {
       console.warn('refreshReportCard failed', e);
+    }
+  }
+
+  async loadOlder() {
+    // Fetch the next-older batch and prepend (chronologically) to
+    // the events array. Bookkeeping: track loading flag for UX,
+    // flip hasMoreOlder false when the server returns fewer rows
+    // than the page size so the affordance disappears at the boundary.
+    if (this.loadingOlder || !this.hasMoreOlder) return;
+    if (!this.oldestEventId) return;
+    this.loadingOlder = true;
+    try {
+      const r = await fetch(
+        `/p/${this.#ph}/live/${this.#sessionId}/replay`
+        + `?before=${this.oldestEventId}`,
+      );
+      if (!r.ok) return;
+      const data = await r.json();
+      const older = data.events || [];
+      if (!older.length) {
+        this.hasMoreOlder = false;
+        return;
+      }
+      // Prepend chronologically. ``push`` would put them after the
+      // current tail; we want them before. Splice in at index 0 in
+      // arrival order so deltaText still reads naturally for the
+      // user's eye on a future render — but note: deltaText for the
+      // historical batch is *not* recomputed because the wall-clock
+      // baseline ``#lastEventAt`` is forward-only. Older events get
+      // an empty delta, which is the right answer (you're looking at
+      // history, not live activity).
+      const olderRendered = [];
+      for (const ev of older) {
+        if (this.#renderedIds.has(ev.id)) continue;
+        this.#renderedIds.add(ev.id);
+        olderRendered.push({
+          id: ev.id,
+          eventType: ev.event_type,
+          payload: ev.payload || {},
+          createdAt: ev.created_at,
+          deltaText: '',
+        });
+      }
+      if (olderRendered.length === 0) {
+        this.hasMoreOlder = false;
+        return;
+      }
+      this.events.splice(0, 0, ...olderRendered);
+      this.oldestEventId = olderRendered[0].id;
+      // If we got fewer than a full page, we've reached the start
+      // of the session.
+      if (older.length < 100) this.hasMoreOlder = false;
+    } catch (e) {
+      console.warn('loadOlder failed', e);
+    } finally {
+      this.loadingOlder = false;
     }
   }
 

@@ -418,10 +418,21 @@ def mount_web(app: FastAPI) -> None:
             since_id = int(request.query_params.get("since", "0") or 0)
         except ValueError:
             since_id = 0
-        # since_id == 0 (the page-load default) wants the tail of the
-        # session, not the prefix. Otherwise it's a forward catch-up
-        # (e.g. an SSE-fallback client paginating after a reconnect).
-        if since_id <= 0:
+        try:
+            before_id = int(request.query_params.get("before", "0") or 0)
+        except ValueError:
+            before_id = 0
+        # Three modes:
+        #   ?before=N  → backward pagination ("load older"): the
+        #                next-older batch with id < N, chronological.
+        #   ?since=N (>0) → forward catch-up after a reconnect; events
+        #                with id > N, chronological.
+        #   else (default) → tail of the session for page-load.
+        if before_id > 0:
+            rows = await daemon.ledger.live_events_before(
+                session_id, before_id=before_id, limit=cfg.live_sse_replay_events
+            )
+        elif since_id <= 0:
             rows = await daemon.ledger.live_events_recent(
                 session_id, limit=cfg.live_sse_replay_events
             )
