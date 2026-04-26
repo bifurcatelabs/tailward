@@ -341,6 +341,48 @@ def mount_web(app: FastAPI) -> None:
     # JSON helpers for live view initial paint
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # v0.2 Platform endpoints — global telemetry not scoped to a session
+    # ------------------------------------------------------------------
+
+    @app.get("/probes/recent")
+    async def probes_recent(request: Request) -> JSONResponse:
+        """Recent probe results across all targets, oldest first.
+
+        Used by the Platform view's polling (we don't push these onto
+        the per-session LiveBus because probes are global, not
+        session-scoped).
+        """
+        daemon = request.app.state.daemon
+        try:
+            limit = int(request.query_params.get("limit", "100") or 100)
+        except ValueError:
+            limit = 100
+        target = request.query_params.get("target") or None
+        rows = await daemon.ledger.recent_probe_results(target=target, limit=limit)
+        return JSONResponse({"probes": rows})
+
+    @app.get("/p/{ph}/turn-metrics")
+    async def project_turn_metrics(
+        request: Request, ph: str
+    ) -> JSONResponse:
+        """Recent per-turn metrics for a project.
+
+        Optional ``model`` query param filters to a single model so the
+        Platform view can chart "this model over time" without mixing
+        models on the same series.
+        """
+        daemon = request.app.state.daemon
+        model = request.query_params.get("model") or None
+        try:
+            limit = int(request.query_params.get("limit", "200") or 200)
+        except ValueError:
+            limit = 200
+        rows = await daemon.ledger.turn_metrics_for_project(
+            ph, model=model, limit=limit
+        )
+        return JSONResponse({"metrics": rows})
+
     @app.get("/p/{ph}/live/{session_id}/state")
     async def live_state(request: Request, ph: str, session_id: str) -> JSONResponse:
         daemon = request.app.state.daemon

@@ -106,6 +106,15 @@ class Config:
     live_sse_replay_events: int = 100
     live_sse_keepalive_seconds: float = 20.0
 
+    # v0.2 Platform probe worker. Probes the *local* LLM endpoint only
+    # — synthetic probes against ``api.anthropic.com`` would mostly
+    # measure ISP / CDN edge variance, not service health, so we
+    # deliberately don't ping it. The local endpoint is what we
+    # control and what rubric quality silently depends on.
+    probe_interval_seconds: float = 30.0
+    probe_timeout_seconds: float = 5.0
+    probe_enabled: bool = True
+
     @classmethod
     def default(cls) -> Config:
         return cls()

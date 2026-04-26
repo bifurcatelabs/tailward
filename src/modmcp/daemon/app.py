@@ -57,6 +57,8 @@ class Daemon:
         self.scope = None
         self.rubric = None
         self.session_close = None
+        # v0.2 platform probe worker.
+        self.probe = None
         # Live event bus; persister is attached after ledger connects.
         cfg = get_config()
         self.live = LiveBus(
@@ -328,6 +330,13 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning("session-close detector unavailable: %s", e)
 
+        try:
+            from .probe_worker import ProbeWorker
+            daemon.probe = ProbeWorker(daemon)
+            await daemon.probe.start()
+        except Exception as e:
+            log.warning("probe worker unavailable: %s", e)
+
         log.info("modmcp daemon started (mode=%s)", get_config().warden_mode)
         try:
             yield
@@ -346,6 +355,8 @@ def create_app() -> FastAPI:
                 await daemon.rubric.stop()
             if daemon.session_close:
                 await daemon.session_close.stop()
+            if daemon.probe:
+                await daemon.probe.stop()
             await daemon.ledger.close()
             log.info("modmcp daemon stopped")
 

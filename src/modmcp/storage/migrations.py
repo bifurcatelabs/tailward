@@ -265,4 +265,21 @@ SCHEMA_STATEMENTS: list[str] = [
     CREATE INDEX IF NOT EXISTS idx_turn_metrics_project_model
         ON turn_metrics(project_hash, model, id);
     """,
+    # ---- v0.2 platform probes ----
+    """
+    CREATE TABLE IF NOT EXISTS probe_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target TEXT NOT NULL,
+        url TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('ok','timeout','error')),
+        latency_ms INTEGER,
+        detail TEXT,
+        error TEXT,
+        ts TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_probe_results_target_id
+        ON probe_results(target, id);
+    """,
 ]

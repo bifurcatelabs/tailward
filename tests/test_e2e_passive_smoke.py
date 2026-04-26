@@ -469,6 +469,41 @@ def _stamped_msg(
     return out
 
 
+def test_probe_worker_records_unreachable_endpoint_as_error(
+    tmp_path: Path,
+) -> None:
+    """Probe worker logs an error row when the configured endpoint
+    is unreachable. Test environment points at an obviously-dead port
+    so the worker hits the connection-refused branch quickly."""
+    home = tmp_path / "modmcp_home"
+    cfg_text = home.joinpath("config.toml").read_text(encoding="utf-8")
+    home.joinpath("config.toml").write_text(
+        cfg_text + (
+            '\n'
+            'qwen_endpoint = "http://127.0.0.1:1/v1"\n'
+            'probe_interval_seconds = 0.1\n'
+            'probe_timeout_seconds = 0.5\n'
+        ),
+        encoding="utf-8",
+    )
+    from modmcp import config as cfg_mod
+    cfg_mod._cached = None
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        def _probes() -> list[dict]:
+            return _run(daemon.ledger.recent_probe_results(target="local_llm"))
+
+        assert _wait_until(lambda: len(_probes()) >= 1, timeout=5.0), (
+            "probe worker did not record any result"
+        )
+        latest = _probes()[-1]
+        assert latest["target"] == "local_llm"
+        assert latest["status"] in ("error", "timeout")
+        assert latest["error"], "expected an error message on a dead endpoint"
+
+
 def test_turn_metrics_derived_from_timestamps_and_usage(
     metric_project: Path, metric_jsonl: Path
 ) -> None:

@@ -653,6 +653,42 @@ class Ledger:
             rows = await cur.fetchall()
         return list(reversed([dict(r) for r in rows]))
 
+    # ------- probe_results (v0.2 platform) -------
+
+    async def record_probe_result(
+        self,
+        target: str,
+        url: str,
+        *,
+        status: str,
+        latency_ms: int | None,
+        detail: str | None,
+        error: str | None,
+    ) -> int:
+        cur = await self.conn.execute(
+            """INSERT INTO probe_results(
+                 target, url, status, latency_ms, detail, error, ts
+               ) VALUES(?, ?, ?, ?, ?, ?, ?)""",
+            (target, url, status, latency_ms, detail, error, _now_iso()),
+        )
+        await self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    async def recent_probe_results(
+        self, *, target: str | None = None, limit: int = 200
+    ) -> list[dict]:
+        if target is not None:
+            sql = """SELECT * FROM probe_results
+                     WHERE target=? ORDER BY id DESC LIMIT ?"""
+            params: tuple = (target, limit)
+        else:
+            sql = """SELECT * FROM probe_results
+                     ORDER BY id DESC LIMIT ?"""
+            params = (limit,)
+        async with self.conn.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
     async def latest_session_for_project(self, project_hash: str) -> str | None:
         async with self.conn.execute(
             """SELECT session_id FROM session_state WHERE project_hash=?
