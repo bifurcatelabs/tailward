@@ -583,6 +583,76 @@ class Ledger:
             rows = await cur.fetchall()
         return list(reversed([dict(r) for r in rows]))
 
+    # ------- turn_metrics (v0.2 inference path) -------
+
+    async def record_turn_metric(
+        self,
+        session_id: str,
+        project_hash: str,
+        *,
+        message_id: str | None,
+        turn_idx: int | None,
+        model: str | None,
+        stop_reason: str | None,
+        prompt_to_response_ms: int | None,
+        response_duration_ms: int | None,
+        input_tokens: int,
+        output_tokens: int,
+        cache_read_tokens: int,
+        cache_creation_tokens: int,
+        output_tps: float | None,
+        cache_hit_ratio: float | None,
+        first_block_at: str | None,
+        last_block_at: str | None,
+    ) -> int:
+        cur = await self.conn.execute(
+            """INSERT INTO turn_metrics(
+                 session_id, project_hash, message_id, turn_idx, model,
+                 stop_reason, prompt_to_response_ms, response_duration_ms,
+                 input_tokens, output_tokens, cache_read_tokens,
+                 cache_creation_tokens, output_tps, cache_hit_ratio,
+                 first_block_at, last_block_at, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session_id, project_hash, message_id, turn_idx, model,
+                stop_reason, prompt_to_response_ms, response_duration_ms,
+                input_tokens, output_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tps, cache_hit_ratio,
+                first_block_at, last_block_at, _now_iso(),
+            ),
+        )
+        await self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    async def turn_metrics_for_session(
+        self, session_id: str, *, limit: int = 200
+    ) -> list[dict]:
+        async with self.conn.execute(
+            """SELECT * FROM turn_metrics
+               WHERE session_id=?
+               ORDER BY id LIMIT ?""",
+            (session_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def turn_metrics_for_project(
+        self, project_hash: str, *, model: str | None = None, limit: int = 500
+    ) -> list[dict]:
+        if model is not None:
+            sql = """SELECT * FROM turn_metrics
+                     WHERE project_hash=? AND model=?
+                     ORDER BY id DESC LIMIT ?"""
+            params: tuple = (project_hash, model, limit)
+        else:
+            sql = """SELECT * FROM turn_metrics
+                     WHERE project_hash=?
+                     ORDER BY id DESC LIMIT ?"""
+            params = (project_hash, limit)
+        async with self.conn.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
     async def latest_session_for_project(self, project_hash: str) -> str | None:
         async with self.conn.execute(
             """SELECT session_id FROM session_state WHERE project_hash=?

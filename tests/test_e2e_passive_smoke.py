@@ -413,6 +413,146 @@ def test_logical_turn_coalescing_and_usage_capture(
         )
 
 
+TURN_METRIC_SESSION_ID = "session-metrics-001"
+
+
+@pytest.fixture
+def metric_jsonl(tmp_path: Path) -> Path:
+    claude_root = Path(os.environ["CLAUDE_PROJECTS_ROOT"])
+    sess_dir = claude_root / "metric-project-sanitized"
+    sess_dir.mkdir(parents=True)
+    f = sess_dir / f"{TURN_METRIC_SESSION_ID}.jsonl"
+    f.touch()
+    return f
+
+
+@pytest.fixture
+def metric_project(tmp_path: Path) -> Path:
+    proj = tmp_path / "metric-project"
+    proj.mkdir()
+    return proj
+
+
+def _stamped_msg(
+    cwd: str,
+    session_id: str,
+    role: str,
+    *,
+    timestamp: str,
+    content_blocks: list[dict] | None = None,
+    text: str | None = None,
+    message_id: str | None = None,
+    model: str | None = None,
+    usage: dict | None = None,
+    stop_reason: str | None = None,
+) -> dict:
+    out: dict = {
+        "type": "user" if role == "user" else "assistant",
+        "sessionId": session_id,
+        "cwd": cwd,
+        "timestamp": timestamp,
+    }
+    msg: dict = {"role": role}
+    if message_id:
+        msg["id"] = message_id
+    if model:
+        msg["model"] = model
+    if usage:
+        msg["usage"] = usage
+    if stop_reason:
+        msg["stop_reason"] = stop_reason
+    if content_blocks is not None:
+        msg["content"] = content_blocks
+    elif text is not None:
+        msg["content"] = text
+    out["message"] = msg
+    return out
+
+
+def test_turn_metrics_derived_from_timestamps_and_usage(
+    metric_project: Path, metric_jsonl: Path
+) -> None:
+    """One assistant turn closes when the next user_message arrives.
+
+    Drives: user_msg @ T0, then assistant blocks (thinking, text,
+    tool_use) at T+0.5s, T+1.5s, T+2.0s sharing one message_id, then
+    a user reply that closes the turn. Asserts:
+
+    1. exactly one turn_metrics row exists for the session
+    2. prompt_to_response_ms ≈ 500
+    3. response_duration_ms ≈ 1500 (first-to-last block)
+    4. output_tps reflects output_tokens / response_duration
+    5. cache_hit_ratio computed from usage block
+    """
+    cwd = str(metric_project)
+    usage = {
+        "input_tokens": 50,
+        "output_tokens": 300,
+        "cache_read_input_tokens": 9000,
+        "cache_creation_input_tokens": 100,
+    }
+
+    events = [
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "user",
+            text="hey",
+            timestamp="2026-04-25T18:00:00.000+00:00",
+        ),
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "assistant",
+            content_blocks=[{"type": "thinking", "thinking": "..."}],
+            timestamp="2026-04-25T18:00:00.500+00:00",
+            message_id="msg_M1", model="claude-opus-4-7",
+            usage=usage, stop_reason="end_turn",
+        ),
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "assistant",
+            content_blocks=[{"type": "text", "text": "Sure."}],
+            timestamp="2026-04-25T18:00:01.500+00:00",
+            message_id="msg_M1", model="claude-opus-4-7",
+            usage=usage, stop_reason="end_turn",
+        ),
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "assistant",
+            content_blocks=[{"type": "text", "text": " More text."}],
+            timestamp="2026-04-25T18:00:02.000+00:00",
+            message_id="msg_M1", model="claude-opus-4-7",
+            usage=usage, stop_reason="end_turn",
+        ),
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "user",
+            text="ok",
+            timestamp="2026-04-25T18:00:03.000+00:00",
+        ),
+    ]
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+        daemon.qwen = None
+        _append_jsonl(metric_jsonl, events)
+
+        def _metrics() -> list[dict]:
+            return _run(daemon.ledger.turn_metrics_for_session(TURN_METRIC_SESSION_ID))
+
+        assert _wait_until(lambda: len(_metrics()) == 1, timeout=8.0), (
+            f"expected exactly one turn_metric row, got: {_metrics()}"
+        )
+        row = _metrics()[0]
+        assert row["message_id"] == "msg_M1"
+        assert row["model"] == "claude-opus-4-7"
+        # 500ms between user prompt and first assistant block
+        assert 400 <= row["prompt_to_response_ms"] <= 700, row
+        # 1500ms between first and last assistant block (T+0.5 to T+2.0)
+        assert 1300 <= row["response_duration_ms"] <= 1700, row
+        # output_tokens=300 over ~1.5s -> ~200 tps
+        assert row["output_tps"] is not None and 150 <= row["output_tps"] <= 250, row
+        # Cache hit ratio: 9000 / (9000 + 50 + 100) ≈ 0.9836
+        assert row["cache_hit_ratio"] is not None
+        assert 0.97 <= row["cache_hit_ratio"] <= 0.99, row
+        assert row["output_tokens"] == 300
+        assert row["cache_read_tokens"] == 9000
+
+
 RESTART_SESSION_ID = "session-restart-001"
 
 

@@ -231,4 +231,38 @@ SCHEMA_STATEMENTS: list[str] = [
     CREATE INDEX IF NOT EXISTS idx_live_events_session
         ON live_events(session_id, id);
     """,
+    # ---- v0.2 inference-path metrics ----
+    """
+    CREATE TABLE IF NOT EXISTS turn_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        project_hash TEXT NOT NULL,
+        message_id TEXT,
+        turn_idx INTEGER,
+        model TEXT,
+        stop_reason TEXT,
+        -- Wall-clock metrics derived from JSONL timestamps
+        prompt_to_response_ms INTEGER,
+        response_duration_ms INTEGER,
+        -- Token metrics from the assistant's usage block
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+        -- Derived
+        output_tps REAL,
+        cache_hit_ratio REAL,
+        first_block_at TEXT,
+        last_block_at TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_turn_metrics_session
+        ON turn_metrics(session_id, id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_turn_metrics_project_model
+        ON turn_metrics(project_hash, model, id);
+    """,
 ]

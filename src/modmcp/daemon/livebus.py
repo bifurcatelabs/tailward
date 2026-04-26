@@ -45,6 +45,7 @@ EVENT_TYPES: frozenset[str] = frozenset(
         "drift",
         "claim",
         "session_closed",
+        "turn_metric",
     }
 )
 

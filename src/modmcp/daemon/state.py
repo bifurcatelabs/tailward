@@ -39,6 +39,15 @@ class SessionState:
     # in the feed.
     last_turn_emit_msg_id: str | None = None
 
+    # In-flight assistant turn used to derive per-turn metrics
+    # (prompt_to_response_ms, response_duration_ms, output_tps,
+    # cache_hit_ratio). Closed and persisted to the turn_metrics table
+    # when the next logical turn starts or a user_message arrives.
+    in_flight_turn: dict[str, Any] | None = None
+    # Wall-clock of the most recent user_message (datetime). Pairs with
+    # the next assistant turn's first block to compute prompt latency.
+    last_user_msg_at: datetime | None = None
+
     def record_tool_call(self, name: str, tool_input: dict[str, Any] | None) -> None:
         self.recent_tool_calls.append(
             {"name": name, "input": tool_input or {}, "at": datetime.utcnow().isoformat()}

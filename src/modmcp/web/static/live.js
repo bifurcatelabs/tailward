@@ -111,6 +111,11 @@
 
         session_closed: (p) => `<div class="feed-meta"><span class="feed-kind kind-session_closed">session closed</span><span>${fmtTime()}</span></div>
             <div class="muted">consolidation complete</div>`,
+
+        // "turn_metric" is consumed by the v0.2 Platform view (Svelte).
+        // The legacy live.js intentionally has no renderer for it so
+        // the feed isn't polluted with metric events; the SSE handler
+        // skips subscribing to types absent from this map.
     };
 
     // ------------ side-effects on the right rail / stats ------------
