@@ -54,7 +54,7 @@
   {:else if view === 'reflection'}
     <ReflectionView />
   {:else if view === 'platform'}
-    <PlatformView />
+    <PlatformView {ph} />
   {/if}
 </div>
 
