@@ -1,31 +1,33 @@
-{% extends "base.html" %}
-{% block title %}live v2 — {{ session_id[:8] }}{% endblock %}
-{% block content %}
-{#
-  v0.2 chassis surface. The Svelte bundle (built into
-  /static/dist/) takes over from #app and reads the project hash and
-  session id from the data attributes — same contract as live.html's
-  vanilla JS, just consumed by a different runtime.
-
-  This template stays minimal on purpose: any structural HTML belongs
-  in the Svelte components so the v2 surface owns its own DOM.
-#}
-<div id="app"
-     data-ph="{{ ph }}"
-     data-session-id="{{ session_id }}"></div>
-
-{# Vite emits a manifest.json mapping "index.html" -> the hashed
-   bundle. Try the manifest first; fall back to a build-time guess so
-   "things show up" even if the manifest hasn't been generated yet. #}
-{% if v2_bundle_js %}
-<script type="module" src="{{ v2_bundle_js }}"></script>
-{% if v2_bundle_css %}
-<link rel="stylesheet" href="{{ v2_bundle_css }}">
-{% endif %}
-{% else %}
-<p style="margin:32px;font-family:ui-monospace,monospace;color:#eb5757">
-  v0.2 bundle not built. Run <code>npm install &amp;&amp; npm run build</code>
-  inside <code>frontend/</code>, then reload.
-</p>
-{% endif %}
-{% endblock %}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>warden · {{ session_id[:8] }}</title>
+  {#
+    The v0.2 surface is intentionally NOT extending base.html. The
+    Svelte app owns every visible piece of chrome (header, tabs,
+    panels, footers), so wrapping it with the legacy template would
+    only inject things that no longer apply: the "modmcp" wordmark,
+    the warden_mode pill (passive is now the only product surface),
+    the v1.1 nav strip, and an htmx <script src="cdn..."> that
+    contradicts the local-first posture of the rest of the daemon.
+  #}
+  {% if v2_bundle_css %}
+  <link rel="stylesheet" href="{{ v2_bundle_css }}">
+  {% endif %}
+</head>
+<body>
+  <div id="app"
+       data-ph="{{ ph }}"
+       data-session-id="{{ session_id }}"></div>
+  {% if v2_bundle_js %}
+  <script type="module" src="{{ v2_bundle_js }}"></script>
+  {% else %}
+  <p style="margin:32px;font-family:ui-monospace,monospace;color:#eb5757">
+    v0.2 bundle not built. Run <code>npm install &amp;&amp; npm run build</code>
+    inside <code>frontend/</code>, then reload.
+  </p>
+  {% endif %}
+</body>
+</html>
