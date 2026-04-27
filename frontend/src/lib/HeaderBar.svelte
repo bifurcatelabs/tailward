@@ -1,5 +1,6 @@
 <script>
   import { live } from './live.svelte.js';
+  import SessionPicker from './SessionPicker.svelte';
   let { ph, sessionId } = $props();
 </script>
 
@@ -48,6 +49,8 @@
     {/if}
   </div>
 
+  <SessionPicker {ph} {sessionId} />
+
   <div class="conn conn-{live.conn}">
     <span class="pulse"></span>
     <span class="conn-label">{live.conn}</span>
@@ -62,6 +65,10 @@
     padding: 16px 24px;
     border-bottom: 1px solid var(--border);
     backdrop-filter: blur(8px);
+    /* Sit above page content (charts, canvases) so the picker
+       panel can overlay the body cleanly. */
+    position: relative;
+    z-index: 100;
   }
   .brand {
     display: flex;

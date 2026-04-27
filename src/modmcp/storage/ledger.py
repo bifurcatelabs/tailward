@@ -816,3 +816,22 @@ class Ledger:
         ) as cur:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    async def recent_sessions(self, limit: int = 30) -> list[dict]:
+        """Recent sessions across all projects, newest first.
+
+        Powers the v0.2 HeaderBar session picker, which lets the user
+        jump between active and recent sessions across the projects
+        Warden is watching. Returns the columns the picker actually
+        renders — id, project, recency, model, turn count — so the
+        frontend doesn't paint a heavy row.
+        """
+        async with self.conn.execute(
+            """SELECT session_id, project_hash, project_path, started_at,
+                      last_seen_at, last_model, turns_seen
+               FROM session_state
+               ORDER BY last_seen_at DESC LIMIT ?""",
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]

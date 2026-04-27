@@ -48,3 +48,35 @@ async def test_record_claim_and_drift() -> None:
         assert rows[0]["severity"] == "med"
     finally:
         await ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_recent_sessions_spans_projects_in_recency_order() -> None:
+    """recent_sessions powers the cross-project picker; rows from
+    different projects must interleave by last_seen_at, newest first."""
+    import asyncio as _asyncio
+
+    ledger = Ledger()
+    await ledger.connect()
+    try:
+        await ledger.upsert_session("s-old", "ph-A", "/proj/A")
+        # Tiny delay so last_seen_at differs at second resolution.
+        await _asyncio.sleep(1.05)
+        await ledger.upsert_session("s-mid", "ph-B", "/proj/B")
+        await _asyncio.sleep(1.05)
+        await ledger.upsert_session("s-new", "ph-A", "/proj/A")
+
+        rows = await ledger.recent_sessions(limit=10)
+        ids = [r["session_id"] for r in rows]
+        assert ids[0] == "s-new"
+        assert ids[1] == "s-mid"
+        assert ids[2] == "s-old"
+
+        # Required columns the picker renders.
+        for r in rows:
+            assert "project_hash" in r
+            assert "project_path" in r
+            assert "last_seen_at" in r
+            assert "turns_seen" in r
+    finally:
+        await ledger.close()

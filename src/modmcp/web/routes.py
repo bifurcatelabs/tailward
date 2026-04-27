@@ -377,6 +377,25 @@ def mount_web(app: FastAPI) -> None:
         rows = await daemon.ledger.llm_call_metrics_summary()
         return JSONResponse({"by_kind": rows})
 
+    @app.get("/v2/sessions/recent")
+    async def v2_recent_sessions(request: Request) -> JSONResponse:
+        """Recent sessions across all watched projects, newest first.
+
+        Powers the v0.2 HeaderBar session picker. Cross-project by
+        design — the picker is the affordance for jumping between
+        sessions when reviewing multiple projects' audit signal.
+        Default limit reflects "what fits in a small panel"; raise
+        via ?limit= for the Reflection-view sessions table when that
+        lands.
+        """
+        daemon = request.app.state.daemon
+        try:
+            limit = int(request.query_params.get("limit", "30") or 30)
+        except ValueError:
+            limit = 30
+        rows = await daemon.ledger.recent_sessions(limit=limit)
+        return JSONResponse({"sessions": rows})
+
     @app.get("/probes/recent")
     async def probes_recent(request: Request) -> JSONResponse:
         """Recent probe results across all targets, oldest first.

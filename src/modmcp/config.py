@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from .paths import atomic_write_text, config_path, ensure_layout
@@ -96,6 +96,24 @@ class Config:
     # Transcript watcher: how many projects we will watch simultaneously.
     max_watch_projects: int = 32
 
+    # Project scope filters. Default empty lists = watch every project
+    # under ``~/.claude/projects/``. Both lists accept entries in either
+    # form: the sanitized folder name as Claude Code stores it
+    # (e.g. ``C--myproject``) or the absolute project path
+    # (e.g. ``C:/code/myproject``). Match is exact and case-sensitive.
+    #
+    # Semantics: ``watch_paths`` whitelists (when non-empty, only listed
+    # projects are watched). ``exclude_paths`` blacklists (always applies).
+    # An entry in both is excluded.
+    #
+    # Use cases:
+    #   * a personal box that also has work projects you don't want
+    #     audited locally → put work paths in ``exclude_paths``.
+    #   * a focused dogfooding setup → list only the project(s) you're
+    #     actively reviewing in ``watch_paths``.
+    watch_paths: list[str] = field(default_factory=list)
+    exclude_paths: list[str] = field(default_factory=list)
+
     # Phase 2 defaults.
     phase2_turns_default: int = 8
     drift_threshold: float = 0.35  # pattern-score above which LLM check runs
@@ -163,6 +181,12 @@ class Config:
                 lines.append(f'{key} = "{escaped}"')
             elif isinstance(value, bool):
                 lines.append(f"{key} = {'true' if value else 'false'}")
+            elif isinstance(value, list):
+                items = ", ".join(
+                    '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+                    for v in value
+                )
+                lines.append(f"{key} = [{items}]")
             else:
                 lines.append(f"{key} = {value}")
         return "\n".join(lines) + "\n"

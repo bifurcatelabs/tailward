@@ -291,7 +291,14 @@ def create_app() -> FastAPI:
                     },
                 )
 
-        daemon.watcher = TranscriptWatcher(daemon.state, daemon.ledger, on_event=on_event)
+        cfg = get_config()
+        daemon.watcher = TranscriptWatcher(
+            daemon.state,
+            daemon.ledger,
+            on_event=on_event,
+            watch_paths=cfg.watch_paths,
+            exclude_paths=cfg.exclude_paths,
+        )
         await daemon.watcher.start()
 
         # Lazy init of M5+ workers if their deps are importable.
