@@ -28,6 +28,39 @@ log = logging.getLogger(__name__)
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]{2,}")
 
 
+# Single source of truth for the drift verdict prompt; surfaced
+# verbatim in /llm-profiles. The system text is static; runtime data
+# lands via PROMPT_USER_TEMPLATE.format(...).
+PROMPT_SYSTEM: str = (
+    "You score whether ONE assistant turn is on-track for the active goal. "
+    "DEFAULT answer is \"low\" (on-track). Most turns are low. "
+    "Escalate ONLY with clear evidence.\n"
+    "\n"
+    "low  — turn advances the goal OR an open thread; asks a clarifying "
+    "       question about the goal; verifies a claim; explains a design "
+    "       decision relevant to the goal; refuses an off-goal request; "
+    "       runs a tool that supports the goal. Cautious / slow / "
+    "       analytical turns are LOW, not higher.\n"
+    "med  — turn does useful work but on something clearly outside all "
+    "       open threads (tangential refactor, unrelated topic).\n"
+    "high — turn makes a false completion claim, contradicts an Active "
+    "       Rule, or pivots entirely to an unrelated goal without "
+    "       explicit scope-change from the user.\n"
+    "\n"
+    "Return JSON only: "
+    "{\"severity\":\"low|med|high\",\"detail\":\"one short sentence naming "
+    "the specific evidence\",\"corrective\":\"<=25 words or empty\"}. "
+    "If severity is low, corrective MUST be empty."
+)
+PROMPT_USER_TEMPLATE: str = (
+    "Active Goal:\n{goal}\n\n"
+    "Open Threads:\n{threads}\n\n"
+    "Active Rules:\n{active_rules}\n\n"
+    "Session mode: {session_mode}\n\n"
+    "Assistant turn:\n{assistant_text}"
+)
+
+
 def _tokens(text: str) -> set[str]:
     return {m.group(0).lower() for m in _WORD_RE.finditer(text or "")}
 
@@ -205,36 +238,17 @@ class DriftWorker:
             )
             return DriftVerdict(severity, pattern_score, "heuristic-only", corrective)
 
-        system = (
-            "You score whether ONE assistant turn is on-track for the active goal. "
-            "DEFAULT answer is \"low\" (on-track). Most turns are low. "
-            "Escalate ONLY with clear evidence.\n"
-            "\n"
-            "low  — turn advances the goal OR an open thread; asks a clarifying "
-            "       question about the goal; verifies a claim; explains a design "
-            "       decision relevant to the goal; refuses an off-goal request; "
-            "       runs a tool that supports the goal. Cautious / slow / "
-            "       analytical turns are LOW, not higher.\n"
-            "med  — turn does useful work but on something clearly outside all "
-            "       open threads (tangential refactor, unrelated topic).\n"
-            "high — turn makes a false completion claim, contradicts an Active "
-            "       Rule, or pivots entirely to an unrelated goal without "
-            "       explicit scope-change from the user.\n"
-            "\n"
-            "Return JSON only: "
-            "{\"severity\":\"low|med|high\",\"detail\":\"one short sentence naming "
-            "the specific evidence\",\"corrective\":\"<=25 words or empty\"}. "
-            "If severity is low, corrective MUST be empty."
-        )
-        user = (
-            f"Active Goal:\n{goal}\n\n"
-            f"Open Threads:\n{threads}\n\n"
-            f"Active Rules:\n{intent.sections.get('Active Rules', '')}\n\n"
-            f"Session mode: {intent.front.session_mode}\n\n"
-            f"Assistant turn:\n{ev.text[:4000]}"
+        user = PROMPT_USER_TEMPLATE.format(
+            goal=goal,
+            threads=threads,
+            active_rules=intent.sections.get("Active Rules", ""),
+            session_mode=intent.front.session_mode,
+            assistant_text=ev.text[:4000],
         )
         try:
-            payload = await self._daemon.qwen.complete_json(system, user, kind="drift")
+            payload = await self._daemon.qwen.complete_json(
+                PROMPT_SYSTEM, user, kind="drift"
+            )
             severity = payload.get("severity", "low")
             if severity not in ("low", "med", "high"):
                 severity = "low"

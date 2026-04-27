@@ -345,6 +345,23 @@ def mount_web(app: FastAPI) -> None:
     # v0.2 Platform endpoints — global telemetry not scoped to a session
     # ------------------------------------------------------------------
 
+    @app.get("/llm-profiles")
+    async def llm_profiles(request: Request) -> JSONResponse:
+        """Per-call-kind config + verbatim prompts.
+
+        Surfaces what Warden itself is sending to the local LLM —
+        model, sampler params, max_tokens, thinking on/off, plus the
+        unredacted system prompt and user-prompt template for each of
+        synth / drift / query / rubric / consolidator. Read by the
+        Platform view's transparency panel.
+        """
+        from ..daemon.llm_profiles import all_profiles, endpoint_summary
+
+        return JSONResponse({
+            "endpoint": endpoint_summary(),
+            "profiles": all_profiles(),
+        })
+
     @app.get("/llm-metrics/summary")
     async def llm_metrics_summary(request: Request) -> JSONResponse:
         """Per-call-kind aggregates of LLM call instrumentation.

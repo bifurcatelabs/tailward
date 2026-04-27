@@ -24,6 +24,16 @@ log = logging.getLogger(__name__)
 mcp_app = FastMCP("modmcp")
 
 
+# Single source of truth for the query_intent prompt; surfaced
+# verbatim in /llm-profiles. Runtime user prompt built via
+# ``PROMPT_USER_TEMPLATE.format(body=..., question=...)``.
+PROMPT_SYSTEM: str = (
+    "Answer the user's question using only the captured intent document provided. "
+    "Be concise. If the document does not contain the answer, say so explicitly."
+)
+PROMPT_USER_TEMPLATE: str = "Captured intent:\n{body}\n\nQuestion: {question}"
+
+
 def _current_project() -> str:
     return os.environ.get("MODMCP_PROJECT") or os.getcwd()
 
@@ -76,12 +86,8 @@ async def query_intent(question: str) -> str:
 
         qwen = QwenClient()
         body = "\n\n".join(f"## {s}\n{intent.sections.get(s, '').strip()}" for s in SECTIONS)
-        system = (
-            "Answer the user's question using only the captured intent document provided. "
-            "Be concise. If the document does not contain the answer, say so explicitly."
-        )
-        user = f"Captured intent:\n{body}\n\nQuestion: {question}"
-        answer = await qwen.complete(system, user, kind="query")
+        user = PROMPT_USER_TEMPLATE.format(body=body, question=question)
+        answer = await qwen.complete(PROMPT_SYSTEM, user, kind="query")
         return answer.strip()
     except Exception as e:
         log.info("qwen unavailable for query_intent (%s); keyword fallback", e)
