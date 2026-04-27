@@ -185,25 +185,27 @@ def test_live_replay_returns_tail_not_prefix(tmp_path: Path) -> None:
         )
 
 
-def test_live_v2_page_renders_chassis(tmp_path: Path) -> None:
-    """v0.2 Svelte chassis route serves a page with the mount node and
-    either a bundle script tag (if dist/ is built) or the build-hint
-    fallback. The route must not 500 in either state."""
-    proj = tmp_path / "v2"
+def test_live_page_serves_svelte_chassis(tmp_path: Path) -> None:
+    """The canonical ``/p/<ph>/live/<sid>`` URL serves the Svelte SPA
+    bundle (formerly the ``/v2`` suffix). The route must render the
+    mount node and either a bundle script tag (if ``dist/`` is built)
+    or the build-hint fallback — never 500 if the bundle is missing.
+    """
+    proj = tmp_path / "live-page"
     proj.mkdir()
     ph = _seed(proj)
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
 
         async def _seed_session():
-            await daemon.ledger.upsert_session("s-v2", ph, str(proj))
+            await daemon.ledger.upsert_session("s-live", ph, str(proj))
 
         _run(_seed_session())
 
-        r = client.get(f"/p/{ph}/live/s-v2/v2")
+        r = client.get(f"/p/{ph}/live/s-live")
         assert r.status_code == 200
         assert f'data-ph="{ph}"' in r.text
-        assert 'data-session-id="s-v2"' in r.text
+        assert 'data-session-id="s-live"' in r.text
         # Either a bundle script (dist built) or the build-hint message
         # — both are acceptable; a route that 500s when the bundle is
         # missing would be the regression we care about.

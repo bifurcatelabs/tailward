@@ -6,7 +6,7 @@
    * projects so the user can jump between them.
    *
    * No live re-connect (yet) — clicking navigates to that session's
-   * /v2 URL, which boots a fresh load. Simpler than swapping the
+   * page URL, which boots a fresh load. Simpler than swapping the
    * `live` store mid-session and good enough for the "review prior
    * sessions" use case the picker is built for.
    */
@@ -77,7 +77,7 @@
   }
 
   function urlFor(s) {
-    return `/p/${s.project_hash}/live/${s.session_id}/v2`;
+    return `/p/${s.project_hash}/live/${s.session_id}`;
   }
 
   function isActive(s) {

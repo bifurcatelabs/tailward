@@ -49,6 +49,10 @@ full cutover sequence.
 
 ### Changed
 
+- **Live URL collapsed** `/p/<ph>/live/<sid>/v2` → `/p/<ph>/live/<sid>`.
+  The Svelte chassis is now the canonical live audit surface; the
+  `/v2` URL stays as a 308 redirect for bookmarks. Template renamed
+  `live_v2.html` → `live.html`.
 - **CLI binary renamed** `modmcp` → `warden`. `modmcp` kept as a
   backward-compat alias so wired-up Claude Code hook configs keep
   working; both binaries invoke the same entry point. Slated for

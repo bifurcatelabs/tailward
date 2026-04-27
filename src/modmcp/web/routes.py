@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -151,16 +151,17 @@ def mount_web(app: FastAPI) -> None:
         )
 
     # ------------------------------------------------------------------
-    # Live session view — v0.2 Svelte chassis
+    # Live session view — Svelte chassis at the canonical URL
     # ------------------------------------------------------------------
 
-    @app.get("/p/{ph}/live/{session_id}/v2", response_class=HTMLResponse)
-    async def live_session_v2(request: Request, ph: str, session_id: str) -> HTMLResponse:
-        """v0.2 chassis surface — Svelte bundle takes over from ``#app``.
+    @app.get("/p/{ph}/live/{session_id}", response_class=HTMLResponse)
+    async def live_session(request: Request, ph: str, session_id: str) -> HTMLResponse:
+        """Live audit surface for a session.
 
-        Made the canonical live surface in v2.0.0; the legacy v1.1 Jinja
-        ``live.html`` + ``live.js`` partial-renderer were deleted in the
-        same release.
+        Serves the Svelte SPA bundle from ``frontend/dist/``. The
+        legacy v1.1 Jinja audit page that used to live at this URL was
+        retired in v2.0.0; the Svelte chassis (formerly at the
+        ``/v2`` suffix) is now the only live UI.
         """
         daemon = request.app.state.daemon
         session = await daemon.ledger.get_session(session_id)
@@ -169,7 +170,7 @@ def mount_web(app: FastAPI) -> None:
         bundle_js, bundle_css = _resolve_v2_bundle()
         return templates.TemplateResponse(
             request,
-            "live_v2.html",
+            "live.html",
             {
                 **_base_ctx(),
                 "ph": ph,
@@ -179,6 +180,13 @@ def mount_web(app: FastAPI) -> None:
                 "v2_bundle_css": bundle_css,
             },
         )
+
+    @app.get("/p/{ph}/live/{session_id}/v2")
+    async def live_session_v2_legacy(ph: str, session_id: str) -> RedirectResponse:
+        """Backward-compat redirect: the Svelte chassis used to live at
+        ``/v2``; in v2.0.0 it became the default. 308 keeps any bookmarks
+        working without a content-type ambiguity."""
+        return RedirectResponse(url=f"/p/{ph}/live/{session_id}", status_code=308)
 
     @app.get("/p/{ph}/live/{session_id}/stream")
     async def live_stream(request: Request, ph: str, session_id: str):
