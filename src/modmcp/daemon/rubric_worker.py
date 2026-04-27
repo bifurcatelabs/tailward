@@ -39,28 +39,38 @@ DIMENSIONS: list[tuple[str, str]] = [
 ]
 
 
-# Prompt template — single source of truth for the rubric system prompt.
-# The /llm-profiles route surfaces this verbatim so the user can see
-# what Warden is asking the local LLM. Built once at import time from
-# the (static) DIMENSIONS list.
-PROMPT_SYSTEM: str = (
-    "You are a judge evaluating ONE assistant turn against four "
-    "dimensions of trustworthy coding behavior. Return JSON ONLY:\n"
-    "{\n"
-    + ",\n".join(
-        f'  "{name}": {{"score": <0-5 integer>, "evidence": "<short quote or fact>", "suggestion": "<<=25 words>"}}'
-        for name, _ in DIMENSIONS
+def _build_system_prompt(active_dims: tuple[str, ...]) -> str:
+    """Build the rubric system prompt for a specific subset of
+    dimensions. Used at runtime so mode-aware profiles can ask the
+    LLM to score only the dimensions that apply (e.g. exploration
+    mode drops 'maintainability' as a category error)."""
+    return (
+        "You are a judge evaluating ONE assistant turn against "
+        f"{len(active_dims)} dimension(s) of trustworthy coding behavior. "
+        "Return JSON ONLY:\n"
+        "{\n"
+        + ",\n".join(
+            f'  "{name}": {{"score": <0-5 integer>, "evidence": "<short quote or fact>", "suggestion": "<<=25 words>"}}'
+            for name in active_dims
+        )
+        + "\n}\n"
+        "Scoring:\n"
+        "  0 — absent or contradicted outright\n"
+        "  3 — average; present but incomplete\n"
+        "  5 — explicit, evidenced, and unambiguous\n"
+        "Default to 3 when uncertain. Do not inflate scores for neutral "
+        "prose. If the turn is purely tool-call noise, score every "
+        "dimension 3 with suggestion empty.\n"
+        "Evidence must be a short verbatim or paraphrase from THIS turn.\n"
     )
-    + "\n}\n"
-    "Scoring:\n"
-    "  0 — absent or contradicted outright\n"
-    "  3 — average; present but incomplete\n"
-    "  5 — explicit, evidenced, and unambiguous\n"
-    "Default to 3 when uncertain. Do not inflate scores for neutral "
-    "prose. If the turn is purely tool-call noise, score every "
-    "dimension 3 with suggestion empty.\n"
-    "Evidence must be a short verbatim or paraphrase from THIS turn.\n"
-)
+
+
+# Canonical (build-mode / full) form of the system prompt. Surfaced
+# in /llm-profiles as the documentation form. At runtime the rubric
+# worker calls _build_system_prompt(active_dims) so non-build modes
+# only score the dimensions whose framing applies.
+PROMPT_SYSTEM: str = _build_system_prompt(tuple(name for name, _ in DIMENSIONS))
+
 # User template uses ``{dim_hints}`` and ``{assistant_text}`` placeholders.
 PROMPT_USER_TEMPLATE: str = (
     "Dimensions:\n{dim_hints}\n\n"
@@ -166,6 +176,13 @@ class RubricWorker:
     ) -> None:
         if self._daemon.qwen is None:
             return
+        from .mode_profile import active_profile_for_project
+        profile = active_profile_for_project(fs.project_path)
+        # Mode-aware short-circuit: a profile with no active dimensions
+        # means the rubric framing doesn't apply to this session at
+        # all (default / yolo / minimal labels). Save the LLM call.
+        if not profile.rubric_dimensions:
+            return
         async with self._lock:
             state = self._by_session.setdefault(fs.session_id, _SessionRubric())
             if state.in_flight:
@@ -187,7 +204,7 @@ class RubricWorker:
                 log.exception("live publish failed (rubric_in_flight)")
 
         try:
-            payload = await self._call_qwen(window)
+            payload = await self._call_qwen(window, project_path=fs.project_path)
             await self._record(fs, turn_idx, payload, triggers)
             if live is not None:
                 await live.publish(
@@ -212,25 +229,47 @@ class RubricWorker:
             async with self._lock:
                 state.in_flight = False
 
-    async def _call_qwen(self, window: list[str]) -> dict:
-        dim_hints = "\n".join(f"- {name}: {desc}" for name, desc in DIMENSIONS)
+    async def _call_qwen(self, window: list[str], project_path: str | None = None) -> dict:
+        from .mode_profile import active_profile_for_project
+        profile = active_profile_for_project(project_path)
+        active = profile.rubric_dimensions
+        # Filter the static DIMENSIONS list to the profile's active set,
+        # preserving the canonical order so prompt and persistence
+        # agree on dimension identity.
+        active_dims = [(name, desc) for name, desc in DIMENSIONS if name in active]
+        if not active_dims:
+            # Defensive: should be caught upstream by ``_run_rubric``,
+            # but in case a future caller invokes us directly.
+            return {}
+        dim_hints = "\n".join(f"- {name}: {desc}" for name, desc in active_dims)
         recent = "\n\n---\n\n".join(window[-3:]) if window else ""
         user = PROMPT_USER_TEMPLATE.format(
             dim_hints=dim_hints,
             assistant_text=recent[:6000],
         )
-        return await self._daemon.qwen.complete_json(
-            PROMPT_SYSTEM, user, kind="rubric"
-        )
+        system = _build_system_prompt(tuple(name for name, _ in active_dims))
+        return await self._daemon.qwen.complete_json(system, user, kind="rubric")
 
     async def _record(
         self, fs, turn_idx: int, payload: dict, triggers: list[str]
     ) -> None:
+        from .mode_profile import (
+            active_profile_for_project,
+            session_mode_for_project,
+        )
         trigger = ",".join(triggers) or None
         model_used = self._daemon.qwen.resolve_model("rubric") if self._daemon.qwen else None
         live = getattr(self._daemon, "live", None)
+        profile = active_profile_for_project(fs.project_path)
+        mode_label = session_mode_for_project(fs.project_path)
 
+        # Persist only the dimensions the active profile asked for.
+        # If the LLM emitted scores for inactive dimensions (legacy
+        # full-dim system prompt, or model hallucination), drop them
+        # — keeping mode-aware analysis honest.
         for name, _desc in DIMENSIONS:
+            if name not in profile.rubric_dimensions:
+                continue
             dim = payload.get(name) or {}
             score_raw = dim.get("score")
             try:
@@ -251,6 +290,7 @@ class RubricWorker:
                 suggestion=suggestion,
                 model_used=model_used,
                 trigger=trigger,
+                session_mode=mode_label,
             )
 
             if live is not None:

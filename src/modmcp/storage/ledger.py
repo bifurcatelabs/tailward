@@ -280,16 +280,18 @@ class Ledger:
         tool_kinds_json: str,
         is_creep: bool,
         baseline: int,
+        session_mode: str | None = None,
     ) -> int:
         cur = await self.conn.execute(
             """INSERT INTO scope_snapshots(
                  session_id, project_hash, turn_idx, files_touched_count,
-                 diff_bytes, tool_kinds_json, is_creep, baseline, created_at
-               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 diff_bytes, tool_kinds_json, is_creep, baseline,
+                 session_mode, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, project_hash, turn_idx, files_touched_count,
                 diff_bytes, tool_kinds_json, 1 if is_creep else 0,
-                baseline, _now_iso(),
+                baseline, session_mode, _now_iso(),
             ),
         )
         await self.conn.commit()
@@ -336,15 +338,18 @@ class Ledger:
         suggestion: str | None,
         model_used: str | None,
         trigger: str | None,
+        session_mode: str | None = None,
     ) -> int:
         cur = await self.conn.execute(
             """INSERT INTO rubric_scores(
                  session_id, project_hash, turn_idx, dim_name, score,
-                 evidence, suggestion, model_used, trigger, created_at
-               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 evidence, suggestion, model_used, trigger,
+                 session_mode, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, project_hash, turn_idx, dim_name, score,
-                evidence, suggestion, model_used, trigger, _now_iso(),
+                evidence, suggestion, model_used, trigger,
+                session_mode, _now_iso(),
             ),
         )
         await self.conn.commit()
@@ -624,6 +629,7 @@ class Ledger:
         cache_hit_ratio: float | None,
         first_block_at: str | None,
         last_block_at: str | None,
+        session_mode: str | None = None,
     ) -> int:
         cur = await self.conn.execute(
             """INSERT INTO turn_metrics(
@@ -631,14 +637,14 @@ class Ledger:
                  stop_reason, prompt_to_response_ms, response_duration_ms,
                  input_tokens, output_tokens, cache_read_tokens,
                  cache_creation_tokens, output_tps, cache_hit_ratio,
-                 first_block_at, last_block_at, created_at
-               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 first_block_at, last_block_at, session_mode, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, project_hash, message_id, turn_idx, model,
                 stop_reason, prompt_to_response_ms, response_duration_ms,
                 input_tokens, output_tokens, cache_read_tokens,
                 cache_creation_tokens, output_tps, cache_hit_ratio,
-                first_block_at, last_block_at, _now_iso(),
+                first_block_at, last_block_at, session_mode, _now_iso(),
             ),
         )
         await self.conn.commit()

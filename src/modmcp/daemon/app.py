@@ -601,6 +601,12 @@ async def _close_turn_metric(daemon, st, fs) -> None:
         cache_hit_ratio = round(cache_read / cache_total, 4)
 
     try:
+        from .mode_profile import session_mode_for_project
+        mode_label = session_mode_for_project(fs.project_path)
+    except Exception:
+        mode_label = None
+
+    try:
         await daemon.ledger.record_turn_metric(
             fs.session_id,
             fs.project_hash,
@@ -618,6 +624,7 @@ async def _close_turn_metric(daemon, st, fs) -> None:
             cache_hit_ratio=cache_hit_ratio,
             first_block_at=first.isoformat() if first else None,
             last_block_at=last.isoformat() if last else None,
+            session_mode=mode_label,
         )
     except Exception:
         log.exception("turn-metric persist failed for %s", fs.session_id)

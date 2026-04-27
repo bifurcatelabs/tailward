@@ -175,6 +175,98 @@ def _assistant_with_tool_use(
     }
 
 
+EXPLORATION_SESSION_ID = "session-exploration-001"
+
+
+@pytest.fixture
+def exploration_jsonl(tmp_path: Path) -> Path:
+    claude_root = Path(os.environ["CLAUDE_PROJECTS_ROOT"])
+    sess_dir = claude_root / "exploration-project-sanitized"
+    sess_dir.mkdir(parents=True)
+    f = sess_dir / f"{EXPLORATION_SESSION_ID}.jsonl"
+    f.touch()
+    return f
+
+
+@pytest.fixture
+def exploration_project(tmp_path: Path) -> Path:
+    proj = tmp_path / "exploration-project"
+    proj.mkdir()
+    return proj
+
+
+def test_exploration_mode_disables_scope_creep_and_tags_session_mode(
+    exploration_project: Path, exploration_jsonl: Path
+) -> None:
+    """The user labels their session ``exploration`` in intent.md.
+    Workers honor the mode profile: scope_snapshots fire, but
+    scope_creep events do NOT — even if files_touched would have
+    crossed the build-mode threshold. The persisted scope_snapshot
+    rows carry the session_mode label so trend math doesn't mix
+    modes silently."""
+    cwd = str(exploration_project)
+    # Seed an intent with session_mode = "exploration".
+    intent = empty_intent(cwd, "exploration-project")
+    intent.front.session_mode = "exploration"
+    save_intent(intent, intent_path(cwd))
+
+    # Drive a tool_use sequence that would exceed the build-mode
+    # creep floor (12). We deliberately touch 14 distinct files.
+    edits = [
+        _assistant_with_tool_use(
+            cwd,
+            "Edit",
+            {"file_path": f"src/file_{i:02d}.py", "old_string": "x", "new_string": "y"},
+            tc_id=f"tc-edit-{i}",
+        )
+        for i in range(14)
+    ]
+    events = [_user_event(cwd, "explore the parser module")] + edits + [
+        _assistant_event("Done; spread some changes around.")
+    ]
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+        daemon.qwen = None
+        _append_jsonl(exploration_jsonl, events)
+
+        def _snapshots() -> list[dict]:
+            return _run(daemon.ledger.scope_snapshots_for_session(EXPLORATION_SESSION_ID))
+
+        # Wait for the full run to drain — one snapshot per edit plus
+        # a trailing one on the assistant_message. Asserting on the
+        # peak files_touched_count rather than just count >=1 makes
+        # the timing race deterministic.
+        assert _wait_until(
+            lambda: any(s["files_touched_count"] >= 14 for s in _snapshots()),
+            timeout=15.0,
+        ), (
+            "scope worker did not see all 14 file edits land in any snapshot; "
+            f"got: {[s['files_touched_count'] for s in _snapshots()]}"
+        )
+        snaps = _snapshots()
+
+        # Mode is stamped on every persisted row.
+        for s in snaps:
+            assert s["session_mode"] == "exploration", (
+                f"snapshot missing session_mode tag: {s}"
+            )
+
+        # Most importantly: NO snapshot is marked is_creep=1, even
+        # though files_touched (14) >= the build-mode floor (12).
+        # Exploration mode profile has scope_creep_floor=None.
+        assert all(s["is_creep"] == 0 for s in snaps), (
+            f"exploration mode should never fire is_creep, got: {snaps}"
+        )
+
+        # And no scope_creep LiveBus event fired.
+        live_rows = _run(daemon.ledger.live_events_for_session(EXPLORATION_SESSION_ID))
+        types = {r["event_type"] for r in live_rows}
+        assert "scope_creep" not in types, (
+            f"exploration mode should not emit scope_creep; got: {types}"
+        )
+
+
 def test_passive_pipeline_smoke(
     fake_project: Path, seeded_intent: Path, jsonl_path: Path
 ) -> None:

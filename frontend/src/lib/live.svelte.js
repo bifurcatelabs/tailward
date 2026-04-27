@@ -58,6 +58,10 @@ class LiveStore {
 
   // Session metadata mirrored back from /state ----------------------
   startedAt = $state(null);
+  // Free-form session_mode label from intent.md (or null if unset).
+  // The active mode profile that drives worker thresholds.
+  sessionMode = $state(null);
+  modeProfile = $state(null);
 
   // Time-series samples for in-page sparklines. Each is a bounded
   // ring buffer of {t, v} points; the visual components don't need
@@ -313,6 +317,8 @@ class LiveStore {
           this.rubricAvgs = { ...this.rubricAvgs, ...data.rubric_dim_avg };
         }
         if (data.session?.started_at) this.startedAt = data.session.started_at;
+        if (data.session_mode !== undefined) this.sessionMode = data.session_mode;
+        if (data.mode_profile !== undefined) this.modeProfile = data.mode_profile;
       }
     } catch {}
   }

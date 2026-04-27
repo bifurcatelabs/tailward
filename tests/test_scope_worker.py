@@ -53,9 +53,12 @@ async def test_scope_worker_records_snapshots(tmp_path: Path) -> None:
             await daemon.scope.enqueue(_edit(i, p), fs)
         await daemon.scope.enqueue(_assistant(), fs)
 
+        # Wait for the snapshot that reflects all three edits — earlier
+        # snapshots fire per tool_use so they show counts 1, 2, 3 in
+        # sequence. Without this, the poll grabs the first one.
         for _ in range(40):
             rows = await daemon.ledger.scope_snapshots_for_session(fs.session_id)
-            if rows:
+            if any(r["files_touched_count"] >= 3 for r in rows):
                 break
             await asyncio.sleep(0.1)
         assert rows, "no scope snapshot recorded"
@@ -69,12 +72,28 @@ async def test_scope_worker_fires_creep(tmp_path: Path, monkeypatch) -> None:
     proj = tmp_path / "scope_creep"
     proj.mkdir()
 
-    # Tighten creep thresholds so a test-sized payload trips them.
-    from modmcp import config as cfg_mod
-    orig = cfg_mod.get_config()
-    orig.scope_creep_floor = 3
-    orig.scope_creep_factor = 1.0
-    cfg_mod._cached = orig
+    # Seed an intent labeled "build" so the build mode profile applies.
+    # Default / unlabeled sessions resolve to the permissive profile,
+    # which has scope_creep_floor=None — creep never fires there by
+    # design.
+    from modmcp.paths import intent_path
+    from modmcp.schema.intent import empty_intent, save_intent
+    intent = empty_intent(str(proj), proj.name)
+    intent.front.session_mode = "build"
+    save_intent(intent, intent_path(str(proj)))
+
+    # Tighten the build profile's creep floor for this test only;
+    # a real session would touch many more files before tripping it.
+    from modmcp.daemon import mode_profile as mp
+    tight_build = mp.ModeProfile(
+        name="build",
+        description="test override",
+        scope_creep_floor=3,
+        scope_creep_factor=1.0,
+        rubric_dimensions=mp.ALL_RUBRIC_DIMENSIONS,
+        scope_event_label="creep",
+    )
+    monkeypatch.setitem(mp._REGISTRY, "build", tight_build)
 
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon

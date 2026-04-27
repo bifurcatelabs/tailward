@@ -22,6 +22,12 @@ ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("session_state", "total_cache_read_tokens", "INTEGER NOT NULL DEFAULT 0"),
     ("session_state", "total_cache_creation_tokens", "INTEGER NOT NULL DEFAULT 0"),
     ("session_state", "last_model", "TEXT"),
+    # ``session_mode`` is stamped on each persisted row so cross-session
+    # trend math can group by mode and not silently mix yolo / build.
+    # Pre-mode-aware rows stay NULL.
+    ("rubric_scores", "session_mode", "TEXT"),
+    ("scope_snapshots", "session_mode", "TEXT"),
+    ("turn_metrics", "session_mode", "TEXT"),
 ]
 
 

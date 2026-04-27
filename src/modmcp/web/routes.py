@@ -432,6 +432,17 @@ def mount_web(app: FastAPI) -> None:
         for r in rubric_rows:
             dim_avgs[r["dim_name"]].append(float(r["score"]))
 
+        # Resolve the active mode profile for this project so the
+        # client can render the mode chip and tune its surfacing
+        # (e.g. show "spread" instead of "creep" for non-build modes).
+        from ..daemon.mode_profile import (
+            active_profile_for_project,
+            session_mode_for_project,
+        )
+        project_path = session.get("project_path") if session else None
+        session_mode_label = session_mode_for_project(project_path)
+        profile = active_profile_for_project(project_path)
+
         return JSONResponse({
             "session": session,
             "last_snapshot": last_snap,
@@ -440,6 +451,16 @@ def mount_web(app: FastAPI) -> None:
             "rubric_samples": len(rubric_rows),
             "report_rows": report_rows,
             "close_status": close_status,
+            "session_mode": session_mode_label,
+            "mode_profile": {
+                "name": profile.name,
+                "description": profile.description,
+                "scope_creep_floor": profile.scope_creep_floor,
+                "scope_event_label": profile.scope_event_label,
+                "rubric_dimensions": list(profile.rubric_dimensions),
+                "is_default": session_mode_label is None
+                    or profile.name == "default",
+            },
         })
 
     @app.get("/p/{ph}/live/{session_id}/replay")

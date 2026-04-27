@@ -33,6 +33,19 @@
     <span class="muted">·</span>
     <span class="muted">project</span>
     <code class="thin" title={ph}>{ph.slice(0, 8)}</code>
+    {#if live.sessionMode || (live.modeProfile && !live.modeProfile.is_default)}
+      <span class="muted">·</span>
+      <span class="muted">mode</span>
+      <code
+        class="mode"
+        class:mode-default={live.modeProfile?.is_default}
+        title={live.modeProfile?.description || 'permissive default profile'}
+      >{live.sessionMode || live.modeProfile?.name || '—'}</code>
+    {:else if live.modeProfile?.is_default}
+      <span class="muted">·</span>
+      <span class="muted">mode</span>
+      <code class="mode mode-default" title={live.modeProfile.description}>default</code>
+    {/if}
   </div>
 
   <div class="conn conn-{live.conn}">
@@ -93,6 +106,16 @@
   }
   .session code.thin {
     background: transparent;
+    color: var(--muted);
+  }
+  .session code.mode {
+    background: rgba(232,153,104,0.10);
+    border-color: rgba(232,153,104,0.30);
+    color: var(--accent);
+  }
+  .session code.mode.mode-default {
+    background: var(--surface-2);
+    border-color: var(--border);
     color: var(--muted);
   }
   .muted {
