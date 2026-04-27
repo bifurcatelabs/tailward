@@ -133,6 +133,69 @@ async def test_watch_paths_whitelists_only_listed(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_filestate_rehydrates_project_from_session_state(
+    tmp_path: Path,
+) -> None:
+    """A daemon restart while the user's cwd is in a subdir must NOT
+    relocate the session under a phantom project_hash.
+
+    Reproduces the bug where ``FileState`` was seeded only with the
+    offset on init; the next post-offset event's ``cwd`` then set
+    project_path to whatever happened to be live (e.g. a
+    ``C:/warden/frontend`` working directory during an npm run).
+    Workers downstream (rubric, scope, etc.) then persisted under
+    the wrong hash, invisible to the canonical project's UI.
+    """
+    import json
+    from modmcp.paths import project_hash
+
+    claude_root = tmp_path / "claude"
+    proj_dir = claude_root / "C--warden"
+    proj_dir.mkdir(parents=True)
+    sid = "demo-session"
+    jsonl = proj_dir / f"{sid}.jsonl"
+
+    # First event's cwd is a subdir — would hash to a different value
+    # than the canonical project root.
+    line = json.dumps(
+        {
+            "type": "user",
+            "sessionId": sid,
+            "cwd": "C:/warden/frontend",
+            "message": {"role": "user", "content": "hello from subdir"},
+        }
+    )
+    jsonl.write_text(line + "\n", encoding="utf-8")
+
+    canonical_path = "C:/warden"
+    canonical_hash = project_hash(canonical_path)
+    subdir_hash = project_hash("C:/warden/frontend")
+    assert canonical_hash != subdir_hash  # sanity
+
+    ledger = Ledger()
+    await ledger.connect()
+    try:
+        # Pre-seed session_state as it would be after a prior daemon run.
+        await ledger.upsert_session(sid, canonical_hash, canonical_path)
+
+        state = StateStore()
+        watcher = TranscriptWatcher(state, ledger, root=claude_root)
+        await watcher.start()
+        await asyncio.sleep(0.5)
+        await watcher.stop()
+
+        fs = watcher._files[jsonl]
+        assert fs.project_hash == canonical_hash, (
+            f"FileState should rehydrate from session_state "
+            f"({canonical_hash}), not derive from event cwd "
+            f"({subdir_hash})"
+        )
+        assert fs.project_path == canonical_path
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
 async def test_watch_paths_accepts_desanitized_form(tmp_path: Path) -> None:
     """``C:/warden`` and ``C--warden`` should both work as filter entries.
 

@@ -174,6 +174,21 @@ class TranscriptWatcher:
             stored = await self._ledger.get_offset(session_id)
             fs.offset = stored
             fs.session_id = session_id
+            # Rehydrate the project from session_state if this session
+            # is already known. Without this, a daemon restart while
+            # the user's cwd is in a subdir (e.g. ``C:\warden\frontend``
+            # for an ``npm run build``) would seed FileState from the
+            # next post-offset event's cwd — which is the subdir, not
+            # the project root — and every downstream worker would
+            # persist under a phantom project_hash. The session_state
+            # row carries the canonical pair; trust it.
+            try:
+                sess = await self._ledger.get_session(session_id)
+            except Exception:
+                sess = None
+            if sess:
+                fs.project_path = sess["project_path"]
+                fs.project_hash = sess["project_hash"]
             self._files[path] = fs
 
         try:
