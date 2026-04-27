@@ -28,6 +28,11 @@ ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("rubric_scores", "session_mode", "TEXT"),
     ("scope_snapshots", "session_mode", "TEXT"),
     ("turn_metrics", "session_mode", "TEXT"),
+    # ``subject`` distinguishes who is being scored: 'assistant' (the
+    # default for all pre-self-rubric rows) or 'user'. The Reflection
+    # view's self-rubric panel reads subject='user'; the existing
+    # session view's rubric rail reads subject='assistant'.
+    ("rubric_scores", "subject", "TEXT NOT NULL DEFAULT 'assistant'"),
 ]
 
 

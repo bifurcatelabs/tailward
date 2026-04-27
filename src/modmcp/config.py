@@ -132,6 +132,15 @@ class Config:
     rubric_turn_interval: int = 5
     rubric_min_text_chars: int = 80     # skip trivially short turns
 
+    # User-side self-rubric (v0.2). Mirrors the assistant rubric across
+    # 4 user-side dimensions (intent_clarity, context_coverage,
+    # verification_engagement, mode_coherence). Runs less often than
+    # the assistant rubric — user-side patterns emerge over multi-turn
+    # windows so rapid sampling adds noise without signal. Synthesized
+    # /compact turns are excluded.
+    user_rubric_turn_interval: int = 6
+    user_rubric_min_text_chars: int = 80
+
     # Scope tracking: files-touched baseline comes from the rolling median
     # of the previous N completed sessions for the same project. Creep
     # fires when files_touched > baseline * creep_factor OR absolute floor.

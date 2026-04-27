@@ -57,6 +57,7 @@ class Daemon:
         self.constraints = None
         self.scope = None
         self.rubric = None
+        self.user_rubric = None
         self.session_close = None
         # v0.2 platform probe worker.
         self.probe = None
@@ -166,6 +167,13 @@ def create_app() -> FastAPI:
                     await daemon.scope.enqueue(ev, fs)
                 if daemon.rubric is not None and ev.kind == "assistant_message":
                     await daemon.rubric.enqueue(ev, fs)
+                if (
+                    getattr(daemon, "user_rubric", None) is not None
+                    and ev.kind == "user_message"
+                    and not ev.synthesized
+                    and _looks_like_human_prompt(ev)
+                ):
+                    await daemon.user_rubric.enqueue(ev, fs)
 
             # Publish turn-level markers to the live bus so the web feed
             # sees activity even without worker findings. Fires at most
@@ -357,6 +365,13 @@ def create_app() -> FastAPI:
             log.warning("rubric worker unavailable: %s", e)
 
         try:
+            from .user_rubric_worker import UserRubricWorker
+            daemon.user_rubric = UserRubricWorker(daemon)
+            await daemon.user_rubric.start()
+        except Exception as e:
+            log.warning("user rubric worker unavailable: %s", e)
+
+        try:
             from .session_close import SessionCloseDetector
             daemon.session_close = SessionCloseDetector(daemon)
             await daemon.session_close.start()
@@ -386,6 +401,8 @@ def create_app() -> FastAPI:
                 await daemon.scope.stop()
             if daemon.rubric:
                 await daemon.rubric.stop()
+            if getattr(daemon, "user_rubric", None):
+                await daemon.user_rubric.stop()
             if daemon.session_close:
                 await daemon.session_close.stop()
             if daemon.probe:

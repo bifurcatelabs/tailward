@@ -377,6 +377,25 @@ def mount_web(app: FastAPI) -> None:
         rows = await daemon.ledger.llm_call_metrics_summary()
         return JSONResponse({"by_kind": rows})
 
+    @app.get("/v2/reflection/{ph}/self-rubric")
+    async def v2_self_rubric(request: Request, ph: str) -> JSONResponse:
+        """User-side rubric summary + recent samples for a project.
+
+        Powers the Reflection-view self-rubric panel: per-dimension
+        averages alongside recent specific evidence/suggestion rows.
+        """
+        daemon = request.app.state.daemon
+        try:
+            limit = int(request.query_params.get("limit", "30") or 30)
+        except ValueError:
+            limit = 30
+        summary = await daemon.ledger.user_rubric_summary(ph)
+        recent = await daemon.ledger.user_rubric_recent(ph, limit=limit)
+        return JSONResponse({
+            "by_dim": summary["by_dim"],
+            "recent": recent,
+        })
+
     @app.get("/v2/reflection/sessions")
     async def v2_reflection_sessions(request: Request) -> JSONResponse:
         """Cross-project sessions list with summary stats.

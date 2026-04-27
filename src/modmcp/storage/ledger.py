@@ -339,17 +339,18 @@ class Ledger:
         model_used: str | None,
         trigger: str | None,
         session_mode: str | None = None,
+        subject: str = "assistant",
     ) -> int:
         cur = await self.conn.execute(
             """INSERT INTO rubric_scores(
                  session_id, project_hash, turn_idx, dim_name, score,
                  evidence, suggestion, model_used, trigger,
-                 session_mode, created_at
-               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 session_mode, subject, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, project_hash, turn_idx, dim_name, score,
                 evidence, suggestion, model_used, trigger,
-                session_mode, _now_iso(),
+                session_mode, subject, _now_iso(),
             ),
         )
         await self.conn.commit()
@@ -836,6 +837,54 @@ class Ledger:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    # ------- Reflection-view self-rubric panel -------
+
+    async def user_rubric_summary(self, project_hash: str) -> dict:
+        """Per-dimension average + sample count for user-side scores.
+
+        Powers the Reflection-view self-rubric panel's "averages by
+        dimension" row. Filters to ``subject='user'`` so the
+        assistant-side rubric doesn't pollute the math.
+        """
+        async with self.conn.execute(
+            """SELECT dim_name, AVG(score) AS avg_score, COUNT(*) AS n
+               FROM rubric_scores
+               WHERE project_hash=? AND subject='user'
+               GROUP BY dim_name""",
+            (project_hash,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return {
+            "by_dim": [
+                {
+                    "dim": str(r["dim_name"]),
+                    "avg_score": float(r["avg_score"]) if r["avg_score"] is not None else None,
+                    "n": int(r["n"]),
+                }
+                for r in rows
+            ],
+        }
+
+    async def user_rubric_recent(
+        self, project_hash: str, limit: int = 30
+    ) -> list[dict]:
+        """Recent user-rubric samples for a project, newest first.
+
+        Returns the rows with evidence + suggestion populated so the
+        panel can show the latest specific feedback the LLM produced
+        about the user's behavior.
+        """
+        async with self.conn.execute(
+            """SELECT id, session_id, turn_idx, dim_name, score,
+                      evidence, suggestion, created_at, session_mode
+               FROM rubric_scores
+               WHERE project_hash=? AND subject='user'
+               ORDER BY id DESC LIMIT ?""",
+            (project_hash, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
     # ------- Reflection-view past-sessions panel -------
 
     async def recent_sessions_with_summary(self, limit: int = 50) -> list[dict]:
@@ -856,13 +905,22 @@ class Ledger:
                 ss.started_at, ss.last_seen_at, ss.last_model,
                 ss.turns_seen, ss.total_input_tokens, ss.total_output_tokens,
                 rs.avg_score, rs.sample_count,
+                urs.avg_score AS user_avg_score,
+                urs.sample_count AS user_sample_count,
                 CASE WHEN sr.session_id IS NOT NULL THEN 1 ELSE 0 END AS has_report
             FROM session_state ss
             LEFT JOIN (
                 SELECT session_id, AVG(score) AS avg_score, COUNT(*) AS sample_count
                 FROM rubric_scores
+                WHERE subject='assistant'
                 GROUP BY session_id
             ) rs ON rs.session_id = ss.session_id
+            LEFT JOIN (
+                SELECT session_id, AVG(score) AS avg_score, COUNT(*) AS sample_count
+                FROM rubric_scores
+                WHERE subject='user'
+                GROUP BY session_id
+            ) urs ON urs.session_id = ss.session_id
             LEFT JOIN (
                 SELECT DISTINCT session_id FROM session_reports
             ) sr ON sr.session_id = ss.session_id

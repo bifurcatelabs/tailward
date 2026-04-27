@@ -137,6 +137,9 @@
       </div>
     {:else if kind === 'rubric_sample'}
       <div class="row">
+        {#if p.subject === 'user'}
+          <span class="subject-tag">self</span>
+        {/if}
         <strong>{p.dim}</strong>
         <span class="score">{Number(p.score).toFixed(1)}<span class="muted">/5</span></span>
         <span class="muted">turn {p.turn_idx}</span>
@@ -229,6 +232,18 @@
     color: var(--accent);
     border-color: rgba(232,153,104,0.35);
     border-style: dashed;
+  }
+  /* User-side rubric tag — distinguishes self-rubric samples from
+     the assistant-side rubric they share an event type with. */
+  .subject-tag {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(95,195,167,0.10);
+    color: var(--ok);
+    border: 1px solid rgba(95,195,167,0.25);
   }
 
   .severity {

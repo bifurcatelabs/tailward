@@ -94,6 +94,47 @@ async def test_claim_status_counts_groups_by_status() -> None:
 
 
 @pytest.mark.asyncio
+async def test_user_rubric_summary_filters_by_subject() -> None:
+    """The user-rubric panel must not see assistant-side rows.
+
+    The schema column ``subject`` defaults to 'assistant' for legacy
+    rows; user rows must be tagged 'user' explicitly. Verify the
+    aggregate query filters correctly.
+    """
+    ledger = Ledger()
+    await ledger.connect()
+    try:
+        # Two user-side rows.
+        await ledger.record_rubric_score(
+            "s1", "ph", turn_idx=1, dim_name="intent_clarity",
+            score=4.0, evidence=None, suggestion=None,
+            model_used=None, trigger=None, session_mode="build",
+            subject="user",
+        )
+        await ledger.record_rubric_score(
+            "s1", "ph", turn_idx=2, dim_name="intent_clarity",
+            score=2.0, evidence=None, suggestion=None,
+            model_used=None, trigger=None, session_mode="build",
+            subject="user",
+        )
+        # One assistant-side row that must NOT pollute the user avg.
+        await ledger.record_rubric_score(
+            "s1", "ph", turn_idx=1, dim_name="intent_clarity",
+            score=5.0, evidence=None, suggestion=None,
+            model_used=None, trigger=None, session_mode="build",
+            # subject defaults to 'assistant'
+        )
+
+        summary = await ledger.user_rubric_summary("ph")
+        by_dim = {r["dim"]: r for r in summary["by_dim"]}
+        assert "intent_clarity" in by_dim
+        assert by_dim["intent_clarity"]["n"] == 2
+        assert by_dim["intent_clarity"]["avg_score"] == 3.0  # avg of 4 and 2
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
 async def test_recent_sessions_with_summary_includes_rubric_avg_and_report_flag() -> None:
     """Reflection's past-sessions table reads avg_score + has_report."""
     ledger = Ledger()

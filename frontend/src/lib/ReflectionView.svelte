@@ -12,6 +12,7 @@
    * placeholder content here.
    */
   import SessionsPanel from './SessionsPanel.svelte';
+  import SelfRubricPanel from './SelfRubricPanel.svelte';
 
   let { ph } = $props();
 
@@ -262,12 +263,15 @@
       </div>
     </div>
 
+    <SelfRubricPanel {ph} />
+
     <SessionsPanel />
 
     <p class="cutout">
-      Self-rubric (LLM-scored user-side dimensions) is the next layer for this view. The panels
-      above are derived from existing audit data — no LLM calls — and reflect what's already
-      observable about the session.
+      Two layers: derived signals above (no LLM, free) and the self-rubric below (LLM-scored,
+      every <code>user_rubric_turn_interval</code> typed user turns). The bottom layer accumulates
+      slowly by design — early scores cluster near 3.0 until the LLM has enough context to
+      discriminate.
     </p>
   {/if}
 </section>
