@@ -164,6 +164,47 @@ async def test_complete_records_metric_on_length_truncation(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_per_kind_temperature_and_presence_flow_to_api(tmp_path) -> None:
+    """Per-call-kind sampler overrides reach the underlying chat-completion
+    call. Regression for the Qwen3 profile split: rubric uses the
+    precise-coding profile (temp=0.6, presence=0.0); other thinking-on
+    kinds use the general profile (temp=1.0, presence=1.5)."""
+    db = tmp_path / "ledger.db"
+    ledger = Ledger(db_path=db)
+    await ledger.connect()
+
+    captured: dict = {}
+
+    def _capture(**kwargs):
+        captured.update(kwargs)
+        return _fake_response(content='{"ok":true}')
+
+    client = QwenClient()
+    client.attach_recorder(ledger, asyncio.get_running_loop())
+    client._client = SimpleNamespace(
+        chat=SimpleNamespace(
+            completions=SimpleNamespace(create=_capture),
+        ),
+    )
+
+    await client.complete("sys", "user", kind="rubric")
+    assert captured["temperature"] == pytest.approx(0.6)
+    assert captured["presence_penalty"] == pytest.approx(0.0)
+
+    captured.clear()
+    await client.complete("sys", "user", kind="synth")
+    assert captured["temperature"] == pytest.approx(1.0)
+    assert captured["presence_penalty"] == pytest.approx(1.5)
+
+    captured.clear()
+    await client.complete("sys", "user", kind="drift")
+    assert captured["temperature"] == pytest.approx(1.0)
+    assert captured["presence_penalty"] == pytest.approx(1.5)
+
+    await ledger.close()
+
+
+@pytest.mark.asyncio
 async def test_complete_records_metric_on_http_failure(tmp_path) -> None:
     """If the underlying HTTP call raises, the error is captured in
     the metric row (with duration), then re-raised. Without this we'd

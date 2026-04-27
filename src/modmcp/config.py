@@ -42,15 +42,43 @@ class Config:
     qwen_presence_penalty: float = 0.0
     qwen_repetition_penalty: float = 1.0
 
+    # Per-call-kind sampler overrides. Qwen3 publishes distinct profiles
+    # per task shape (per the model card):
+    #   * thinking + general:        temp=1.0, presence_penalty=1.5
+    #   * thinking + precise coding: temp=0.6, presence_penalty=0.0
+    #   * non-thinking:              temp=1.0, presence_penalty=1.5
+    # These per-kind defaults match those profiles. ``None`` (or unset in
+    # config.toml) falls back to the global ``qwen_temperature`` /
+    # ``qwen_presence_penalty`` above — backward compatible for users
+    # who set globals before this differentiation existed.
+    qwen_temperature_synth: float | None = 1.0          # generative + thinking
+    qwen_temperature_drift: float | None = 1.0          # classification
+    qwen_temperature_query: float | None = 1.0          # classification
+    qwen_temperature_rubric: float | None = 0.6         # judging — stability over diversity
+    qwen_temperature_consolidator: float | None = 1.0   # generative + thinking
+    qwen_presence_penalty_synth: float | None = 1.5
+    qwen_presence_penalty_drift: float | None = 1.5
+    qwen_presence_penalty_query: float | None = 1.5
+    qwen_presence_penalty_rubric: float | None = 0.0
+    qwen_presence_penalty_consolidator: float | None = 1.5
+
     # Context window of the served model (used to size transcript slices).
     qwen_context_tokens: int = 32768
 
-    # Per-call-type output budgets. Thinking models need generous headroom.
+    # Per-call-type output budgets. Thinking models need generous headroom
+    # — the budget covers the entire ``<think>`` preamble *plus* the visible
+    # output, and Qwen3-class models routinely burn 1500-3000 tokens inside
+    # thinking before producing the first output token.
+    #
+    # ``rubric`` was 2500 until v0.2 instrumentation (commit 9e40c5a) showed
+    # 33% of rubric calls hitting ``finish_reason='length'`` with the model
+    # truncating mid-think and returning empty content. Bumped to 6000 to
+    # match the drift/query budgets users typically configure.
     qwen_max_tokens_synth: int = 6000         # Phase 1 synthesis
-    qwen_max_tokens_drift: int = 1500         # per-turn drift verdict
-    qwen_max_tokens_query: int = 1500         # query_intent answer
-    qwen_max_tokens_rubric: int = 2500        # per-sample 4-dimension rubric
-    qwen_max_tokens_consolidator: int = 8000  # end-of-session 8-mode report card
+    qwen_max_tokens_drift: int = 1500         # per-turn drift verdict (no thinking by default)
+    qwen_max_tokens_query: int = 1500         # query_intent answer (no thinking by default)
+    qwen_max_tokens_rubric: int = 6000        # per-sample 4-dimension rubric, thinking on
+    qwen_max_tokens_consolidator: int = 8000  # end-of-session 8-mode report card, thinking on
 
     # Qwen3 thinking mode, per call-type. Synth benefits from deep reasoning;
     # drift/query are fast-path structured tasks where thinking just burns

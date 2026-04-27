@@ -248,7 +248,7 @@ qwen_model_consolidator = ""
 qwen_max_tokens_synth = 6000
 qwen_max_tokens_drift = 1500
 qwen_max_tokens_query = 1500
-qwen_max_tokens_rubric = 2500
+qwen_max_tokens_rubric = 6000
 qwen_max_tokens_consolidator = 8000
 
 # Per-call-kind Qwen3 thinking mode.
@@ -258,10 +258,33 @@ qwen_enable_thinking_query = false
 qwen_enable_thinking_rubric = true
 qwen_enable_thinking_consolidator = true
 
-# Sampling (Qwen3 thinking-mode defaults).
+# Sampling. The globals below are fallbacks. Per-call-kind overrides
+# below them follow the Qwen3 model-card profiles:
+#   thinking + general:        temperature = 1.0, presence_penalty = 1.5
+#   thinking + precise coding: temperature = 0.6, presence_penalty = 0.0
+#   non-thinking:              temperature = 1.0, presence_penalty = 1.5
 qwen_temperature = 0.6
 qwen_top_p = 0.95
 qwen_top_k = 20
+qwen_presence_penalty = 0.0
+qwen_repetition_penalty = 1.0
+
+# Per-call-kind sampler overrides. Defaults (shown) match Qwen's published
+# profiles per task shape — rubric stays on the precise-coding profile for
+# stable JSON judging; everything else uses the general / non-thinking
+# profile. Set to a value to override; comment out (or set to the global
+# value above) to fall back to the global. Existing configs that only set
+# the globals continue to work unchanged.
+qwen_temperature_synth        = 1.0
+qwen_temperature_drift        = 1.0
+qwen_temperature_query        = 1.0
+qwen_temperature_rubric       = 0.6
+qwen_temperature_consolidator = 1.0
+qwen_presence_penalty_synth        = 1.5
+qwen_presence_penalty_drift        = 1.5
+qwen_presence_penalty_query        = 1.5
+qwen_presence_penalty_rubric       = 0.0
+qwen_presence_penalty_consolidator = 1.5
 
 # Phase 2 (active mode).
 phase2_turns_default = 8

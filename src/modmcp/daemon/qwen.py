@@ -82,6 +82,28 @@ class QwenClient:
         }[kind]
         return override or cfg.qwen_model
 
+    def _temperature_for(self, kind: CallKind) -> float:
+        cfg = self._cfg
+        override = {
+            "synth": cfg.qwen_temperature_synth,
+            "drift": cfg.qwen_temperature_drift,
+            "query": cfg.qwen_temperature_query,
+            "rubric": cfg.qwen_temperature_rubric,
+            "consolidator": cfg.qwen_temperature_consolidator,
+        }[kind]
+        return cfg.qwen_temperature if override is None else override
+
+    def _presence_penalty_for(self, kind: CallKind) -> float:
+        cfg = self._cfg
+        override = {
+            "synth": cfg.qwen_presence_penalty_synth,
+            "drift": cfg.qwen_presence_penalty_drift,
+            "query": cfg.qwen_presence_penalty_query,
+            "rubric": cfg.qwen_presence_penalty_rubric,
+            "consolidator": cfg.qwen_presence_penalty_consolidator,
+        }[kind]
+        return cfg.qwen_presence_penalty if override is None else override
+
     def resolve_model(self, kind: CallKind) -> str:
         return self._model_for(kind)
 
@@ -116,10 +138,14 @@ class QwenClient:
         kind: CallKind,
     ) -> str:
         cfg = self._cfg
-        temp = cfg.qwen_temperature if temperature is None else temperature
+        # Caller-passed temperature is the strongest override; otherwise
+        # the per-kind setting (which itself falls back to the global
+        # ``qwen_temperature`` if the kind override is ``None``).
+        temp = self._temperature_for(kind) if temperature is None else temperature
         mt = self._max_tokens_for(kind) if max_tokens is None else max_tokens
         thinking = self._thinking_for(kind)
         model = self._model_for(kind)
+        presence_penalty = self._presence_penalty_for(kind)
 
         extra_body: dict[str, Any] = {
             "top_k": cfg.qwen_top_k,
@@ -134,7 +160,7 @@ class QwenClient:
             model=model,
             temperature=temp,
             top_p=cfg.qwen_top_p,
-            presence_penalty=cfg.qwen_presence_penalty,
+            presence_penalty=presence_penalty,
             max_tokens=mt,
             extra_body=extra_body,
             messages=[
