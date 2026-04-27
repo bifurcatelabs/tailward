@@ -4,12 +4,15 @@ build-backend = "hatchling.build"
 
 [project]
 name = "modmcp"
-version = "0.1.0"
-description = "Session-handoff and accountability layer for Claude Code. A local warden daemon that preserves context and audits agent claims across sessions."
+version = "2.0.0"
+description = "Warden — a local-first trust layer for AI coding workflows. Passive transcript audit, mode-aware rubric scoring, in-band inference-path metrics. Internal package name is modmcp; the CLI binary and product surface are warden."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "modmcp" }]
+authors = [{ name = "Glenn Walker", email = "glenn@glennw.net" }]
+
+[project.urls]
+Repository = "https://git.bifurcate.io/active/warden"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
