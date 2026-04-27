@@ -377,6 +377,46 @@ def mount_web(app: FastAPI) -> None:
         rows = await daemon.ledger.llm_call_metrics_summary()
         return JSONResponse({"by_kind": rows})
 
+    @app.get("/v2/reflection/sessions")
+    async def v2_reflection_sessions(request: Request) -> JSONResponse:
+        """Cross-project sessions list with summary stats.
+
+        Returns one row per session: id, recency, project, turns,
+        token totals, avg rubric score (across all dimensions, all
+        turns), rubric sample count, and whether the session-close
+        consolidator produced a 8-mode report card. Powers the
+        Reflection-view past-sessions table.
+        """
+        daemon = request.app.state.daemon
+        try:
+            limit = int(request.query_params.get("limit", "50") or 50)
+        except ValueError:
+            limit = 50
+        rows = await daemon.ledger.recent_sessions_with_summary(limit=limit)
+        return JSONResponse({"sessions": rows})
+
+    @app.get("/v2/reflection/sessions/{session_id}")
+    async def v2_reflection_session_detail(
+        request: Request, session_id: str
+    ) -> JSONResponse:
+        """Per-session deep view: 8-mode report card + rubric trajectory.
+
+        Used when the user expands a row in the Reflection sessions
+        table. Returns enough to render both the score card and a
+        per-turn rubric plot without further round-trips.
+        """
+        daemon = request.app.state.daemon
+        session = await daemon.ledger.get_session(session_id)
+        if session is None:
+            raise HTTPException(404)
+        report = await daemon.ledger.session_report(session_id)
+        trajectory = await daemon.ledger.session_rubric_trajectory(session_id)
+        return JSONResponse({
+            "session": session,
+            "report": report,
+            "trajectory": trajectory,
+        })
+
     @app.get("/v2/reflection/{ph}")
     async def v2_reflection_signals(request: Request, ph: str) -> JSONResponse:
         """Derived signals for the Reflection view — no LLM calls.

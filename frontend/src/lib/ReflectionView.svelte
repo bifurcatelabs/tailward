@@ -11,6 +11,8 @@
    * a separate panel; this view leaves room for it without faking
    * placeholder content here.
    */
+  import SessionsPanel from './SessionsPanel.svelte';
+
   let { ph } = $props();
 
   let loading = $state(true);
@@ -260,8 +262,10 @@
       </div>
     </div>
 
+    <SessionsPanel />
+
     <p class="cutout">
-      Self-rubric (LLM-scored user-side dimensions) is the next layer for this view. The four panels
+      Self-rubric (LLM-scored user-side dimensions) is the next layer for this view. The panels
       above are derived from existing audit data — no LLM calls — and reflect what's already
       observable about the session.
     </p>

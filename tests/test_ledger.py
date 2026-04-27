@@ -94,6 +94,70 @@ async def test_claim_status_counts_groups_by_status() -> None:
 
 
 @pytest.mark.asyncio
+async def test_recent_sessions_with_summary_includes_rubric_avg_and_report_flag() -> None:
+    """Reflection's past-sessions table reads avg_score + has_report."""
+    ledger = Ledger()
+    await ledger.connect()
+    try:
+        await ledger.upsert_session("s-A", "ph", "/proj/A")
+        await ledger.upsert_session("s-B", "ph", "/proj/A")
+
+        # s-A has rubric scores; s-B doesn't.
+        for turn, score in [(1, 4.0), (2, 3.0), (3, 5.0)]:
+            await ledger.record_rubric_score(
+                "s-A", "ph", turn_idx=turn, dim_name="provenance",
+                score=score, evidence=None, suggestion=None,
+                model_used=None, trigger=None, session_mode="build",
+            )
+
+        # s-A has a report card; s-B doesn't.
+        await ledger.upsert_session_report(
+            "s-A", "ph", mode_id=1, mode_name="provenance",
+            score=4.0, evidence_json=None, suggestion="keep going",
+            model_used=None,
+        )
+
+        rows = await ledger.recent_sessions_with_summary(limit=10)
+        by_id = {r["session_id"]: r for r in rows}
+
+        assert by_id["s-A"]["avg_score"] == 4.0
+        assert by_id["s-A"]["sample_count"] == 3
+        assert by_id["s-A"]["has_report"] == 1
+
+        assert by_id["s-B"]["avg_score"] is None
+        assert by_id["s-B"]["sample_count"] is None
+        assert by_id["s-B"]["has_report"] == 0
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_session_rubric_trajectory_returns_per_turn_per_dim() -> None:
+    """Powers the deep view's per-dimension trajectory plot."""
+    ledger = Ledger()
+    await ledger.connect()
+    try:
+        await ledger.upsert_session("s1", "ph", "/p")
+        for turn in (1, 2, 3):
+            for dim in ("provenance", "uncertainty_honesty"):
+                await ledger.record_rubric_score(
+                    "s1", "ph", turn_idx=turn, dim_name=dim,
+                    score=3.5, evidence=None, suggestion=None,
+                    model_used=None, trigger=None, session_mode="build",
+                )
+
+        traj = await ledger.session_rubric_trajectory("s1")
+        # 3 turns × 2 dims = 6 rows, ordered by (turn_idx, dim_name).
+        assert len(traj) == 6
+        assert traj[0]["turn_idx"] == 1
+        assert traj[-1]["turn_idx"] == 3
+        # Within a turn, dim_name is sorted ASC.
+        assert traj[0]["dim_name"] < traj[1]["dim_name"]
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
 async def test_user_turn_rows_returns_oldest_first_with_payload() -> None:
     """Reflection derives idle-gap and prompt-length stats from this stream.
     Synthesized turns are included with their event_type so callers can

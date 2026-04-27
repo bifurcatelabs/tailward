@@ -836,6 +836,62 @@ class Ledger:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    # ------- Reflection-view past-sessions panel -------
+
+    async def recent_sessions_with_summary(self, limit: int = 50) -> list[dict]:
+        """Cross-project recent sessions enriched with rubric averages
+        and a "has report card" flag.
+
+        Powers the Reflection-view past-sessions table. Pre-calibration
+        sessions (rubric truncated mid-think) will have ``avg_score``
+        clustered near 3.0 — that's noise, documented in
+        project_v0_2_reports_gap.md. We surface the data anyway and
+        leave interpretation to the user; visual treatment of noisy
+        rows is a UI concern.
+        """
+        async with self.conn.execute(
+            """
+            SELECT
+                ss.session_id, ss.project_hash, ss.project_path,
+                ss.started_at, ss.last_seen_at, ss.last_model,
+                ss.turns_seen, ss.total_input_tokens, ss.total_output_tokens,
+                rs.avg_score, rs.sample_count,
+                CASE WHEN sr.session_id IS NOT NULL THEN 1 ELSE 0 END AS has_report
+            FROM session_state ss
+            LEFT JOIN (
+                SELECT session_id, AVG(score) AS avg_score, COUNT(*) AS sample_count
+                FROM rubric_scores
+                GROUP BY session_id
+            ) rs ON rs.session_id = ss.session_id
+            LEFT JOIN (
+                SELECT DISTINCT session_id FROM session_reports
+            ) sr ON sr.session_id = ss.session_id
+            ORDER BY ss.last_seen_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def session_rubric_trajectory(self, session_id: str) -> list[dict]:
+        """All rubric_scores for one session, ordered by turn then dim.
+
+        Powers the per-session deep view's trajectory plot. Returns
+        every dimension/turn pair so the UI can pivot however it wants
+        (line per dim, faceted, average per turn).
+        """
+        async with self.conn.execute(
+            """SELECT id, turn_idx, dim_name, score, evidence, suggestion,
+                      created_at, session_mode
+               FROM rubric_scores
+               WHERE session_id=?
+               ORDER BY turn_idx ASC, dim_name ASC""",
+            (session_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
     # ------- Reflection-view signals (derived; no LLM) -------
 
     async def user_turn_rows(
