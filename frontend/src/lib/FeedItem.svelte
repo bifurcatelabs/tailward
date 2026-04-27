@@ -21,6 +21,7 @@
     report_progress: 'report',
     report_ready: 'report',
     session_closed: 'session closed',
+    compact_summary: 'synthesized',
   };
 
   let p = $derived(event.payload || {});
@@ -77,6 +78,21 @@
         >{p.text_preview}</button>
       {/if}
     {:else if kind === 'user_turn'}
+      {#if p.text_preview}
+        <button
+          type="button"
+          class="evidence"
+          class:expanded
+          onclick={() => (expanded = !expanded)}
+        >{p.text_preview}</button>
+      {/if}
+    {:else if kind === 'compact_summary'}
+      <div class="row">
+        <span class="muted small">
+          synthesized handoff (Claude Code <code>/compact</code>) — persisted as a user turn in the
+          transcript via <code>isCompactSummary: true</code>. Not typed by the user.
+        </span>
+      </div>
       {#if p.text_preview}
         <button
           type="button"
@@ -205,6 +221,15 @@
   .chip-claim        { background: rgba(232,122,122,0.10); color: var(--err); border-color: rgba(232,122,122,0.25); }
   .chip-report_progress, .chip-report_ready { background: rgba(232,153,104,0.10); color: var(--accent); border-color: rgba(232,153,104,0.25); }
   .chip-session_closed { background: var(--surface-2); color: var(--muted); border-color: var(--border); }
+  /* Synthesized turns sit visually between user_turn and a system marker —
+     warm copper-tinted so the user notices it isn't them, with a dashed
+     border so it reads as "different shape" not "alarming". */
+  .chip-compact_summary {
+    background: rgba(232,153,104,0.08);
+    color: var(--accent);
+    border-color: rgba(232,153,104,0.35);
+    border-style: dashed;
+  }
 
   .severity {
     font-size: 9px;

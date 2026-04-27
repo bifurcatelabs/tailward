@@ -240,6 +240,12 @@ def create_app() -> FastAPI:
             # user_message events too (content blocks of type
             # ``tool_result``); those are tool output, not human prompts,
             # so filter them out before publishing.
+            #
+            # Tool-emitted synthesized turns (Claude Code's /compact
+            # persists its summary as ``type: "user"`` with
+            # ``isCompactSummary: true``) are surfaced as a distinct
+            # event type so the feed/timeline can render them as
+            # synthesized rather than treating them as the user typing.
             if (
                 fs.session_id
                 and fs.project_hash
@@ -248,15 +254,27 @@ def create_app() -> FastAPI:
             ):
                 preview = (ev.text or "").replace("\r", "").rstrip()
                 if preview.strip():
-                    await daemon.live.publish(
-                        fs.session_id,
-                        fs.project_hash,
-                        "user_turn",
-                        {
-                            "text_preview": preview,
-                            "chars": len(ev.text or ""),
-                        },
-                    )
+                    if ev.synthesized and ev.synthesis_kind == "compact_summary":
+                        await daemon.live.publish(
+                            fs.session_id,
+                            fs.project_hash,
+                            "compact_summary",
+                            {
+                                "text_preview": preview,
+                                "chars": len(ev.text or ""),
+                                "source": "claude_code_compact",
+                            },
+                        )
+                    else:
+                        await daemon.live.publish(
+                            fs.session_id,
+                            fs.project_hash,
+                            "user_turn",
+                            {
+                                "text_preview": preview,
+                                "chars": len(ev.text or ""),
+                            },
+                        )
 
             # Tool-call markers fire whenever a tool_use is present, whether
             # the event is a bare ``tool_use`` or an assistant message that

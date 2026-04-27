@@ -24,6 +24,10 @@ const KNOWN_EVENT_TYPES = new Set([
   'drift',
   'claim',
   'session_closed',
+  // Tool-emitted synthesis (Claude Code /compact). Surfaced as a
+  // distinct kind so the feed can render it explicitly instead of as
+  // a regular user turn. See memory: project_synthesized_turns.md.
+  'compact_summary',
 ]);
 
 const FEED_CAP = 250;

@@ -46,6 +46,13 @@ EVENT_TYPES: frozenset[str] = frozenset(
         "claim",
         "session_closed",
         "turn_metric",
+        # Tool-emitted synthesized turn (e.g. Claude Code's /compact
+        # persisting its generated summary as a user-shaped JSONL entry
+        # flagged ``isCompactSummary: true``). Surfaced separately from
+        # ``user_turn`` so the live feed renders an explicit chip and
+        # cross-session aggregations can exclude it from user-behavior
+        # stats. See memory: project_synthesized_turns.md.
+        "compact_summary",
     }
 )
 

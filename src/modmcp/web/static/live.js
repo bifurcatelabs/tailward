@@ -112,6 +112,14 @@
         session_closed: (p) => `<div class="feed-meta"><span class="feed-kind kind-session_closed">session closed</span><span>${fmtTime()}</span></div>
             <div class="muted">consolidation complete</div>`,
 
+        // Tool-side synthesized turn (Claude Code's /compact). Persisted
+        // as type=user with isCompactSummary=true; we render it as a
+        // distinct kind so it doesn't blend in with typed user turns.
+        // See memory: project_synthesized_turns.md.
+        compact_summary: (p) => `<div class="feed-meta"><span class="feed-kind kind-compact_summary">synthesized</span><span>${fmtTime()}</span></div>
+            <div class="muted" style="font-size:11px">synthesized handoff (Claude Code <code>/compact</code>) — persisted as a user turn via <code>isCompactSummary: true</code>. Not typed by the user.</div>
+            ${p.text_preview ? `<div class="evidence">${escape(p.text_preview)}</div>` : ''}`,
+
         // "turn_metric" is consumed by the v0.2 Platform view (Svelte).
         // The legacy live.js intentionally has no renderer for it so
         // the feed isn't polluted with metric events; the SSE handler

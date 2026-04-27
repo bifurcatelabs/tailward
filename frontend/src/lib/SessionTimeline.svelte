@@ -18,6 +18,7 @@
     report_progress: 'var(--accent)',
     report_ready: 'var(--accent)',
     session_closed: 'var(--muted)',
+    compact_summary: 'var(--accent)',
   };
 
   // Compute layout in epoch-seconds space so a long idle gap reads

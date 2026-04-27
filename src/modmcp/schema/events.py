@@ -44,6 +44,15 @@ class TranscriptEvent:
     # scope snapshot) use this to fire once per logical turn instead of
     # once per content block. Not derived from the JSONL itself.
     new_turn: bool = False
+    # Tool-side synthesized turns. Claude Code's /compact persists its
+    # generated summary as ``type: "user"`` with ``isCompactSummary: true``
+    # — the JSONL is honest about it, but the live UI doesn't surface
+    # the fact. We carry the flag through so the live feed can render
+    # an explicit chip and aggregations can exclude it from "user
+    # behavior" stats. ``synthesis_kind`` discriminates which synthesis
+    # pattern was detected; future patterns add new values.
+    synthesized: bool = False
+    synthesis_kind: str | None = None
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -168,6 +177,12 @@ def parse_line(line: str) -> TranscriptEvent | None:
         if isinstance(sr, str):
             stop_reason = sr
 
+    synthesized = False
+    synthesis_kind: str | None = None
+    if obj.get("isCompactSummary") is True:
+        synthesized = True
+        synthesis_kind = "compact_summary"
+
     return TranscriptEvent(
         raw=obj,
         kind=kind,
@@ -182,6 +197,8 @@ def parse_line(line: str) -> TranscriptEvent | None:
         model=model,
         usage=usage,
         stop_reason=stop_reason,
+        synthesized=synthesized,
+        synthesis_kind=synthesis_kind,
     )
 
 
