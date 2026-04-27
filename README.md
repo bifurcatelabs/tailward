@@ -4,6 +4,11 @@ A local-first, passive-first session-audit layer for Claude Code. A long-running
 
 See [`V1 Proposal.md`](V1%20Proposal.md) for the original design, [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the v1.1 audit layer, and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which of those failure modes Warden currently detects and how.
 
+## Branch state
+
+- **`main`** is tagged **`v1.1.0`** and is the **production audit surface**. Live UI at `/p/<hash>/live/<session_id>` (Jinja templates + vanilla JS). Everything below describes this surface.
+- **`v0.2-trust-layer`** is the **active development branch**. Reframes Warden from a session-audit layer into a multi-surface trust tool — Session / Reflection / Platform views — with a Svelte 5 SPA at `/p/<hash>/live/<session_id>/v2`, a probe worker for the local LLM endpoint, in-band per-turn inference metrics derived from JSONL timestamps + the `usage` block, and instrumentation on every Qwen call. Build with `npm install && npm run build` inside `frontend/`. The legacy v1.1 UI continues to work alongside the v2 surface on this branch.
+
 ## What it does
 
 **v1 — session handoff and continuity (opt-in `active` mode — _unmaintained, see note below_)**
@@ -384,7 +389,7 @@ All workers run in both `passive` and `active` modes; the only mode-gated behavi
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # 97 tests, ~22s
+pytest -q          # 110 tests on v0.2-trust-layer, ~22s
 ```
 
 Troubleshooting:
