@@ -282,4 +282,27 @@ SCHEMA_STATEMENTS: list[str] = [
     CREATE INDEX IF NOT EXISTS idx_probe_results_target_id
         ON probe_results(target, id);
     """,
+    # ---- v0.2 LLM call instrumentation ----
+    """
+    CREATE TABLE IF NOT EXISTS llm_call_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        call_kind TEXT NOT NULL,
+        model TEXT,
+        max_tokens INTEGER,
+        enable_thinking INTEGER,
+        prompt_tokens INTEGER,
+        completion_tokens INTEGER,
+        reasoning_tokens INTEGER,
+        total_tokens INTEGER,
+        finish_reason TEXT,
+        duration_ms INTEGER,
+        usage_json TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_llm_metrics_kind_id
+        ON llm_call_metrics(call_kind, id);
+    """,
 ]

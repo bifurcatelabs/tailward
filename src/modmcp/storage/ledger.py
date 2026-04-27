@@ -673,6 +673,88 @@ class Ledger:
             rows = await cur.fetchall()
         return list(reversed([dict(r) for r in rows]))
 
+    # ------- llm_call_metrics (v0.2 platform) -------
+
+    async def record_llm_call_metric(
+        self,
+        *,
+        call_kind: str,
+        model: str | None,
+        max_tokens: int | None,
+        enable_thinking: bool | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        reasoning_tokens: int | None,
+        total_tokens: int | None,
+        finish_reason: str | None,
+        duration_ms: int | None,
+        usage_json: str | None,
+        error: str | None,
+    ) -> int:
+        cur = await self.conn.execute(
+            """INSERT INTO llm_call_metrics(
+                 call_kind, model, max_tokens, enable_thinking,
+                 prompt_tokens, completion_tokens, reasoning_tokens,
+                 total_tokens, finish_reason, duration_ms, usage_json,
+                 error, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                call_kind, model, max_tokens,
+                None if enable_thinking is None else (1 if enable_thinking else 0),
+                prompt_tokens, completion_tokens, reasoning_tokens,
+                total_tokens, finish_reason, duration_ms, usage_json,
+                error, _now_iso(),
+            ),
+        )
+        await self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    async def llm_call_metrics_recent(
+        self, *, call_kind: str | None = None, limit: int = 200
+    ) -> list[dict]:
+        if call_kind is not None:
+            sql = """SELECT * FROM llm_call_metrics
+                     WHERE call_kind=? ORDER BY id DESC LIMIT ?"""
+            params: tuple = (call_kind, limit)
+        else:
+            sql = """SELECT * FROM llm_call_metrics
+                     ORDER BY id DESC LIMIT ?"""
+            params = (limit,)
+        async with self.conn.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
+    async def llm_call_metrics_summary(self) -> list[dict]:
+        """Per-call-kind aggregates for the inspection endpoint.
+
+        SQLite has no median, so we return count + finish-reason
+        histogram + averages + 95th-percentile-ish via a window of the
+        max value; the route layer picks whichever shape is useful.
+        For the truncation question, ``finish_reason='length'`` count
+        and ``avg(completion_tokens)`` vs ``max_tokens`` are the
+        load-bearing fields.
+        """
+        async with self.conn.execute(
+            """SELECT
+                 call_kind,
+                 COUNT(*) AS n,
+                 SUM(CASE WHEN finish_reason='length' THEN 1 ELSE 0 END) AS n_length,
+                 SUM(CASE WHEN finish_reason='stop'   THEN 1 ELSE 0 END) AS n_stop,
+                 SUM(CASE WHEN error IS NOT NULL      THEN 1 ELSE 0 END) AS n_error,
+                 AVG(prompt_tokens)        AS avg_prompt,
+                 AVG(completion_tokens)    AS avg_completion,
+                 MAX(completion_tokens)    AS max_completion,
+                 AVG(reasoning_tokens)     AS avg_reasoning,
+                 MAX(reasoning_tokens)     AS max_reasoning,
+                 AVG(duration_ms)          AS avg_duration_ms,
+                 MAX(max_tokens)           AS configured_max_tokens
+               FROM llm_call_metrics
+               GROUP BY call_kind
+               ORDER BY call_kind"""
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
     # ------- probe_results (v0.2 platform) -------
 
     async def record_probe_result(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -279,6 +280,13 @@ def create_app() -> FastAPI:
         try:
             from .qwen import QwenClient
             daemon.qwen = QwenClient()
+            # Bridge in the metrics recorder. The QwenClient runs LLM
+            # calls from a worker thread (via ``asyncio.to_thread``);
+            # the recorder needs a reference to this event loop to
+            # post the aiosqlite write back from that thread.
+            daemon.qwen.attach_recorder(
+                daemon.ledger, asyncio.get_running_loop()
+            )
         except Exception as e:
             log.warning("qwen client unavailable: %s", e)
 

@@ -345,6 +345,21 @@ def mount_web(app: FastAPI) -> None:
     # v0.2 Platform endpoints — global telemetry not scoped to a session
     # ------------------------------------------------------------------
 
+    @app.get("/llm-metrics/summary")
+    async def llm_metrics_summary(request: Request) -> JSONResponse:
+        """Per-call-kind aggregates of LLM call instrumentation.
+
+        Answers the open question of whether ``qwen_max_tokens_rubric``
+        / ``_consolidator`` are silently truncating mid-think. Read
+        the ``n_length`` count and the ratio of ``avg_completion`` to
+        ``configured_max_tokens`` per kind; high ``n_length`` with
+        ``avg_completion`` near ``configured_max_tokens`` is the smoking
+        gun.
+        """
+        daemon = request.app.state.daemon
+        rows = await daemon.ledger.llm_call_metrics_summary()
+        return JSONResponse({"by_kind": rows})
+
     @app.get("/probes/recent")
     async def probes_recent(request: Request) -> JSONResponse:
         """Recent probe results across all targets, oldest first.
