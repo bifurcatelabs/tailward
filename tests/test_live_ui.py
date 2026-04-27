@@ -39,18 +39,11 @@ def test_mode_pill_renders_in_header(tmp_path: Path) -> None:
         assert ">passive<" in r.text
 
 
-def test_live_index_redirects_to_latest_session(tmp_path: Path) -> None:
-    proj = tmp_path / "liveidx"
-    proj.mkdir()
-    ph = _seed(proj)
-    with TestClient(create_app()) as client:
-        r = client.get(f"/p/{ph}/live")
-        assert r.status_code == 200
-        # No session exists; the "waiting" template should render.
-        assert "Live session view" in r.text or "No active sessions" in r.text
-
-
-def test_live_session_page_renders_and_state_json(tmp_path: Path) -> None:
+def test_live_state_json_returns_session(tmp_path: Path) -> None:
+    """The live ``state`` JSON endpoint feeds the v0.2 Svelte chassis on
+    initial paint; the Jinja-rendered ``/p/<ph>/live/<sid>`` page that
+    used to ride alongside it was retired in v2.0.0.
+    """
     proj = tmp_path / "livesess"
     proj.mkdir()
     ph = _seed(proj)
@@ -61,11 +54,6 @@ def test_live_session_page_renders_and_state_json(tmp_path: Path) -> None:
             await daemon.ledger.upsert_session("s-live", ph, str(proj))
 
         _run(_seed_session())
-
-        r = client.get(f"/p/{ph}/live/s-live")
-        assert r.status_code == 200
-        assert "live-grid" in r.text
-        assert "data-session-id=\"s-live\"" in r.text
 
         state = client.get(f"/p/{ph}/live/s-live/state")
         assert state.status_code == 200
@@ -98,6 +86,61 @@ def test_live_replay_returns_recent_events(tmp_path: Path) -> None:
         types = [e["event_type"] for e in body["events"]]
         assert "turn" in types
         assert "constraint_violation" in types
+
+
+def test_live_replay_before_paginates_backwards(tmp_path: Path) -> None:
+    """``?before=N`` returns the batch of events with id < N, in
+    chronological order. Lets a client pass the lowest id it currently
+    has rendered and receive the next-older window — the wire shape
+    the load-older affordance binds to."""
+    proj = tmp_path / "before-page"
+    proj.mkdir()
+    ph = _seed(proj)
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        async def _drive():
+            await daemon.ledger.upsert_session("s-bp", ph, str(proj))
+            for i in range(150):
+                await daemon.live.publish(
+                    "s-bp", ph, "turn",
+                    {"turn_idx": i, "chars": i, "marker": i},
+                )
+
+        _run(_drive())
+
+        # First fetch: page-load tail. Should be the latest 100 markers.
+        r = client.get(f"/p/{ph}/live/s-bp/replay")
+        assert r.status_code == 200
+        first = r.json()["events"]
+        assert len(first) == 100
+        first_markers = [e["payload"]["marker"] for e in first]
+        assert max(first_markers) == 149
+        oldest_id_seen = first[0]["id"]
+
+        # Second fetch: load older. before=oldest_id_seen returns the
+        # batch immediately before that — markers 0..49 in this case.
+        r2 = client.get(
+            f"/p/{ph}/live/s-bp/replay?before={oldest_id_seen}"
+        )
+        assert r2.status_code == 200
+        older = r2.json()["events"]
+        # 150 events written, 100 already seen → 50 older remain.
+        assert len(older) == 50
+        older_markers = [e["payload"]["marker"] for e in older]
+        assert older_markers == sorted(older_markers), (
+            "load-older batch must be chronological"
+        )
+        assert max(older_markers) < min(first_markers), (
+            "load-older batch must precede the initial tail"
+        )
+
+        # Third fetch: nothing older than the absolute first id.
+        r3 = client.get(
+            f"/p/{ph}/live/s-bp/replay?before={older[0]['id']}"
+        )
+        assert r3.status_code == 200
+        assert r3.json()["events"] == []
 
 
 def test_live_replay_returns_tail_not_prefix(tmp_path: Path) -> None:
@@ -139,6 +182,36 @@ def test_live_replay_returns_tail_not_prefix(tmp_path: Path) -> None:
         # Order should be chronological so live.js renders correctly.
         assert markers == sorted(markers), (
             f"replay events not ordered chronologically: {markers[:5]}..."
+        )
+
+
+def test_live_page_serves_svelte_chassis(tmp_path: Path) -> None:
+    """The canonical ``/p/<ph>/live/<sid>`` URL serves the Svelte SPA
+    bundle (formerly the ``/v2`` suffix). The route must render the
+    mount node and either a bundle script tag (if ``dist/`` is built)
+    or the build-hint fallback — never 500 if the bundle is missing.
+    """
+    proj = tmp_path / "live-page"
+    proj.mkdir()
+    ph = _seed(proj)
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        async def _seed_session():
+            await daemon.ledger.upsert_session("s-live", ph, str(proj))
+
+        _run(_seed_session())
+
+        r = client.get(f"/p/{ph}/live/s-live")
+        assert r.status_code == 200
+        assert f'data-ph="{ph}"' in r.text
+        assert 'data-session-id="s-live"' in r.text
+        # Either a bundle script (dist built) or the build-hint message
+        # — both are acceptable; a route that 500s when the bundle is
+        # missing would be the regression we care about.
+        assert (
+            "/static/dist/" in r.text
+            or "npm install &amp;&amp; npm run build" in r.text
         )
 
 

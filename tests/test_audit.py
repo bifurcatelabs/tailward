@@ -91,6 +91,43 @@ def test_verify_skips_change_verbs_without_direction(tmp_path: Path) -> None:
     assert status == "skip"
 
 
+def test_extract_skips_quoted_meta_text() -> None:
+    """Backticks, fenced code blocks, and blockquotes are quotation
+    contexts — what's inside them is not a first-person completion
+    claim by the model. Without this filter, a turn that *discusses*
+    the audit ("the audit flagged my 'I removed FooBar'") would itself
+    trip the audit and contradict against the test file FooBar lives
+    in. Real false-positive seen during dogfooding."""
+    inline_quoted = 'The audit flagged my `"I removed FooBar"` from earlier.'
+    assert extract_claims(inline_quoted) == []
+
+    fenced = (
+        "Here's what the assistant said:\n"
+        "```\n"
+        "I removed TranscriptEvent from the codebase entirely.\n"
+        "```\n"
+        "But that wasn't really a claim, just an example."
+    )
+    assert extract_claims(fenced) == []
+
+    blockquote = (
+        "Earlier I noted:\n"
+        "> I deleted the QwenClient class\n"
+        "Worth revisiting later."
+    )
+    assert extract_claims(blockquote) == []
+
+    # Sanity: an *unquoted* claim in the same paragraph still fires.
+    mixed = (
+        "Earlier I said `I removed FooBar` (just an example). "
+        "But really, I removed the OldHandler class today."
+    )
+    claims = extract_claims(mixed)
+    assert any("OldHandler" in c.text for c in claims), claims
+    # The quoted FooBar must NOT have produced a claim.
+    assert not any("FooBar" in c.text for c in claims), claims
+
+
 def test_extract_filters_plain_english_identifiers() -> None:
     """Lowercase dictionary words must not become grep candidates. Real
     bug: user said ``tests/ is gone`` and the audit grepped for ``gone``,

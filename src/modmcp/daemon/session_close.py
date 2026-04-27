@@ -41,6 +41,26 @@ FAILURE_MODES: list[tuple[int, str, str]] = [
 ]
 
 
+# Single source of truth for the consolidator prompt; surfaced verbatim
+# in /llm-profiles. The runtime user prompt is built via
+# PROMPT_USER_TEMPLATE.format(...) below.
+PROMPT_SYSTEM: str = (
+    "You are compiling an end-of-session report card for a coding "
+    "agent. For EACH failure mode listed, return a JSON object with "
+    "score (0-5), evidence (short text), and suggestion (<=30 "
+    "words). Be conservative. Default to 3 when uncertain.\n"
+    "Return JSON shaped as:\n"
+    "{\"modes\": {\"1\": {...}, \"2\": {...}, ...}}\n"
+    "Use the mode numbers as keys."
+)
+PROMPT_USER_TEMPLATE: str = (
+    "Failure modes:\n{modes_desc}\n\n"
+    "Observed constraint violations (last 20):\n{violations_json}\n\n"
+    "Scope snapshots (last 10):\n{snapshots_json}\n\n"
+    "Rubric samples (last 16):\n{rubric_json}"
+)
+
+
 @dataclass
 class _ClosedSession:
     session_id: str
@@ -267,15 +287,6 @@ class SessionCloseDetector:
         rubric_rows: list[dict],
     ) -> dict[int, dict]:
         modes_desc = "\n".join(f"{mid}. {name} — {desc}" for mid, name, desc in FAILURE_MODES)
-        system = (
-            "You are compiling an end-of-session report card for a coding "
-            "agent. For EACH failure mode listed, return a JSON object with "
-            "score (0-5), evidence (short text), and suggestion (<=30 "
-            "words). Be conservative. Default to 3 when uncertain.\n"
-            "Return JSON shaped as:\n"
-            "{\"modes\": {\"1\": {...}, \"2\": {...}, ...}}\n"
-            "Use the mode numbers as keys."
-        )
         v_summary = json.dumps([
             {k: v.get(k) for k in ("rule_id", "rule_text", "evidence", "severity")}
             for v in violations[-20:]
@@ -288,15 +299,15 @@ class SessionCloseDetector:
             {k: r.get(k) for k in ("turn_idx", "dim_name", "score", "evidence")}
             for r in rubric_rows[-16:]
         ])
-        user = (
-            f"Failure modes:\n{modes_desc}\n\n"
-            f"Observed constraint violations (last 20):\n{v_summary}\n\n"
-            f"Scope snapshots (last 10):\n{s_summary}\n\n"
-            f"Rubric samples (last 16):\n{r_summary}"
+        user = PROMPT_USER_TEMPLATE.format(
+            modes_desc=modes_desc,
+            violations_json=v_summary,
+            snapshots_json=s_summary,
+            rubric_json=r_summary,
         )
 
         payload = await self._daemon.qwen.complete_json(
-            system, user, kind="consolidator"
+            PROMPT_SYSTEM, user, kind="consolidator"
         )
         modes = payload.get("modes") or {}
         out: dict[int, dict] = {}

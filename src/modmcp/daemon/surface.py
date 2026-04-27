@@ -23,6 +23,7 @@ import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
+from ..config import get_config
 from ..paths import project_dir
 
 if TYPE_CHECKING:
@@ -69,6 +70,12 @@ class Surfacer:
         self._notify(session_id, kind, severity, text)
 
     def _notify(self, session_id: str, kind: str, severity: str, text: str) -> None:
+        # Off by default — the live web UI is the primary surface and
+        # an OS toast on top of it is redundant for an interactive
+        # session. The ledger row + LiveBus event have already fired by
+        # the time we get here.
+        if not get_config().os_notifications_enabled:
+            return
         key = (session_id, kind)
         now = time.monotonic()
         last = self._last_notified.get(key, 0.0)
@@ -81,9 +88,9 @@ class Surfacer:
             from plyer import notification  # type: ignore
 
             notification.notify(  # type: ignore[attr-defined]
-                title=f"modmcp: {kind} ({severity})",
+                title=f"warden: {kind} ({severity})",
                 message=text[:200],
-                app_name="modmcp",
+                app_name="warden",
                 timeout=10,
             )
         except Exception as e:

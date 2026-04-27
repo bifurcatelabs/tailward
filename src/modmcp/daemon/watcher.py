@@ -19,6 +19,26 @@ from ..schema.events import TranscriptEvent, parse_line
 from ..storage.ledger import Ledger
 from .state import StateStore
 
+
+def _path_matches_filter(jsonl_path: Path, root: Path, entries: list[str]) -> bool:
+    """True when ``jsonl_path`` matches any entry in ``entries``.
+
+    Each entry is matched against either the sanitized folder name
+    (Claude Code's per-project directory name, e.g. ``C--warden``) or
+    the de-sanitized form of that name. Both forms are accepted so users
+    can write ``C:/warden`` or ``C--warden`` — whichever they prefer —
+    in their config and have it work.
+    """
+    try:
+        rel = jsonl_path.relative_to(root)
+    except ValueError:
+        return False
+    if not rel.parts:
+        return False
+    sanitized = rel.parts[0]
+    candidates = {sanitized, _sanitize_to_path(sanitized)}
+    return any(entry in candidates for entry in entries)
+
 log = logging.getLogger(__name__)
 
 EventHandler = Callable[[TranscriptEvent, "FileState"], Awaitable[None]]
@@ -58,6 +78,8 @@ class TranscriptWatcher:
         ledger: Ledger,
         on_event: EventHandler | None = None,
         root: Path | None = None,
+        watch_paths: list[str] | None = None,
+        exclude_paths: list[str] | None = None,
     ) -> None:
         self._state = state
         self._ledger = ledger
@@ -66,6 +88,21 @@ class TranscriptWatcher:
         self._files: dict[Path, FileState] = {}
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        # Empty list = no constraint (watch everything). See
+        # Config.watch_paths / Config.exclude_paths for semantics.
+        self._watch_paths = list(watch_paths or ())
+        self._exclude_paths = list(exclude_paths or ())
+
+    def _path_allowed(self, jsonl_path: Path) -> bool:
+        if self._exclude_paths and _path_matches_filter(
+            jsonl_path, self._root, self._exclude_paths
+        ):
+            return False
+        if self._watch_paths and not _path_matches_filter(
+            jsonl_path, self._root, self._watch_paths
+        ):
+            return False
+        return True
 
     async def start(self) -> None:
         self._stop.clear()
@@ -111,6 +148,8 @@ class TranscriptWatcher:
                     p = Path(path_str)
                     if p.suffix != ".jsonl":
                         continue
+                    if not self._path_allowed(p):
+                        continue
                     await self._process_file(p)
         except RuntimeError as e:
             # watchfiles raises if the watched root disappears mid-run; treat
@@ -122,6 +161,8 @@ class TranscriptWatcher:
 
     async def _prime_existing(self) -> None:
         for jsonl in self._root.rglob("*.jsonl"):
+            if not self._path_allowed(jsonl):
+                continue
             await self._process_file(jsonl)
 
     async def _process_file(self, path: Path) -> None:
@@ -133,6 +174,21 @@ class TranscriptWatcher:
             stored = await self._ledger.get_offset(session_id)
             fs.offset = stored
             fs.session_id = session_id
+            # Rehydrate the project from session_state if this session
+            # is already known. Without this, a daemon restart while
+            # the user's cwd is in a subdir (e.g. ``C:\warden\frontend``
+            # for an ``npm run build``) would seed FileState from the
+            # next post-offset event's cwd — which is the subdir, not
+            # the project root — and every downstream worker would
+            # persist under a phantom project_hash. The session_state
+            # row carries the canonical pair; trust it.
+            try:
+                sess = await self._ledger.get_session(session_id)
+            except Exception:
+                sess = None
+            if sess:
+                fs.project_path = sess["project_path"]
+                fs.project_hash = sess["project_hash"]
             self._files[path] = fs
 
         try:

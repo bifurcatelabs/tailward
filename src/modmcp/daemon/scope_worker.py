@@ -114,19 +114,35 @@ class ScopeWorker:
             await self._emit_snapshot(scope, fs)
 
     async def _emit_snapshot(self, scope: _SessionScope, fs) -> None:
+        from .mode_profile import (
+            active_profile_for_project,
+            session_mode_for_project,
+        )
+
         cfg = get_config()
+        # Mode-aware: an exploration / yolo / unknown session resolves
+        # to a profile with ``scope_creep_floor=None``, in which case
+        # the snapshot still records counters but no creep event ever
+        # fires. Build mode keeps the SWE thresholds.
+        profile = active_profile_for_project(fs.project_path)
+        mode_label = session_mode_for_project(fs.project_path)
+        floor = profile.scope_creep_floor
+        factor = profile.scope_creep_factor
+
         baseline = await self._daemon.ledger.baseline_files_touched(
             fs.project_hash, cfg.scope_baseline_window
         )
         files_n = len(scope.files_touched)
-        creep_threshold = max(
-            cfg.scope_creep_floor, int(baseline * cfg.scope_creep_factor)
-        )
-        is_creep = (
-            files_n >= cfg.scope_creep_floor
-            and baseline > 0
-            and files_n > creep_threshold
-        )
+        if floor is None:
+            creep_threshold = None
+            is_creep = False
+        else:
+            creep_threshold = max(floor, int(baseline * factor))
+            is_creep = (
+                files_n >= floor
+                and baseline > 0
+                and files_n > creep_threshold
+            )
 
         tool_kinds_json = json.dumps(dict(scope.tool_kinds))
         sid = await self._daemon.ledger.record_scope_snapshot(
@@ -138,6 +154,7 @@ class ScopeWorker:
             tool_kinds_json=tool_kinds_json,
             is_creep=is_creep,
             baseline=baseline,
+            session_mode=mode_label,
         )
 
         if getattr(self._daemon, "live", None) is not None:
@@ -154,6 +171,10 @@ class ScopeWorker:
                         "tool_kinds": dict(scope.tool_kinds),
                         "baseline": baseline,
                         "threshold": creep_threshold,
+                        # cosmetic — UI uses this to label "creep" vs
+                        # "spread" depending on mode framing.
+                        "label": profile.scope_event_label,
+                        "session_mode": mode_label or profile.name,
                     },
                 )
             except Exception:

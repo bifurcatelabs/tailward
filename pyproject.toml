@@ -4,12 +4,12 @@ build-backend = "hatchling.build"
 
 [project]
 name = "modmcp"
-version = "0.1.0"
-description = "Session-handoff and accountability layer for Claude Code. A local warden daemon that preserves context and audits agent claims across sessions."
+version = "2.0.0"
+description = "Warden — a local-first trust layer for AI coding workflows. Passive transcript audit, mode-aware rubric scoring, in-band inference-path metrics. Internal package name is modmcp; the CLI binary and product surface are warden."
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "modmcp" }]
+authors = [{ name = "Glenn Walker", email = "glenn@glennw.net" }]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -20,7 +20,6 @@ dependencies = [
     "typer>=0.12",
     "python-frontmatter>=1.1",
     "jinja2>=3.1",
-    "mcp>=1.0",
     "openai>=1.40",
     "plyer>=2.1",
     "tomli>=2.0; python_version < '3.11'",
@@ -33,7 +32,15 @@ dev = [
     "ruff>=0.6",
 ]
 
+[project.urls]
+Repository = "https://git.bifurcate.io/active/warden"
+
 [project.scripts]
+# ``warden`` is the canonical CLI binary as of v2.0.0. ``modmcp`` is
+# kept as a backward-compat alias for users who already have it in
+# their muscle memory or wired into Claude Code MCP / hook configs.
+# Both invoke the same entry point. Slated for removal in v3.0.0.
+warden = "modmcp.cli:main"
 modmcp = "modmcp.cli:main"
 
 [tool.hatch.build.targets.wheel]

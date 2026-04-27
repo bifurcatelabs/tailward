@@ -1,4 +1,9 @@
-"""``modmcp`` CLI: daemon lifecycle, handoff, hook, link, mcp server."""
+"""``warden`` CLI: daemon lifecycle, handoff, hook, link.
+
+Internal package name remains ``modmcp`` per the v2.0.0 light-path
+rebrand. The legacy ``modmcp`` console script is kept as a backward-
+compat alias; both invoke the same entry point.
+"""
 
 from __future__ import annotations
 
@@ -28,7 +33,7 @@ from .schema.intent import empty_intent, load_intent, save_intent
 
 app = typer.Typer(
     add_completion=False,
-    help="modmcp — session-handoff and accountability layer for Claude Code.",
+    help="warden — local-first trust layer for AI coding workflows.",
     no_args_is_help=True,
 )
 
@@ -49,7 +54,7 @@ def _root() -> None:
 
 @app.command()
 def version() -> None:
-    """Print modmcp version."""
+    """Print warden version."""
     typer.echo(__version__)
 
 
@@ -65,7 +70,7 @@ def daemon_start() -> None:
         typer.echo(f"failed to start daemon: {e}", err=True)
         raise typer.Exit(code=1) from e
     typer.echo(
-        f"modmcp daemon started "
+        f"warden daemon started "
         f"(pid={pid}, mode={get_config().warden_mode}, "
         f"url={lifecycle.health_url()})"
     )
@@ -177,7 +182,7 @@ def link(
     project_path = (project or Path.cwd()).resolve()
     target = intent_path(str(project_path))
     if not target.exists():
-        typer.echo(f"no intent.md at {target}; run `modmcp handoff` first", err=True)
+        typer.echo(f"no intent.md at {target}; run `warden handoff` first", err=True)
         raise typer.Exit(code=2)
 
     link_dir = project_path / ".modmcp"
@@ -235,17 +240,6 @@ def hook_userpromptsubmit() -> None:
         pass
     # Silent pass-through on any failure.
     sys.exit(0)
-
-
-# ---------------- mcp ----------------
-
-
-@app.command()
-def mcp() -> None:
-    """Run the stdio MCP server (invoked by Claude Code MCP config)."""
-    from .mcp_server import run_stdio
-
-    run_stdio()
 
 
 # ---------------- helpers ----------------

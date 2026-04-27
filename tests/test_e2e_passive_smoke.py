@@ -175,6 +175,98 @@ def _assistant_with_tool_use(
     }
 
 
+EXPLORATION_SESSION_ID = "session-exploration-001"
+
+
+@pytest.fixture
+def exploration_jsonl(tmp_path: Path) -> Path:
+    claude_root = Path(os.environ["CLAUDE_PROJECTS_ROOT"])
+    sess_dir = claude_root / "exploration-project-sanitized"
+    sess_dir.mkdir(parents=True)
+    f = sess_dir / f"{EXPLORATION_SESSION_ID}.jsonl"
+    f.touch()
+    return f
+
+
+@pytest.fixture
+def exploration_project(tmp_path: Path) -> Path:
+    proj = tmp_path / "exploration-project"
+    proj.mkdir()
+    return proj
+
+
+def test_exploration_mode_disables_scope_creep_and_tags_session_mode(
+    exploration_project: Path, exploration_jsonl: Path
+) -> None:
+    """The user labels their session ``exploration`` in intent.md.
+    Workers honor the mode profile: scope_snapshots fire, but
+    scope_creep events do NOT — even if files_touched would have
+    crossed the build-mode threshold. The persisted scope_snapshot
+    rows carry the session_mode label so trend math doesn't mix
+    modes silently."""
+    cwd = str(exploration_project)
+    # Seed an intent with session_mode = "exploration".
+    intent = empty_intent(cwd, "exploration-project")
+    intent.front.session_mode = "exploration"
+    save_intent(intent, intent_path(cwd))
+
+    # Drive a tool_use sequence that would exceed the build-mode
+    # creep floor (12). We deliberately touch 14 distinct files.
+    edits = [
+        _assistant_with_tool_use(
+            cwd,
+            "Edit",
+            {"file_path": f"src/file_{i:02d}.py", "old_string": "x", "new_string": "y"},
+            tc_id=f"tc-edit-{i}",
+        )
+        for i in range(14)
+    ]
+    events = [_user_event(cwd, "explore the parser module")] + edits + [
+        _assistant_event("Done; spread some changes around.")
+    ]
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+        daemon.qwen = None
+        _append_jsonl(exploration_jsonl, events)
+
+        def _snapshots() -> list[dict]:
+            return _run(daemon.ledger.scope_snapshots_for_session(EXPLORATION_SESSION_ID))
+
+        # Wait for the full run to drain — one snapshot per edit plus
+        # a trailing one on the assistant_message. Asserting on the
+        # peak files_touched_count rather than just count >=1 makes
+        # the timing race deterministic.
+        assert _wait_until(
+            lambda: any(s["files_touched_count"] >= 14 for s in _snapshots()),
+            timeout=15.0,
+        ), (
+            "scope worker did not see all 14 file edits land in any snapshot; "
+            f"got: {[s['files_touched_count'] for s in _snapshots()]}"
+        )
+        snaps = _snapshots()
+
+        # Mode is stamped on every persisted row.
+        for s in snaps:
+            assert s["session_mode"] == "exploration", (
+                f"snapshot missing session_mode tag: {s}"
+            )
+
+        # Most importantly: NO snapshot is marked is_creep=1, even
+        # though files_touched (14) >= the build-mode floor (12).
+        # Exploration mode profile has scope_creep_floor=None.
+        assert all(s["is_creep"] == 0 for s in snaps), (
+            f"exploration mode should never fire is_creep, got: {snaps}"
+        )
+
+        # And no scope_creep LiveBus event fired.
+        live_rows = _run(daemon.ledger.live_events_for_session(EXPLORATION_SESSION_ID))
+        types = {r["event_type"] for r in live_rows}
+        assert "scope_creep" not in types, (
+            f"exploration mode should not emit scope_creep; got: {types}"
+        )
+
+
 def test_passive_pipeline_smoke(
     fake_project: Path, seeded_intent: Path, jsonl_path: Path
 ) -> None:
@@ -411,6 +503,181 @@ def test_logical_turn_coalescing_and_usage_capture(
         assert "Done; that file is large." in previews, (
             f"second turn missing prose in preview: {previews}"
         )
+
+
+TURN_METRIC_SESSION_ID = "session-metrics-001"
+
+
+@pytest.fixture
+def metric_jsonl(tmp_path: Path) -> Path:
+    claude_root = Path(os.environ["CLAUDE_PROJECTS_ROOT"])
+    sess_dir = claude_root / "metric-project-sanitized"
+    sess_dir.mkdir(parents=True)
+    f = sess_dir / f"{TURN_METRIC_SESSION_ID}.jsonl"
+    f.touch()
+    return f
+
+
+@pytest.fixture
+def metric_project(tmp_path: Path) -> Path:
+    proj = tmp_path / "metric-project"
+    proj.mkdir()
+    return proj
+
+
+def _stamped_msg(
+    cwd: str,
+    session_id: str,
+    role: str,
+    *,
+    timestamp: str,
+    content_blocks: list[dict] | None = None,
+    text: str | None = None,
+    message_id: str | None = None,
+    model: str | None = None,
+    usage: dict | None = None,
+    stop_reason: str | None = None,
+) -> dict:
+    out: dict = {
+        "type": "user" if role == "user" else "assistant",
+        "sessionId": session_id,
+        "cwd": cwd,
+        "timestamp": timestamp,
+    }
+    msg: dict = {"role": role}
+    if message_id:
+        msg["id"] = message_id
+    if model:
+        msg["model"] = model
+    if usage:
+        msg["usage"] = usage
+    if stop_reason:
+        msg["stop_reason"] = stop_reason
+    if content_blocks is not None:
+        msg["content"] = content_blocks
+    elif text is not None:
+        msg["content"] = text
+    out["message"] = msg
+    return out
+
+
+def test_probe_worker_records_unreachable_endpoint_as_error(
+    tmp_path: Path,
+) -> None:
+    """Probe worker logs an error row when the configured endpoint
+    is unreachable. Test environment points at an obviously-dead port
+    so the worker hits the connection-refused branch quickly."""
+    home = tmp_path / "modmcp_home"
+    cfg_text = home.joinpath("config.toml").read_text(encoding="utf-8")
+    home.joinpath("config.toml").write_text(
+        cfg_text + (
+            '\n'
+            'qwen_endpoint = "http://127.0.0.1:1/v1"\n'
+            'probe_interval_seconds = 0.1\n'
+            'probe_timeout_seconds = 0.5\n'
+        ),
+        encoding="utf-8",
+    )
+    from modmcp import config as cfg_mod
+    cfg_mod._cached = None
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        def _probes() -> list[dict]:
+            return _run(daemon.ledger.recent_probe_results(target="local_llm"))
+
+        assert _wait_until(lambda: len(_probes()) >= 1, timeout=5.0), (
+            "probe worker did not record any result"
+        )
+        latest = _probes()[-1]
+        assert latest["target"] == "local_llm"
+        assert latest["status"] in ("error", "timeout")
+        assert latest["error"], "expected an error message on a dead endpoint"
+
+
+def test_turn_metrics_derived_from_timestamps_and_usage(
+    metric_project: Path, metric_jsonl: Path
+) -> None:
+    """One assistant turn closes when the next user_message arrives.
+
+    Drives: user_msg @ T0, then assistant blocks (thinking, text,
+    tool_use) at T+0.5s, T+1.5s, T+2.0s sharing one message_id, then
+    a user reply that closes the turn. Asserts:
+
+    1. exactly one turn_metrics row exists for the session
+    2. prompt_to_response_ms ≈ 500
+    3. response_duration_ms ≈ 1500 (first-to-last block)
+    4. output_tps reflects output_tokens / response_duration
+    5. cache_hit_ratio computed from usage block
+    """
+    cwd = str(metric_project)
+    usage = {
+        "input_tokens": 50,
+        "output_tokens": 300,
+        "cache_read_input_tokens": 9000,
+        "cache_creation_input_tokens": 100,
+    }
+
+    events = [
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "user",
+            text="hey",
+            timestamp="2026-04-25T18:00:00.000+00:00",
+        ),
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "assistant",
+            content_blocks=[{"type": "thinking", "thinking": "..."}],
+            timestamp="2026-04-25T18:00:00.500+00:00",
+            message_id="msg_M1", model="claude-opus-4-7",
+            usage=usage, stop_reason="end_turn",
+        ),
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "assistant",
+            content_blocks=[{"type": "text", "text": "Sure."}],
+            timestamp="2026-04-25T18:00:01.500+00:00",
+            message_id="msg_M1", model="claude-opus-4-7",
+            usage=usage, stop_reason="end_turn",
+        ),
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "assistant",
+            content_blocks=[{"type": "text", "text": " More text."}],
+            timestamp="2026-04-25T18:00:02.000+00:00",
+            message_id="msg_M1", model="claude-opus-4-7",
+            usage=usage, stop_reason="end_turn",
+        ),
+        _stamped_msg(
+            cwd, TURN_METRIC_SESSION_ID, "user",
+            text="ok",
+            timestamp="2026-04-25T18:00:03.000+00:00",
+        ),
+    ]
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+        daemon.qwen = None
+        _append_jsonl(metric_jsonl, events)
+
+        def _metrics() -> list[dict]:
+            return _run(daemon.ledger.turn_metrics_for_session(TURN_METRIC_SESSION_ID))
+
+        assert _wait_until(lambda: len(_metrics()) == 1, timeout=8.0), (
+            f"expected exactly one turn_metric row, got: {_metrics()}"
+        )
+        row = _metrics()[0]
+        assert row["message_id"] == "msg_M1"
+        assert row["model"] == "claude-opus-4-7"
+        # 500ms between user prompt and first assistant block
+        assert 400 <= row["prompt_to_response_ms"] <= 700, row
+        # 1500ms between first and last assistant block (T+0.5 to T+2.0)
+        assert 1300 <= row["response_duration_ms"] <= 1700, row
+        # output_tokens=300 over ~1.5s -> ~200 tps
+        assert row["output_tps"] is not None and 150 <= row["output_tps"] <= 250, row
+        # Cache hit ratio: 9000 / (9000 + 50 + 100) ≈ 0.9836
+        assert row["cache_hit_ratio"] is not None
+        assert 0.97 <= row["cache_hit_ratio"] <= 0.99, row
+        assert row["output_tokens"] == 300
+        assert row["cache_read_tokens"] == 9000
 
 
 RESTART_SESSION_ID = "session-restart-001"

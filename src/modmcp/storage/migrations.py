@@ -22,6 +22,17 @@ ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     ("session_state", "total_cache_read_tokens", "INTEGER NOT NULL DEFAULT 0"),
     ("session_state", "total_cache_creation_tokens", "INTEGER NOT NULL DEFAULT 0"),
     ("session_state", "last_model", "TEXT"),
+    # ``session_mode`` is stamped on each persisted row so cross-session
+    # trend math can group by mode and not silently mix yolo / build.
+    # Pre-mode-aware rows stay NULL.
+    ("rubric_scores", "session_mode", "TEXT"),
+    ("scope_snapshots", "session_mode", "TEXT"),
+    ("turn_metrics", "session_mode", "TEXT"),
+    # ``subject`` distinguishes who is being scored: 'assistant' (the
+    # default for all pre-self-rubric rows) or 'user'. The Reflection
+    # view's self-rubric panel reads subject='user'; the existing
+    # session view's rubric rail reads subject='assistant'.
+    ("rubric_scores", "subject", "TEXT NOT NULL DEFAULT 'assistant'"),
 ]
 
 
@@ -230,5 +241,79 @@ SCHEMA_STATEMENTS: list[str] = [
     """
     CREATE INDEX IF NOT EXISTS idx_live_events_session
         ON live_events(session_id, id);
+    """,
+    # ---- v0.2 inference-path metrics ----
+    """
+    CREATE TABLE IF NOT EXISTS turn_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL,
+        project_hash TEXT NOT NULL,
+        message_id TEXT,
+        turn_idx INTEGER,
+        model TEXT,
+        stop_reason TEXT,
+        -- Wall-clock metrics derived from JSONL timestamps
+        prompt_to_response_ms INTEGER,
+        response_duration_ms INTEGER,
+        -- Token metrics from the assistant's usage block
+        input_tokens INTEGER NOT NULL DEFAULT 0,
+        output_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_read_tokens INTEGER NOT NULL DEFAULT 0,
+        cache_creation_tokens INTEGER NOT NULL DEFAULT 0,
+        -- Derived
+        output_tps REAL,
+        cache_hit_ratio REAL,
+        first_block_at TEXT,
+        last_block_at TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_turn_metrics_session
+        ON turn_metrics(session_id, id);
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_turn_metrics_project_model
+        ON turn_metrics(project_hash, model, id);
+    """,
+    # ---- v0.2 platform probes ----
+    """
+    CREATE TABLE IF NOT EXISTS probe_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target TEXT NOT NULL,
+        url TEXT NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('ok','timeout','error')),
+        latency_ms INTEGER,
+        detail TEXT,
+        error TEXT,
+        ts TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_probe_results_target_id
+        ON probe_results(target, id);
+    """,
+    # ---- v0.2 LLM call instrumentation ----
+    """
+    CREATE TABLE IF NOT EXISTS llm_call_metrics (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        call_kind TEXT NOT NULL,
+        model TEXT,
+        max_tokens INTEGER,
+        enable_thinking INTEGER,
+        prompt_tokens INTEGER,
+        completion_tokens INTEGER,
+        reasoning_tokens INTEGER,
+        total_tokens INTEGER,
+        finish_reason TEXT,
+        duration_ms INTEGER,
+        usage_json TEXT,
+        error TEXT,
+        created_at TEXT NOT NULL
+    );
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_llm_metrics_kind_id
+        ON llm_call_metrics(call_kind, id);
     """,
 ]

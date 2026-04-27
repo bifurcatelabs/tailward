@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -56,7 +57,10 @@ class Daemon:
         self.constraints = None
         self.scope = None
         self.rubric = None
+        self.user_rubric = None
         self.session_close = None
+        # v0.2 platform probe worker.
+        self.probe = None
         # Live event bus; persister is attached after ledger connects.
         cfg = get_config()
         self.live = LiveBus(
@@ -91,6 +95,50 @@ def create_app() -> FastAPI:
         daemon.live.set_persister(_persist_live)
 
         async def on_event(ev, fs):
+            # In-flight turn tracking for per-turn inference-path metrics.
+            # We close the in-flight turn at two transition points: (a)
+            # a new logical assistant turn starts (different message_id),
+            # and (b) a user_message arrives (the human responded, so
+            # any pending assistant turn is done). Mid-turn assistant
+            # blocks just extend the last_block_at timestamp.
+            st = daemon.state.get(fs.session_id) if fs.session_id else None
+            if st is not None:
+                if ev.kind == "assistant_message":
+                    if ev.new_turn:
+                        await _close_turn_metric(daemon, st, fs)
+                        if (
+                            ev.message_id
+                            and ev.model
+                            and ev.model != "<synthetic>"
+                        ):
+                            st.in_flight_turn = {
+                                "message_id": ev.message_id,
+                                "first_block_at": ev.timestamp,
+                                "last_block_at": ev.timestamp,
+                                "model": ev.model,
+                                "stop_reason": ev.stop_reason,
+                                "usage": dict(ev.usage) if ev.usage else None,
+                                "turn_idx": st.turns_seen,
+                                "prompt_to_response_ms": _ms_between(
+                                    st.last_user_msg_at, ev.timestamp
+                                ),
+                            }
+                    elif st.in_flight_turn and ev.message_id == st.in_flight_turn.get(
+                        "message_id"
+                    ):
+                        if ev.timestamp:
+                            st.in_flight_turn["last_block_at"] = ev.timestamp
+                        # Usage / stop_reason are duplicated across blocks
+                        # of one logical turn; the most recent values win.
+                        if ev.usage:
+                            st.in_flight_turn["usage"] = dict(ev.usage)
+                        if ev.stop_reason:
+                            st.in_flight_turn["stop_reason"] = ev.stop_reason
+                elif ev.kind == "user_message":
+                    await _close_turn_metric(daemon, st, fs)
+                    if ev.timestamp:
+                        st.last_user_msg_at = ev.timestamp
+
             # Drift only fires on assistant turns (we're judging the assistant's
             # trajectory). Audit fires on BOTH user and assistant turns — user
             # turns often carry strong first-person claims about external
@@ -119,6 +167,13 @@ def create_app() -> FastAPI:
                     await daemon.scope.enqueue(ev, fs)
                 if daemon.rubric is not None and ev.kind == "assistant_message":
                     await daemon.rubric.enqueue(ev, fs)
+                if (
+                    getattr(daemon, "user_rubric", None) is not None
+                    and ev.kind == "user_message"
+                    and not ev.synthesized
+                    and _looks_like_human_prompt(ev)
+                ):
+                    await daemon.user_rubric.enqueue(ev, fs)
 
             # Publish turn-level markers to the live bus so the web feed
             # sees activity even without worker findings. Fires at most
@@ -127,7 +182,6 @@ def create_app() -> FastAPI:
             # preview reflects real prose or a tool action \u2014 not an
             # empty header. Tool-only turns still fire (with empty
             # preview) so the right-rail token totals advance.
-            st = daemon.state.get(fs.session_id) if fs.session_id else None
             already_emitted = (
                 st.last_turn_emit_msg_id if st else None
             )
@@ -194,6 +248,12 @@ def create_app() -> FastAPI:
             # user_message events too (content blocks of type
             # ``tool_result``); those are tool output, not human prompts,
             # so filter them out before publishing.
+            #
+            # Tool-emitted synthesized turns (Claude Code's /compact
+            # persists its summary as ``type: "user"`` with
+            # ``isCompactSummary: true``) are surfaced as a distinct
+            # event type so the feed/timeline can render them as
+            # synthesized rather than treating them as the user typing.
             if (
                 fs.session_id
                 and fs.project_hash
@@ -202,15 +262,27 @@ def create_app() -> FastAPI:
             ):
                 preview = (ev.text or "").replace("\r", "").rstrip()
                 if preview.strip():
-                    await daemon.live.publish(
-                        fs.session_id,
-                        fs.project_hash,
-                        "user_turn",
-                        {
-                            "text_preview": preview,
-                            "chars": len(ev.text or ""),
-                        },
-                    )
+                    if ev.synthesized and ev.synthesis_kind == "compact_summary":
+                        await daemon.live.publish(
+                            fs.session_id,
+                            fs.project_hash,
+                            "compact_summary",
+                            {
+                                "text_preview": preview,
+                                "chars": len(ev.text or ""),
+                                "source": "claude_code_compact",
+                            },
+                        )
+                    else:
+                        await daemon.live.publish(
+                            fs.session_id,
+                            fs.project_hash,
+                            "user_turn",
+                            {
+                                "text_preview": preview,
+                                "chars": len(ev.text or ""),
+                            },
+                        )
 
             # Tool-call markers fire whenever a tool_use is present, whether
             # the event is a bare ``tool_use`` or an assistant message that
@@ -227,13 +299,27 @@ def create_app() -> FastAPI:
                     },
                 )
 
-        daemon.watcher = TranscriptWatcher(daemon.state, daemon.ledger, on_event=on_event)
+        cfg = get_config()
+        daemon.watcher = TranscriptWatcher(
+            daemon.state,
+            daemon.ledger,
+            on_event=on_event,
+            watch_paths=cfg.watch_paths,
+            exclude_paths=cfg.exclude_paths,
+        )
         await daemon.watcher.start()
 
         # Lazy init of M5+ workers if their deps are importable.
         try:
             from .qwen import QwenClient
             daemon.qwen = QwenClient()
+            # Bridge in the metrics recorder. The QwenClient runs LLM
+            # calls from a worker thread (via ``asyncio.to_thread``);
+            # the recorder needs a reference to this event loop to
+            # post the aiosqlite write back from that thread.
+            daemon.qwen.attach_recorder(
+                daemon.ledger, asyncio.get_running_loop()
+            )
         except Exception as e:
             log.warning("qwen client unavailable: %s", e)
 
@@ -279,11 +365,25 @@ def create_app() -> FastAPI:
             log.warning("rubric worker unavailable: %s", e)
 
         try:
+            from .user_rubric_worker import UserRubricWorker
+            daemon.user_rubric = UserRubricWorker(daemon)
+            await daemon.user_rubric.start()
+        except Exception as e:
+            log.warning("user rubric worker unavailable: %s", e)
+
+        try:
             from .session_close import SessionCloseDetector
             daemon.session_close = SessionCloseDetector(daemon)
             await daemon.session_close.start()
         except Exception as e:
             log.warning("session-close detector unavailable: %s", e)
+
+        try:
+            from .probe_worker import ProbeWorker
+            daemon.probe = ProbeWorker(daemon)
+            await daemon.probe.start()
+        except Exception as e:
+            log.warning("probe worker unavailable: %s", e)
 
         log.info("modmcp daemon started (mode=%s)", get_config().warden_mode)
         try:
@@ -301,8 +401,12 @@ def create_app() -> FastAPI:
                 await daemon.scope.stop()
             if daemon.rubric:
                 await daemon.rubric.stop()
+            if getattr(daemon, "user_rubric", None):
+                await daemon.user_rubric.stop()
             if daemon.session_close:
                 await daemon.session_close.stop()
+            if daemon.probe:
+                await daemon.probe.stop()
             await daemon.ledger.close()
             log.info("modmcp daemon stopped")
 
@@ -489,6 +593,105 @@ def _snapshot(intent_file: Path) -> None:
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
     target = archive / f"intent-{ts}.md"
     target.write_bytes(intent_file.read_bytes())
+
+
+def _ms_between(start, end) -> int | None:
+    """Whole milliseconds from ``start`` to ``end`` (datetimes), or
+    ``None`` if either is missing. Negative deltas are clamped to None
+    so clock skew can't poison metrics."""
+    if start is None or end is None:
+        return None
+    try:
+        delta = (end - start).total_seconds() * 1000.0
+    except Exception:
+        return None
+    if delta < 0:
+        return None
+    return int(delta)
+
+
+async def _close_turn_metric(daemon, st, fs) -> None:
+    """If a turn is in-flight, persist its derived metrics to the
+    ledger and publish a ``turn_metric`` LiveBus event. Idempotent —
+    safe to call when no turn is in-flight."""
+    turn = st.in_flight_turn
+    if not turn:
+        return
+    st.in_flight_turn = None
+
+    first = turn.get("first_block_at")
+    last = turn.get("last_block_at")
+    response_duration_ms = _ms_between(first, last)
+
+    usage = turn.get("usage") or {}
+    input_tokens = int(usage.get("input_tokens") or 0)
+    output_tokens = int(usage.get("output_tokens") or 0)
+    cache_read = int(usage.get("cache_read_input_tokens") or 0)
+    cache_create = int(usage.get("cache_creation_input_tokens") or 0)
+
+    # Output tokens-per-second: noisy at small durations, but the
+    # trend is what matters. Skip when we don't have a meaningful
+    # window — sub-100ms intervals are usually a single-block turn
+    # where Claude Code grouped emit events tightly.
+    output_tps = None
+    if response_duration_ms and response_duration_ms >= 100 and output_tokens > 0:
+        output_tps = round(output_tokens / (response_duration_ms / 1000.0), 2)
+
+    cache_hit_ratio = None
+    cache_total = cache_read + input_tokens + cache_create
+    if cache_total > 0:
+        cache_hit_ratio = round(cache_read / cache_total, 4)
+
+    try:
+        from .mode_profile import session_mode_for_project
+        mode_label = session_mode_for_project(fs.project_path)
+    except Exception:
+        mode_label = None
+
+    try:
+        await daemon.ledger.record_turn_metric(
+            fs.session_id,
+            fs.project_hash,
+            message_id=turn.get("message_id"),
+            turn_idx=turn.get("turn_idx"),
+            model=turn.get("model"),
+            stop_reason=turn.get("stop_reason"),
+            prompt_to_response_ms=turn.get("prompt_to_response_ms"),
+            response_duration_ms=response_duration_ms,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read,
+            cache_creation_tokens=cache_create,
+            output_tps=output_tps,
+            cache_hit_ratio=cache_hit_ratio,
+            first_block_at=first.isoformat() if first else None,
+            last_block_at=last.isoformat() if last else None,
+            session_mode=mode_label,
+        )
+    except Exception:
+        log.exception("turn-metric persist failed for %s", fs.session_id)
+        return
+
+    try:
+        await daemon.live.publish(
+            fs.session_id,
+            fs.project_hash,
+            "turn_metric",
+            {
+                "message_id": turn.get("message_id"),
+                "turn_idx": turn.get("turn_idx"),
+                "model": turn.get("model"),
+                "stop_reason": turn.get("stop_reason"),
+                "prompt_to_response_ms": turn.get("prompt_to_response_ms"),
+                "response_duration_ms": response_duration_ms,
+                "output_tokens": output_tokens,
+                "cache_read_tokens": cache_read,
+                "output_tps": output_tps,
+                "cache_hit_ratio": cache_hit_ratio,
+            },
+        )
+    except Exception:
+        log.exception("turn-metric publish failed for %s", fs.session_id)
 
 
 def _visible_text(ev) -> str:

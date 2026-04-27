@@ -56,16 +56,33 @@ async def test_publish_only_session_isolated() -> None:
     assert qb.empty(), "s2 subscriber should not receive s1 events"
 
 
-def test_js_client_has_renderer_for_every_event_type() -> None:
-    """Regression: live.js must carry a partial renderer for every bus type.
+def test_svelte_feed_renders_every_event_type() -> None:
+    """Regression: every published event type must have a chip + body
+    branch in the v0.2 Svelte feed.
 
-    If a worker ever starts publishing a new event type without wiring the
-    client-side renderer, the visibility-parity guarantee breaks.
+    If a worker starts publishing a new event type without wiring the
+    Svelte renderer, the visibility-parity guarantee breaks. The legacy
+    ``live.js`` renderer was retired in v2.0.0; this test now pins the
+    Svelte ``FeedItem.svelte`` instead.
+
+    Two checks per event type:
+      * a ``chipLabel`` entry maps the type to a friendly label
+      * the LiveStore's ``KNOWN_EVENT_TYPES`` set includes it (so the
+        SSE listener subscribes)
     """
-    js = Path("src/modmcp/web/static/live.js").read_text(encoding="utf-8")
+    feed_item = Path(
+        "frontend/src/lib/FeedItem.svelte"
+    ).read_text(encoding="utf-8")
+    live_store = Path(
+        "frontend/src/lib/live.svelte.js"
+    ).read_text(encoding="utf-8")
     for event_type in EVENT_TYPES:
-        assert f"{event_type}:" in js or f'"{event_type}"' in js, (
-            f"live.js missing renderer for event type {event_type!r}"
+        assert f"{event_type}:" in feed_item or f"'{event_type}'" in feed_item, (
+            f"FeedItem.svelte missing chipLabel/branch for event type "
+            f"{event_type!r}"
+        )
+        assert f"'{event_type}'" in live_store, (
+            f"live.svelte.js KNOWN_EVENT_TYPES missing {event_type!r}"
         )
 
 

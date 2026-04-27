@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import tomllib
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 from .paths import atomic_write_text, config_path, ensure_layout
@@ -42,15 +42,43 @@ class Config:
     qwen_presence_penalty: float = 0.0
     qwen_repetition_penalty: float = 1.0
 
+    # Per-call-kind sampler overrides. Qwen3 publishes distinct profiles
+    # per task shape (per the model card):
+    #   * thinking + general:        temp=1.0, presence_penalty=1.5
+    #   * thinking + precise coding: temp=0.6, presence_penalty=0.0
+    #   * non-thinking:              temp=1.0, presence_penalty=1.5
+    # These per-kind defaults match those profiles. ``None`` (or unset in
+    # config.toml) falls back to the global ``qwen_temperature`` /
+    # ``qwen_presence_penalty`` above — backward compatible for users
+    # who set globals before this differentiation existed.
+    qwen_temperature_synth: float | None = 1.0          # generative + thinking
+    qwen_temperature_drift: float | None = 1.0          # classification
+    qwen_temperature_query: float | None = 1.0          # classification
+    qwen_temperature_rubric: float | None = 0.6         # judging — stability over diversity
+    qwen_temperature_consolidator: float | None = 1.0   # generative + thinking
+    qwen_presence_penalty_synth: float | None = 1.5
+    qwen_presence_penalty_drift: float | None = 1.5
+    qwen_presence_penalty_query: float | None = 1.5
+    qwen_presence_penalty_rubric: float | None = 0.0
+    qwen_presence_penalty_consolidator: float | None = 1.5
+
     # Context window of the served model (used to size transcript slices).
     qwen_context_tokens: int = 32768
 
-    # Per-call-type output budgets. Thinking models need generous headroom.
+    # Per-call-type output budgets. Thinking models need generous headroom
+    # — the budget covers the entire ``<think>`` preamble *plus* the visible
+    # output, and Qwen3-class models routinely burn 1500-3000 tokens inside
+    # thinking before producing the first output token.
+    #
+    # ``rubric`` was 2500 until v0.2 instrumentation (commit 9e40c5a) showed
+    # 33% of rubric calls hitting ``finish_reason='length'`` with the model
+    # truncating mid-think and returning empty content. Bumped to 6000 to
+    # match the drift/query budgets users typically configure.
     qwen_max_tokens_synth: int = 6000         # Phase 1 synthesis
-    qwen_max_tokens_drift: int = 1500         # per-turn drift verdict
-    qwen_max_tokens_query: int = 1500         # query_intent answer
-    qwen_max_tokens_rubric: int = 2500        # per-sample 4-dimension rubric
-    qwen_max_tokens_consolidator: int = 8000  # end-of-session 8-mode report card
+    qwen_max_tokens_drift: int = 1500         # per-turn drift verdict (no thinking by default)
+    qwen_max_tokens_query: int = 1500         # query_intent answer (no thinking by default)
+    qwen_max_tokens_rubric: int = 6000        # per-sample 4-dimension rubric, thinking on
+    qwen_max_tokens_consolidator: int = 8000  # end-of-session 8-mode report card, thinking on
 
     # Qwen3 thinking mode, per call-type. Synth benefits from deep reasoning;
     # drift/query are fast-path structured tasks where thinking just burns
@@ -67,6 +95,24 @@ class Config:
 
     # Transcript watcher: how many projects we will watch simultaneously.
     max_watch_projects: int = 32
+
+    # Project scope filters. Default empty lists = watch every project
+    # under ``~/.claude/projects/``. Both lists accept entries in either
+    # form: the sanitized folder name as Claude Code stores it
+    # (e.g. ``C--myproject``) or the absolute project path
+    # (e.g. ``C:/code/myproject``). Match is exact and case-sensitive.
+    #
+    # Semantics: ``watch_paths`` whitelists (when non-empty, only listed
+    # projects are watched). ``exclude_paths`` blacklists (always applies).
+    # An entry in both is excluded.
+    #
+    # Use cases:
+    #   * a personal box that also has work projects you don't want
+    #     audited locally → put work paths in ``exclude_paths``.
+    #   * a focused dogfooding setup → list only the project(s) you're
+    #     actively reviewing in ``watch_paths``.
+    watch_paths: list[str] = field(default_factory=list)
+    exclude_paths: list[str] = field(default_factory=list)
 
     # Phase 2 defaults.
     phase2_turns_default: int = 8
@@ -85,6 +131,15 @@ class Config:
     # triggered runs on scope creep and first-person completion claims.
     rubric_turn_interval: int = 5
     rubric_min_text_chars: int = 80     # skip trivially short turns
+
+    # User-side self-rubric (v0.2). Mirrors the assistant rubric across
+    # 4 user-side dimensions (intent_clarity, context_coverage,
+    # verification_engagement, mode_coherence). Runs less often than
+    # the assistant rubric — user-side patterns emerge over multi-turn
+    # windows so rapid sampling adds noise without signal. Synthesized
+    # /compact turns are excluded.
+    user_rubric_turn_interval: int = 6
+    user_rubric_min_text_chars: int = 80
 
     # Scope tracking: files-touched baseline comes from the rolling median
     # of the previous N completed sessions for the same project. Creep
@@ -106,6 +161,23 @@ class Config:
     live_sse_replay_events: int = 100
     live_sse_keepalive_seconds: float = 20.0
 
+    # v0.2 Platform probe worker. Probes the *local* LLM endpoint only
+    # — synthetic probes against ``api.anthropic.com`` would mostly
+    # measure ISP / CDN edge variance, not service health, so we
+    # deliberately don't ping it. The local endpoint is what we
+    # control and what rubric quality silently depends on.
+    probe_interval_seconds: float = 30.0
+    probe_timeout_seconds: float = 5.0
+    probe_enabled: bool = True
+
+    # OS-level toast notifications. Off by default: the live web UI is
+    # the primary surface, and an interactive coding session at the
+    # same machine doesn't need OS interrupts about events the user is
+    # already watching. Ledger rows and LiveBus events still fire — only
+    # the OS toast is suppressed. Flip to true if you want to walk away
+    # from the page and still get pinged on high-severity surfacings.
+    os_notifications_enabled: bool = False
+
     @classmethod
     def default(cls) -> Config:
         return cls()
@@ -118,6 +190,12 @@ class Config:
                 lines.append(f'{key} = "{escaped}"')
             elif isinstance(value, bool):
                 lines.append(f"{key} = {'true' if value else 'false'}")
+            elif isinstance(value, list):
+                items = ", ".join(
+                    '"' + str(v).replace("\\", "\\\\").replace('"', '\\"') + '"'
+                    for v in value
+                )
+                lines.append(f"{key} = [{items}]")
             else:
                 lines.append(f"{key} = {value}")
         return "\n".join(lines) + "\n"

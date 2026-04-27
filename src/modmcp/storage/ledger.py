@@ -280,16 +280,18 @@ class Ledger:
         tool_kinds_json: str,
         is_creep: bool,
         baseline: int,
+        session_mode: str | None = None,
     ) -> int:
         cur = await self.conn.execute(
             """INSERT INTO scope_snapshots(
                  session_id, project_hash, turn_idx, files_touched_count,
-                 diff_bytes, tool_kinds_json, is_creep, baseline, created_at
-               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 diff_bytes, tool_kinds_json, is_creep, baseline,
+                 session_mode, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, project_hash, turn_idx, files_touched_count,
                 diff_bytes, tool_kinds_json, 1 if is_creep else 0,
-                baseline, _now_iso(),
+                baseline, session_mode, _now_iso(),
             ),
         )
         await self.conn.commit()
@@ -336,15 +338,19 @@ class Ledger:
         suggestion: str | None,
         model_used: str | None,
         trigger: str | None,
+        session_mode: str | None = None,
+        subject: str = "assistant",
     ) -> int:
         cur = await self.conn.execute(
             """INSERT INTO rubric_scores(
                  session_id, project_hash, turn_idx, dim_name, score,
-                 evidence, suggestion, model_used, trigger, created_at
-               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                 evidence, suggestion, model_used, trigger,
+                 session_mode, subject, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 session_id, project_hash, turn_idx, dim_name, score,
-                evidence, suggestion, model_used, trigger, _now_iso(),
+                evidence, suggestion, model_used, trigger,
+                session_mode, subject, _now_iso(),
             ),
         )
         await self.conn.commit()
@@ -583,6 +589,215 @@ class Ledger:
             rows = await cur.fetchall()
         return list(reversed([dict(r) for r in rows]))
 
+    async def live_events_before(
+        self, session_id: str, *, before_id: int, limit: int = 100
+    ) -> list[dict]:
+        """Events with ``id < before_id``, returning the most-recent
+        ``limit`` of those (i.e. paginating backwards). Returned in
+        chronological order so the caller can prepend without resorting.
+
+        Used by the live-feed "load older" affordance: the client
+        passes the lowest id it currently has rendered, and we hand
+        back the next-older batch.
+        """
+        async with self.conn.execute(
+            """SELECT * FROM live_events
+               WHERE session_id=? AND id < ?
+               ORDER BY id DESC LIMIT ?""",
+            (session_id, before_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
+    # ------- turn_metrics (v0.2 inference path) -------
+
+    async def record_turn_metric(
+        self,
+        session_id: str,
+        project_hash: str,
+        *,
+        message_id: str | None,
+        turn_idx: int | None,
+        model: str | None,
+        stop_reason: str | None,
+        prompt_to_response_ms: int | None,
+        response_duration_ms: int | None,
+        input_tokens: int,
+        output_tokens: int,
+        cache_read_tokens: int,
+        cache_creation_tokens: int,
+        output_tps: float | None,
+        cache_hit_ratio: float | None,
+        first_block_at: str | None,
+        last_block_at: str | None,
+        session_mode: str | None = None,
+    ) -> int:
+        cur = await self.conn.execute(
+            """INSERT INTO turn_metrics(
+                 session_id, project_hash, message_id, turn_idx, model,
+                 stop_reason, prompt_to_response_ms, response_duration_ms,
+                 input_tokens, output_tokens, cache_read_tokens,
+                 cache_creation_tokens, output_tps, cache_hit_ratio,
+                 first_block_at, last_block_at, session_mode, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                session_id, project_hash, message_id, turn_idx, model,
+                stop_reason, prompt_to_response_ms, response_duration_ms,
+                input_tokens, output_tokens, cache_read_tokens,
+                cache_creation_tokens, output_tps, cache_hit_ratio,
+                first_block_at, last_block_at, session_mode, _now_iso(),
+            ),
+        )
+        await self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    async def turn_metrics_for_session(
+        self, session_id: str, *, limit: int = 200
+    ) -> list[dict]:
+        async with self.conn.execute(
+            """SELECT * FROM turn_metrics
+               WHERE session_id=?
+               ORDER BY id LIMIT ?""",
+            (session_id, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def turn_metrics_for_project(
+        self, project_hash: str, *, model: str | None = None, limit: int = 500
+    ) -> list[dict]:
+        if model is not None:
+            sql = """SELECT * FROM turn_metrics
+                     WHERE project_hash=? AND model=?
+                     ORDER BY id DESC LIMIT ?"""
+            params: tuple = (project_hash, model, limit)
+        else:
+            sql = """SELECT * FROM turn_metrics
+                     WHERE project_hash=?
+                     ORDER BY id DESC LIMIT ?"""
+            params = (project_hash, limit)
+        async with self.conn.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
+    # ------- llm_call_metrics (v0.2 platform) -------
+
+    async def record_llm_call_metric(
+        self,
+        *,
+        call_kind: str,
+        model: str | None,
+        max_tokens: int | None,
+        enable_thinking: bool | None,
+        prompt_tokens: int | None,
+        completion_tokens: int | None,
+        reasoning_tokens: int | None,
+        total_tokens: int | None,
+        finish_reason: str | None,
+        duration_ms: int | None,
+        usage_json: str | None,
+        error: str | None,
+    ) -> int:
+        cur = await self.conn.execute(
+            """INSERT INTO llm_call_metrics(
+                 call_kind, model, max_tokens, enable_thinking,
+                 prompt_tokens, completion_tokens, reasoning_tokens,
+                 total_tokens, finish_reason, duration_ms, usage_json,
+                 error, created_at
+               ) VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                call_kind, model, max_tokens,
+                None if enable_thinking is None else (1 if enable_thinking else 0),
+                prompt_tokens, completion_tokens, reasoning_tokens,
+                total_tokens, finish_reason, duration_ms, usage_json,
+                error, _now_iso(),
+            ),
+        )
+        await self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    async def llm_call_metrics_recent(
+        self, *, call_kind: str | None = None, limit: int = 200
+    ) -> list[dict]:
+        if call_kind is not None:
+            sql = """SELECT * FROM llm_call_metrics
+                     WHERE call_kind=? ORDER BY id DESC LIMIT ?"""
+            params: tuple = (call_kind, limit)
+        else:
+            sql = """SELECT * FROM llm_call_metrics
+                     ORDER BY id DESC LIMIT ?"""
+            params = (limit,)
+        async with self.conn.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
+    async def llm_call_metrics_summary(self) -> list[dict]:
+        """Per-call-kind aggregates for the inspection endpoint.
+
+        SQLite has no median, so we return count + finish-reason
+        histogram + averages + 95th-percentile-ish via a window of the
+        max value; the route layer picks whichever shape is useful.
+        For the truncation question, ``finish_reason='length'`` count
+        and ``avg(completion_tokens)`` vs ``max_tokens`` are the
+        load-bearing fields.
+        """
+        async with self.conn.execute(
+            """SELECT
+                 call_kind,
+                 COUNT(*) AS n,
+                 SUM(CASE WHEN finish_reason='length' THEN 1 ELSE 0 END) AS n_length,
+                 SUM(CASE WHEN finish_reason='stop'   THEN 1 ELSE 0 END) AS n_stop,
+                 SUM(CASE WHEN error IS NOT NULL      THEN 1 ELSE 0 END) AS n_error,
+                 AVG(prompt_tokens)        AS avg_prompt,
+                 AVG(completion_tokens)    AS avg_completion,
+                 MAX(completion_tokens)    AS max_completion,
+                 AVG(reasoning_tokens)     AS avg_reasoning,
+                 MAX(reasoning_tokens)     AS max_reasoning,
+                 AVG(duration_ms)          AS avg_duration_ms,
+                 MAX(max_tokens)           AS configured_max_tokens
+               FROM llm_call_metrics
+               GROUP BY call_kind
+               ORDER BY call_kind"""
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ------- probe_results (v0.2 platform) -------
+
+    async def record_probe_result(
+        self,
+        target: str,
+        url: str,
+        *,
+        status: str,
+        latency_ms: int | None,
+        detail: str | None,
+        error: str | None,
+    ) -> int:
+        cur = await self.conn.execute(
+            """INSERT INTO probe_results(
+                 target, url, status, latency_ms, detail, error, ts
+               ) VALUES(?, ?, ?, ?, ?, ?, ?)""",
+            (target, url, status, latency_ms, detail, error, _now_iso()),
+        )
+        await self.conn.commit()
+        return int(cur.lastrowid or 0)
+
+    async def recent_probe_results(
+        self, *, target: str | None = None, limit: int = 200
+    ) -> list[dict]:
+        if target is not None:
+            sql = """SELECT * FROM probe_results
+                     WHERE target=? ORDER BY id DESC LIMIT ?"""
+            params: tuple = (target, limit)
+        else:
+            sql = """SELECT * FROM probe_results
+                     ORDER BY id DESC LIMIT ?"""
+            params = (limit,)
+        async with self.conn.execute(sql, params) as cur:
+            rows = await cur.fetchall()
+        return list(reversed([dict(r) for r in rows]))
+
     async def latest_session_for_project(self, project_hash: str) -> str | None:
         async with self.conn.execute(
             """SELECT session_id FROM session_state WHERE project_hash=?
@@ -602,3 +817,203 @@ class Ledger:
         ) as cur:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    async def recent_sessions(self, limit: int = 30) -> list[dict]:
+        """Recent sessions across all projects, newest first.
+
+        Powers the v0.2 HeaderBar session picker, which lets the user
+        jump between active and recent sessions across the projects
+        Warden is watching. Returns the columns the picker actually
+        renders — id, project, recency, model, turn count — so the
+        frontend doesn't paint a heavy row.
+        """
+        async with self.conn.execute(
+            """SELECT session_id, project_hash, project_path, started_at,
+                      last_seen_at, last_model, turns_seen
+               FROM session_state
+               ORDER BY last_seen_at DESC LIMIT ?""",
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ------- Reflection-view self-rubric panel -------
+
+    async def user_rubric_summary(self, project_hash: str) -> dict:
+        """Per-dimension average + sample count for user-side scores.
+
+        Powers the Reflection-view self-rubric panel's "averages by
+        dimension" row. Filters to ``subject='user'`` so the
+        assistant-side rubric doesn't pollute the math.
+        """
+        async with self.conn.execute(
+            """SELECT dim_name, AVG(score) AS avg_score, COUNT(*) AS n
+               FROM rubric_scores
+               WHERE project_hash=? AND subject='user'
+               GROUP BY dim_name""",
+            (project_hash,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return {
+            "by_dim": [
+                {
+                    "dim": str(r["dim_name"]),
+                    "avg_score": float(r["avg_score"]) if r["avg_score"] is not None else None,
+                    "n": int(r["n"]),
+                }
+                for r in rows
+            ],
+        }
+
+    async def user_rubric_recent(
+        self, project_hash: str, limit: int = 30
+    ) -> list[dict]:
+        """Recent user-rubric samples for a project, newest first.
+
+        Returns the rows with evidence + suggestion populated so the
+        panel can show the latest specific feedback the LLM produced
+        about the user's behavior.
+        """
+        async with self.conn.execute(
+            """SELECT id, session_id, turn_idx, dim_name, score,
+                      evidence, suggestion, created_at, session_mode
+               FROM rubric_scores
+               WHERE project_hash=? AND subject='user'
+               ORDER BY id DESC LIMIT ?""",
+            (project_hash, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ------- Reflection-view past-sessions panel -------
+
+    async def recent_sessions_with_summary(self, limit: int = 50) -> list[dict]:
+        """Cross-project recent sessions enriched with rubric averages
+        and a "has report card" flag.
+
+        Powers the Reflection-view past-sessions table. Pre-calibration
+        sessions (rubric truncated mid-think) will have ``avg_score``
+        clustered near 3.0 — that's noise, documented in
+        project_v0_2_reports_gap.md. We surface the data anyway and
+        leave interpretation to the user; visual treatment of noisy
+        rows is a UI concern.
+        """
+        async with self.conn.execute(
+            """
+            SELECT
+                ss.session_id, ss.project_hash, ss.project_path,
+                ss.started_at, ss.last_seen_at, ss.last_model,
+                ss.turns_seen, ss.total_input_tokens, ss.total_output_tokens,
+                rs.avg_score, rs.sample_count,
+                urs.avg_score AS user_avg_score,
+                urs.sample_count AS user_sample_count,
+                CASE WHEN sr.session_id IS NOT NULL THEN 1 ELSE 0 END AS has_report
+            FROM session_state ss
+            LEFT JOIN (
+                SELECT session_id, AVG(score) AS avg_score, COUNT(*) AS sample_count
+                FROM rubric_scores
+                WHERE subject='assistant'
+                GROUP BY session_id
+            ) rs ON rs.session_id = ss.session_id
+            LEFT JOIN (
+                SELECT session_id, AVG(score) AS avg_score, COUNT(*) AS sample_count
+                FROM rubric_scores
+                WHERE subject='user'
+                GROUP BY session_id
+            ) urs ON urs.session_id = ss.session_id
+            LEFT JOIN (
+                SELECT DISTINCT session_id FROM session_reports
+            ) sr ON sr.session_id = ss.session_id
+            ORDER BY ss.last_seen_at DESC
+            LIMIT ?
+            """,
+            (limit,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    async def session_rubric_trajectory(self, session_id: str) -> list[dict]:
+        """All rubric_scores for one session, ordered by turn then dim.
+
+        Powers the per-session deep view's trajectory plot. Returns
+        every dimension/turn pair so the UI can pivot however it wants
+        (line per dim, faceted, average per turn).
+        """
+        async with self.conn.execute(
+            """SELECT id, turn_idx, dim_name, score, evidence, suggestion,
+                      created_at, session_mode
+               FROM rubric_scores
+               WHERE session_id=?
+               ORDER BY turn_idx ASC, dim_name ASC""",
+            (session_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
+    # ------- Reflection-view signals (derived; no LLM) -------
+
+    async def user_turn_rows(
+        self, project_hash: str, limit: int = 500
+    ) -> list[dict]:
+        """Recent ``user_turn`` (and ``compact_summary``) live events for a
+        project, oldest-first, with raw payload for downstream stats.
+
+        The Reflection view derives idle-gap and prompt-length
+        distributions client-side from this stream. We deliberately
+        include both event types here so the caller can choose to
+        exclude synthesized turns (Claude Code /compact) when
+        characterizing *user* behavior — a synthesized turn isn't
+        the user typing, even though it's the same JSONL shape.
+        """
+        async with self.conn.execute(
+            """SELECT id, session_id, event_type, payload, created_at
+               FROM live_events
+               WHERE project_hash=?
+                 AND event_type IN ('user_turn','compact_summary')
+               ORDER BY id DESC LIMIT ?""",
+            (project_hash, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        # Reverse to oldest-first so callers can compute deltas without
+        # re-sorting.
+        return [dict(r) for r in reversed(list(rows))]
+
+    async def violation_status_counts(self, project_hash: str) -> dict:
+        """Aggregate constraint-violation status counts for a project.
+
+        Maps to the Reflection view's "destructive-action approval
+        cadence" panel: how often did the user acknowledge versus
+        dismiss versus leave new the violations Warden surfaced?
+        """
+        async with self.conn.execute(
+            """SELECT status, count(*) AS n
+               FROM constraint_violations
+               WHERE project_hash=?
+               GROUP BY status""",
+            (project_hash,),
+        ) as cur:
+            rows = await cur.fetchall()
+        out = {"new": 0, "acknowledged": 0, "dismissed": 0}
+        for r in rows:
+            out[str(r["status"])] = int(r["n"])
+        return out
+
+    async def claim_status_counts(self, project_hash: str) -> dict:
+        """Aggregate claim verification verdicts for a project.
+
+        Maps to the Reflection view's "verification behavior" panel:
+        of the assistant's first-person completion claims, how many
+        held up under grep-based verification?
+        """
+        async with self.conn.execute(
+            """SELECT status, count(*) AS n
+               FROM verification_ledger
+               WHERE project_hash=?
+               GROUP BY status""",
+            (project_hash,),
+        ) as cur:
+            rows = await cur.fetchall()
+        out = {"verified": 0, "contradicted": 0, "unverifiable": 0}
+        for r in rows:
+            out[str(r["status"])] = int(r["n"])
+        return out

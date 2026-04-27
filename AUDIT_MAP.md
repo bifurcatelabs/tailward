@@ -35,7 +35,7 @@ Both are legitimate trust dimensions — they just need a different tool.
 | | |
 |---|---|
 | **Detector** | rule-based: [`constraints_worker`](src/modmcp/daemon/constraints_worker.py) + [`schema/constraints.py`](src/modmcp/schema/constraints.py); LLM: consolidator at session close |
-| **Trigger** | every `tool_use` event |
+| **Trigger** | every event with a tool call — bare `tool_use` events *and* assistant messages whose content list wraps a `tool_use` block (the dominant Claude Code shape) |
 | **Signal** | `constraint_violations` table; `constraint_violation` LiveBus event |
 | **UI surface** | Live view → Violations pane (ack/dismiss), `/p/<hash>/violations` history, report card row 1 |
 | **Coverage** | **strong** — deterministic, zero LLM dependency, baseline guardrails even with empty Active Rules |
@@ -108,7 +108,7 @@ See Mode 5 and Mode 10 below for the full mapping.
 | | |
 |---|---|
 | **Detector** | rule-based: [`constraints_worker`](src/modmcp/daemon/constraints_worker.py) + [`default_policy()`](src/modmcp/schema/constraints.py) mute-the-alarm baselines; consolidator |
-| **Trigger** | every `tool_use` event with a bash command |
+| **Trigger** | every tool call carrying a Bash command (bare `tool_use` events or assistant-wrapped `tool_use` blocks) |
 | **Signal** | `constraint_violations` (severity rule-dependent); `constraint_violation` LiveBus event |
 | **UI surface** | Violations pane, report card row 5 |
 | **Coverage** | **medium** — baseline forbidden-bash now catches the common silencing patterns; language-specific skip markers still need user rules |
@@ -158,7 +158,7 @@ Baseline patterns are anchored to named test/lint tools so that legitimate `mkdi
 | | |
 |---|---|
 | **Detector** | rule-based: [`scope_worker`](src/modmcp/daemon/scope_worker.py); consolidator |
-| **Trigger** | every `tool_use` event + every assistant turn (snapshot cadence) |
+| **Trigger** | every tool call (bare `tool_use` or assistant-wrapped `tool_use` block) — emits a snapshot post-update; tool-less assistant turns also emit one snapshot per logical turn as a timeline marker |
 | **Signal** | `scope_snapshots` table; `scope_snapshot` + `scope_creep` LiveBus events |
 | **UI surface** | Live counter strip (files touched, diff bytes, tool-kind breakdown), creep markers on timeline, report card row 8 |
 | **Coverage** | **strong** — deterministic, rolling baseline per project |
@@ -204,7 +204,7 @@ Default thresholds in [`config.py`](src/modmcp/config.py): `scope_baseline_windo
 | | |
 |---|---|
 | **Detector** | hybrid: rule-based (`constraints_worker` + [`default_policy()`](src/modmcp/schema/constraints.py) target-gaming baselines) **and** consolidator (LLM, session close) |
-| **Trigger** | every `tool_use` event with a bash command or a touched path; session-close consolidation |
+| **Trigger** | every tool call carrying a Bash command or a touched path (bare `tool_use` or assistant-wrapped `tool_use` block); session-close consolidation |
 | **Signal** | `constraint_violations` + `constraint_violation` LiveBus event (live); report card row 10 (end-of-session) |
 | **UI surface** | Violations pane, live feed, report card row 10 |
 | **Coverage** | **medium** — was the weakest mode; now has live rule-based coverage for the most common moves |

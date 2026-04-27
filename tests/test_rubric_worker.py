@@ -42,6 +42,15 @@ async def test_rubric_fires_on_cadence_and_records_all_dimensions(tmp_path: Path
     proj = tmp_path / "rub"
     proj.mkdir()
 
+    # Seed an intent with session_mode="build" so the rubric runs all
+    # four dimensions. Unlabeled / yolo sessions fall through to the
+    # permissive default profile which only scores uncertainty_honesty.
+    from modmcp.paths import intent_path
+    from modmcp.schema.intent import empty_intent, save_intent
+    intent = empty_intent(str(proj), proj.name)
+    intent.front.session_mode = "build"
+    save_intent(intent, intent_path(str(proj)))
+
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
         payload = {

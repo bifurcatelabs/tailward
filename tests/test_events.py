@@ -50,3 +50,43 @@ def test_parse_empty_and_garbage() -> None:
     ev = parse_line('{"type": "weirdo"}')
     assert ev is not None
     assert ev.kind == "unknown"
+
+
+def test_parse_compact_summary_flag_detected() -> None:
+    """Claude Code's /compact persists its synthesized summary as
+    type=user with isCompactSummary=true. The parser must surface that
+    flag so downstream code can render it as synthesized rather than
+    treating it as a typed user turn."""
+    line = json.dumps(
+        {
+            "type": "user",
+            "sessionId": "s3",
+            "cwd": "/p",
+            "isCompactSummary": True,
+            "isVisibleInTranscriptOnly": True,
+            "message": {
+                "role": "user",
+                "content": "This session is being continued from a previous conversation...",
+            },
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.kind == "user_message"
+    assert ev.synthesized is True
+    assert ev.synthesis_kind == "compact_summary"
+
+
+def test_parse_regular_user_turn_not_synthesized() -> None:
+    line = json.dumps(
+        {
+            "type": "user",
+            "sessionId": "s4",
+            "cwd": "/p",
+            "message": {"role": "user", "content": "actual prompt"},
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.synthesized is False
+    assert ev.synthesis_kind is None

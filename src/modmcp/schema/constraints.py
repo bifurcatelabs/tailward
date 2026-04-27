@@ -72,7 +72,10 @@ class ForbiddenBashPatterns:
                 continue
 
     def violation_for(self, command: str) -> str | None:
-        for raw, pat in zip(self.patterns, self._compiled):
+        # ``strict=False`` is deliberate: a regex that fails to compile
+        # is silently dropped from ``_compiled`` (see __init__), so the
+        # two lists may have different lengths. Truncate, don't raise.
+        for raw, pat in zip(self.patterns, self._compiled, strict=False):
             if pat.search(command or ""):
                 return raw
         return None

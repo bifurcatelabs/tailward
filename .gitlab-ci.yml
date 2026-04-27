@@ -1,0 +1,60 @@
+# GitLab CI for warden. Aspirational until runners are provisioned on
+# the on-prem GitLab CE — file is in place so the moment a runner is
+# online, jobs gate PRs without further config.
+#
+# Three jobs run in parallel on the ``test`` stage:
+#   * python-tests  — pytest suite under the project's editable install
+#   * ruff-lint     — ruff config lives in pyproject.toml
+#   * frontend-build — Vite production build to confirm the Svelte
+#                      bundle compiles
+#
+# Caches: pip + npm. node_modules cached too so frontend-build doesn't
+# repeat the install on every run.
+
+stages:
+  - test
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+  NPM_CONFIG_CACHE: "$CI_PROJECT_DIR/.cache/npm"
+  PIP_DISABLE_PIP_VERSION_CHECK: "1"
+
+default:
+  cache:
+    key:
+      files:
+        - pyproject.toml
+        - frontend/package-lock.json
+    paths:
+      - .cache/pip
+      - .cache/npm
+      - frontend/node_modules/
+
+python-tests:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - python -m pip install --upgrade pip
+    - pip install -e ".[dev]"
+  script:
+    - python -m pytest tests/ -v
+
+ruff-lint:
+  stage: test
+  image: python:3.12-slim
+  before_script:
+    - pip install ruff
+  script:
+    - ruff check src/ tests/
+
+frontend-build:
+  stage: test
+  image: node:20-alpine
+  before_script:
+    - cd frontend && npm ci
+  script:
+    - npm run build
+  artifacts:
+    paths:
+      - src/modmcp/web/static/dist/
+    expire_in: 1 week
