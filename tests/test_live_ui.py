@@ -27,16 +27,83 @@ def _run(coro):
         loop.close()
 
 
-def test_mode_pill_renders_in_header(tmp_path: Path) -> None:
-    proj = tmp_path / "modepill"
+def test_project_page_serves_spa_shell(tmp_path: Path) -> None:
+    """The ``/p/<ph>`` route now serves the SPA shell (rules viewer is
+    rendered client-side from /v2/projects/<ph>). The legacy Jinja
+    intent editor was retired in v2.1 — the v1 ``pill-passive`` chrome
+    no longer ships."""
+    proj = tmp_path / "projview"
     proj.mkdir()
     ph = _seed(proj)
     with TestClient(create_app()) as client:
         r = client.get(f"/p/{ph}")
         assert r.status_code == 200
-        # conftest defaults to passive (the supported product surface).
-        assert "pill-passive" in r.text
-        assert ">passive<" in r.text
+        # SPA shell mounts ``<div id="app">`` and serves the bundle
+        # script (or build-hint fallback).
+        assert 'id="app"' in r.text
+        assert (
+            "/static/dist/" in r.text
+            or "npm install &amp;&amp; npm run build" in r.text
+        )
+
+
+def test_landing_page_serves_spa_shell(tmp_path: Path) -> None:
+    """The ``/`` landing route serves the same SPA shell that all
+    other top-level pages use; main.js inspects the URL to render
+    the LandingView client-side."""
+    with TestClient(create_app()) as client:
+        r = client.get("/")
+        assert r.status_code == 200
+        assert 'id="app"' in r.text
+
+
+def test_v2_projects_endpoint_returns_list(tmp_path: Path) -> None:
+    """LandingView reads from /v2/projects."""
+    proj = tmp_path / "projlist"
+    proj.mkdir()
+    ph = _seed(proj)
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        async def _seed_session():
+            await daemon.ledger.upsert_session("s-list", ph, str(proj))
+
+        _run(_seed_session())
+
+        r = client.get("/v2/projects")
+        assert r.status_code == 200
+        body = r.json()
+        assert "projects" in body
+        hashes = [p["project_hash"] for p in body["projects"]]
+        assert ph in hashes
+
+
+def test_v2_project_detail_returns_rules(tmp_path: Path) -> None:
+    """ProjectView reads from /v2/projects/<ph>; the response includes
+    the parsed rules + active session_mode so the page can render
+    the policy read-only."""
+    proj = tmp_path / "projdetail"
+    proj.mkdir()
+    ph = _seed(proj)
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        async def _seed_session():
+            await daemon.ledger.upsert_session("s-detail", ph, str(proj))
+
+        _run(_seed_session())
+
+        r = client.get(f"/v2/projects/{ph}")
+        assert r.status_code == 200
+        body = r.json()
+        assert body["project_hash"] == ph
+        assert "rules" in body
+        assert "path" in body["rules"]
+        assert "immutable" in body["rules"]
+        assert "bash" in body["rules"]
+        # Default-policy baseline ships immutable + bash patterns.
+        assert isinstance(body["rules"]["bash"], list)
+        assert len(body["rules"]["bash"]) > 0
 
 
 def test_live_state_json_returns_session(tmp_path: Path) -> None:

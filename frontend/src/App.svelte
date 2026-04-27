@@ -1,16 +1,17 @@
 <script>
   import { live } from './lib/live.svelte.js';
   import HeaderBar from './lib/HeaderBar.svelte';
+  import TopStrip from './lib/TopStrip.svelte';
   import TabNav from './lib/TabNav.svelte';
   import SessionView from './lib/SessionView.svelte';
   import ReflectionView from './lib/ReflectionView.svelte';
   import PlatformView from './lib/PlatformView.svelte';
+  import LandingView from './lib/LandingView.svelte';
+  import ProjectView from './lib/ProjectView.svelte';
 
-  let { ph = '', sessionId = '' } = $props();
+  let { page = 'landing', ph = '', sessionId = '' } = $props();
 
-  // Three top-level views. Hash sync so refresh / browser back-forward
-  // / bookmarks all land on the right tab without us pulling in a
-  // routing library.
+  // Within the session page, three tabs (hash-routed).
   const TABS = ['session', 'reflection', 'platform'];
 
   function readHash() {
@@ -30,31 +31,38 @@
   }
 
   $effect(() => {
+    if (page !== 'session') return;
     const onHash = () => { view = readHash(); };
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   });
 
-  // Live store stays connected regardless of which tab is active —
-  // the Session view is where its data lands today, but the probe
-  // worker (next commit) will share the bus, so we keep the SSE
-  // stream open for the whole page session.
+  // Live store only connects on the session page. Landing + project
+  // pages don't talk to the per-session bus.
   $effect(() => {
-    if (!ph || !sessionId) return;
+    if (page !== 'session' || !ph || !sessionId) return;
     live.connect(ph, sessionId);
     return () => live.disconnect();
   });
 </script>
 
 <div class="app">
-  <HeaderBar {ph} {sessionId} />
-  <TabNav {view} {setView} />
-  {#if view === 'session'}
-    <SessionView />
-  {:else if view === 'reflection'}
-    <ReflectionView {ph} />
-  {:else if view === 'platform'}
-    <PlatformView {ph} />
+  {#if page === 'session'}
+    <HeaderBar {ph} {sessionId} />
+    <TabNav {view} {setView} />
+    {#if view === 'session'}
+      <SessionView />
+    {:else if view === 'reflection'}
+      <ReflectionView {ph} />
+    {:else if view === 'platform'}
+      <PlatformView {ph} />
+    {/if}
+  {:else if page === 'project'}
+    <TopStrip />
+    <ProjectView {ph} />
+  {:else}
+    <TopStrip />
+    <LandingView />
   {/if}
 </div>
 

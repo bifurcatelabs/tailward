@@ -24,8 +24,8 @@
         stroke-linejoin="round"
       />
     </svg>
-    <span class="name">warden</span>
-    <span class="version">0.2</span>
+    <a href="/" class="name" style="text-decoration:none;color:inherit">warden</a>
+    <span class="version">2.0</span>
   </div>
 
   <div class="session">

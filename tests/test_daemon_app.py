@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 
 from modmcp.daemon.app import create_app
 from modmcp.paths import intent_path, project_dir, project_hash
-from modmcp.schema.intent import empty_intent, load_intent, save_intent
+from modmcp.schema.intent import empty_intent, save_intent
 
 
 def _seed_project(project_path: str, goal: str = "ship M0 through M10") -> str:
@@ -86,33 +86,24 @@ def test_hook_returns_empty_when_no_intent(tmp_path: Path, client: TestClient) -
     assert r.json() == {}
 
 
-def test_web_project_list_and_intent_save(tmp_path: Path, client: TestClient) -> None:
+def test_web_landing_and_project_pages_serve_spa(
+    tmp_path: Path, client: TestClient
+) -> None:
+    """v2.1 retired the Jinja project list + intent editor; both URLs
+    now serve the same SPA shell. The shell-coverage tests live in
+    ``test_live_ui.py``; this case just verifies the routes still
+    respond 200 with a mount node."""
     proj = tmp_path / "proj2"
     proj.mkdir()
     ph = _seed_project(str(proj), goal="initial goal")
 
     r = client.get("/")
     assert r.status_code == 200
-    assert "example" in r.text
+    assert 'id="app"' in r.text
 
     r = client.get(f"/p/{ph}")
     assert r.status_code == 200
-    assert "initial goal" in r.text
-
-    r = client.post(
-        f"/p/{ph}/save",
-        data={
-            "session_mode": "build",
-            "phase2_turns_remaining": "4",
-            "section[Active Goal]": "updated goal",
-        },
-    )
-    assert r.status_code == 200
-    assert "saved" in r.text
-
-    updated = load_intent(intent_path(str(proj)))
-    assert "updated goal" in updated.sections["Active Goal"]
-    assert updated.front.phase2_turns_remaining == 4
+    assert 'id="app"' in r.text
 
 
 def test_api_ledger_and_drift_empty(tmp_path: Path, client: TestClient) -> None:

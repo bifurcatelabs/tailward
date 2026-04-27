@@ -5,7 +5,40 @@ All notable changes to warden are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v2.0.0 cutover (in progress)
+## [Unreleased] — v2.1.0
+
+### Added
+
+- Svelte landing page at `/`. Lists projects warden has seen, with
+  session count, last-active timestamp, active session_mode, and
+  click-through to each project's most-recent session. Replaces the
+  legacy Jinja project-index page; the SPA now owns every visible
+  surface.
+- Svelte project rules viewer at `/p/<ph>`. Read-only render of the
+  parsed `CompiledPolicy` (path allow/deny globs, immutable files,
+  forbidden bash patterns) + active `session_mode` for the project,
+  with a pointer at `intent.md` for editing.
+- New JSON endpoints `GET /v2/projects` and `GET /v2/projects/<ph>`
+  that the new Svelte views read.
+- `TopStrip` component on non-session pages (the rich `HeaderBar`
+  continues to wrap the live audit surface).
+
+### Changed
+
+- `main.js` parses `window.location.pathname` to pick which top-level
+  Svelte view to render (landing / project / session). Same bundle
+  serves all three pages.
+
+### Removed
+
+- Legacy Jinja intent editor (`/p/<ph>` GET + `/p/<ph>/save` POST)
+  and the `intent.html` / `index.html` / `base.html` templates.
+  `intent.md` remains the source of truth — users hand-edit it; the
+  daemon re-reads on each turn so changes land without restart.
+  Decided per `memory/project_v3_handoff_deprecation.md` and the
+  `memory/project_no_injection_position.md` framing.
+
+## [v2.0.0] — trust layer cutover
 
 The v2.0.0 release reframes the project as a **trust layer for AI coding
 workflows** and retires the legacy v1.1 surfaces in favor of a single

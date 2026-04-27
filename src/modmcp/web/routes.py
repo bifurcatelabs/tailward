@@ -1,18 +1,16 @@
-"""Web UI: project list + intent editor + live session view (v0.2 Svelte) +
-the JSON endpoints the live + Reflection + Platform views read.
+"""Web UI routes: SPA shell for landing / project / session pages, plus
+the JSON endpoints the SPA reads.
 
-FastAPI routes mounted onto the main daemon app. The live audit surface
-is the v0.2 Svelte chassis served at ``/p/<ph>/live/<sid>/v2``. The
-legacy v1.1 Jinja audit pages (``live.html``, ``violations.html``,
-``trends.html``, ``session_report.html``, ``ledger.html``,
-``drift.html``, ``no_session.html``) and their routes were retired in
-v2.0.0; cross-session aggregation lives in the Reflection view now.
+FastAPI routes mounted onto the main daemon app. As of v2.1 the Svelte
+SPA owns every visible page (landing at ``/``, project rules viewer at
+``/p/<ph>``, session audit at ``/p/<ph>/live/<sid>``) — main.js
+inspects the URL to pick the top-level view. The legacy v1 Jinja
+intent editor was retired alongside the v1.1 audit pages.
 """
 
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -21,8 +19,6 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from ..config import get_config
-from ..paths import projects_dir
-from ..schema.intent import SECTIONS, load_intent, save_intent
 from .sse import poll_events, stream_for_session, unwrap_stored_payload
 
 _WEB_DIR = Path(__file__).parent
@@ -85,70 +81,47 @@ def mount_web(app: FastAPI) -> None:
 
         app.mount("/static", _NoCacheStatic(directory=str(_STATIC_DIR)), name="static")
 
-    @app.get("/", response_class=HTMLResponse)
-    async def index(request: Request) -> HTMLResponse:
-        projects = []
-        pd = projects_dir()
-        if pd.exists():
-            for sub in sorted(pd.iterdir()):
-                intent_file = sub / "intent.md"
-                if not intent_file.exists():
-                    continue
-                try:
-                    intent = load_intent(intent_file)
-                    projects.append(
-                        {
-                            "hash": sub.name,
-                            "name": intent.front.project_name,
-                            "path": intent.front.project_path,
-                            "updated": intent.front.updated.isoformat(),
-                            "mode": intent.front.session_mode,
-                            "phase2": intent.front.phase2_turns_remaining,
-                        }
-                    )
-                except Exception:
-                    continue
+    def _spa_shell(request: Request, *, title: str = "warden") -> HTMLResponse:
+        """Render the SPA shell template for non-session pages.
+
+        The same Svelte bundle serves landing (``/``), project rules
+        (``/p/<ph>``), and the session audit surface
+        (``/p/<ph>/live/<sid>``) — main.js inspects the URL pathname
+        to pick which top-level view to render. The shell is just a
+        ``<div id="app">`` mount node + the bundle script.
+        """
+        bundle_js, bundle_css = _resolve_v2_bundle()
         return templates.TemplateResponse(
-            request, "index.html", {**_base_ctx(), "projects": projects}
+            request,
+            "live.html",
+            {
+                **_base_ctx(),
+                "ph": "",
+                "session": None,
+                "session_id": "",
+                "title": title,
+                "v2_bundle_js": bundle_js,
+                "v2_bundle_css": bundle_css,
+            },
         )
+
+    @app.get("/", response_class=HTMLResponse)
+    async def landing(request: Request) -> HTMLResponse:
+        """Landing page — Svelte SPA reads /v2/projects to populate."""
+        return _spa_shell(request, title="warden")
 
     @app.get("/p/{ph}", response_class=HTMLResponse)
     async def project_view(request: Request, ph: str) -> HTMLResponse:
-        intent_file = projects_dir() / ph / "intent.md"
-        if not intent_file.exists():
-            raise HTTPException(404)
-        intent = load_intent(intent_file)
-        return templates.TemplateResponse(
-            request,
-            "intent.html",
-            {**_base_ctx(), "ph": ph, "intent": intent, "sections": SECTIONS},
-        )
+        """Project rules viewer — Svelte SPA reads /v2/projects/<ph>.
 
-    @app.post("/p/{ph}/save", response_class=HTMLResponse)
-    async def project_save(request: Request, ph: str) -> HTMLResponse:
-        intent_file = projects_dir() / ph / "intent.md"
-        if not intent_file.exists():
+        Replaces the legacy Jinja intent editor in v2.1; the SPA
+        renders the parsed CompiledPolicy + session_mode read-only.
+        ``intent.md`` remains the source of truth and is hand-edited.
+        """
+        # Reject obviously-bogus hashes early so 404 routing is honest.
+        if not ph or "/" in ph:
             raise HTTPException(404)
-        intent = load_intent(intent_file)
-        form = await request.form()
-        for section in SECTIONS:
-            val = form.get(f"section[{section}]")
-            if val is not None:
-                intent.sections[section] = (val or "").rstrip() + "\n"
-        mode = form.get("session_mode")
-        if mode in ("build", "meta", "exploration"):
-            intent.front.session_mode = mode  # type: ignore[assignment]
-        raw_turns = form.get("phase2_turns_remaining")
-        if raw_turns is not None and raw_turns != "":
-            try:
-                intent.front.phase2_turns_remaining = max(0, int(raw_turns))
-            except ValueError:
-                pass
-        intent.front.updated = datetime.now(UTC)
-        save_intent(intent, intent_file)
-        return HTMLResponse(
-            "<span style='color:green'>saved</span>", status_code=200
-        )
+        return _spa_shell(request, title=f"warden · {ph[:8]}")
 
     # ------------------------------------------------------------------
     # Live session view — Svelte chassis at the canonical URL
@@ -392,6 +365,112 @@ def mount_web(app: FastAPI) -> None:
             "approvals": approvals,
             "verification": verification,
             "sample_size": len(rows),
+        })
+
+    @app.get("/v2/projects")
+    async def v2_projects(request: Request) -> JSONResponse:
+        """Cross-project landing-page data: one row per project warden
+        has seen, with session count, last activity, intent.md presence,
+        most-recent session id (for click-through), and the active
+        session_mode label.
+        """
+        from ..daemon.mode_profile import session_mode_for_project
+        from ..paths import intent_path, project_dir
+
+        daemon = request.app.state.daemon
+        rows = await daemon.ledger.projects_summary()
+        out = []
+        for r in rows:
+            ph = r["project_hash"]
+            project_path = r["project_path"]
+            try:
+                intent_exists = intent_path(project_path).exists()
+            except Exception:
+                intent_exists = False
+            try:
+                pdir = project_dir(project_path).exists()
+            except Exception:
+                pdir = False
+            try:
+                latest_sid = await daemon.ledger.latest_session_for_project(ph)
+            except Exception:
+                latest_sid = None
+            mode = session_mode_for_project(project_path) if intent_exists else None
+            out.append({
+                "project_hash": ph,
+                "project_path": project_path,
+                "session_count": int(r["session_count"]),
+                "last_active_at": r["last_active_at"],
+                "intent_exists": bool(intent_exists),
+                "project_dir_exists": bool(pdir),
+                "latest_session_id": latest_sid,
+                "session_mode": mode,
+            })
+        return JSONResponse({"projects": out})
+
+    @app.get("/v2/projects/{ph}")
+    async def v2_project_detail(request: Request, ph: str) -> JSONResponse:
+        """Per-project rules viewer payload: parsed CompiledPolicy +
+        active session_mode + intent.md path. Read-only — the file is
+        edited externally.
+        """
+        from dataclasses import asdict
+
+        from ..daemon.mode_profile import (
+            active_profile_for_project,
+            session_mode_for_project,
+        )
+        from ..paths import intent_path
+        from ..schema.constraints import default_policy, parse_active_rules
+        from ..schema.intent import load_intent
+
+        daemon = request.app.state.daemon
+        rows = await daemon.ledger.projects_summary()
+        match = next((r for r in rows if r["project_hash"] == ph), None)
+        if match is None:
+            raise HTTPException(404)
+        project_path = match["project_path"]
+        intent_md = intent_path(project_path)
+
+        # Compose policy = baseline + parsed-from-intent.md (if present).
+        policy = default_policy()
+        if intent_md.exists():
+            try:
+                intent = load_intent(intent_md)
+                rules_body = intent.sections.get("Active Rules", "") or ""
+                parsed = parse_active_rules(rules_body)
+                # Merge parsed onto baseline. Baseline immutable + bash
+                # patterns stay; allow/deny gets concatenated with
+                # parsed entries; rule_texts comes only from parsed.
+                policy.path.allow.extend(parsed.path.allow)
+                policy.path.deny.extend(parsed.path.deny)
+                policy.immutable.paths.extend(parsed.immutable.paths)
+                policy.bash.patterns.extend(parsed.bash.patterns)
+                policy.rule_texts.update(parsed.rule_texts)
+            except Exception:
+                pass
+
+        latest_sid = await daemon.ledger.latest_session_for_project(ph)
+        mode_label = session_mode_for_project(project_path)
+        profile = active_profile_for_project(project_path)
+        return JSONResponse({
+            "project_hash": ph,
+            "project_path": project_path,
+            "intent_path": str(intent_md),
+            "intent_exists": intent_md.exists(),
+            "latest_session_id": latest_sid,
+            "session_mode": mode_label,
+            "mode_profile": {
+                "name": profile.name,
+                "description": profile.description,
+                "is_default": mode_label is None or profile.name == "default",
+            },
+            "rules": {
+                "path": asdict(policy.path),
+                "immutable": list(policy.immutable.paths),
+                "bash": list(policy.bash.patterns),
+                "rule_texts": dict(policy.rule_texts),
+            },
         })
 
     @app.get("/v2/sessions/recent")

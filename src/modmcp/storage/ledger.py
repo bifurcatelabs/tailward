@@ -818,6 +818,22 @@ class Ledger:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    async def projects_summary(self) -> list[dict]:
+        """One row per project warden has seen, with session count and
+        most-recent activity. Used by the v2.1 landing page.
+        """
+        async with self.conn.execute(
+            """SELECT project_hash,
+                      MAX(project_path) AS project_path,
+                      COUNT(*) AS session_count,
+                      MAX(last_seen_at) AS last_active_at
+               FROM session_state
+               GROUP BY project_hash
+               ORDER BY MAX(last_seen_at) DESC"""
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
     async def recent_sessions(self, limit: int = 30) -> list[dict]:
         """Recent sessions across all projects, newest first.
 
