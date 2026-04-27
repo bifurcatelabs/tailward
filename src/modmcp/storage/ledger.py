@@ -835,3 +835,71 @@ class Ledger:
         ) as cur:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
+
+    # ------- Reflection-view signals (derived; no LLM) -------
+
+    async def user_turn_rows(
+        self, project_hash: str, limit: int = 500
+    ) -> list[dict]:
+        """Recent ``user_turn`` (and ``compact_summary``) live events for a
+        project, oldest-first, with raw payload for downstream stats.
+
+        The Reflection view derives idle-gap and prompt-length
+        distributions client-side from this stream. We deliberately
+        include both event types here so the caller can choose to
+        exclude synthesized turns (Claude Code /compact) when
+        characterizing *user* behavior — a synthesized turn isn't
+        the user typing, even though it's the same JSONL shape.
+        """
+        async with self.conn.execute(
+            """SELECT id, session_id, event_type, payload, created_at
+               FROM live_events
+               WHERE project_hash=?
+                 AND event_type IN ('user_turn','compact_summary')
+               ORDER BY id DESC LIMIT ?""",
+            (project_hash, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+        # Reverse to oldest-first so callers can compute deltas without
+        # re-sorting.
+        return [dict(r) for r in reversed(list(rows))]
+
+    async def violation_status_counts(self, project_hash: str) -> dict:
+        """Aggregate constraint-violation status counts for a project.
+
+        Maps to the Reflection view's "destructive-action approval
+        cadence" panel: how often did the user acknowledge versus
+        dismiss versus leave new the violations Warden surfaced?
+        """
+        async with self.conn.execute(
+            """SELECT status, count(*) AS n
+               FROM constraint_violations
+               WHERE project_hash=?
+               GROUP BY status""",
+            (project_hash,),
+        ) as cur:
+            rows = await cur.fetchall()
+        out = {"new": 0, "acknowledged": 0, "dismissed": 0}
+        for r in rows:
+            out[str(r["status"])] = int(r["n"])
+        return out
+
+    async def claim_status_counts(self, project_hash: str) -> dict:
+        """Aggregate claim verification verdicts for a project.
+
+        Maps to the Reflection view's "verification behavior" panel:
+        of the assistant's first-person completion claims, how many
+        held up under grep-based verification?
+        """
+        async with self.conn.execute(
+            """SELECT status, count(*) AS n
+               FROM verification_ledger
+               WHERE project_hash=?
+               GROUP BY status""",
+            (project_hash,),
+        ) as cur:
+            rows = await cur.fetchall()
+        out = {"verified": 0, "contradicted": 0, "unverifiable": 0}
+        for r in rows:
+            out[str(r["status"])] = int(r["n"])
+        return out

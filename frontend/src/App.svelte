@@ -52,7 +52,7 @@
   {#if view === 'session'}
     <SessionView />
   {:else if view === 'reflection'}
-    <ReflectionView />
+    <ReflectionView {ph} />
   {:else if view === 'platform'}
     <PlatformView {ph} />
   {/if}

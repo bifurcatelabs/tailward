@@ -377,6 +377,80 @@ def mount_web(app: FastAPI) -> None:
         rows = await daemon.ledger.llm_call_metrics_summary()
         return JSONResponse({"by_kind": rows})
 
+    @app.get("/v2/reflection/{ph}")
+    async def v2_reflection_signals(request: Request, ph: str) -> JSONResponse:
+        """Derived signals for the Reflection view — no LLM calls.
+
+        Four panels' worth of data, computed from existing live_events,
+        constraint_violations, and verification_ledger rows:
+
+        * ``intervals`` — seconds between consecutive *typed* user turns.
+          Synthesized turns (Claude Code /compact) are excluded so the
+          distribution reflects actual user pacing.
+        * ``prompt_lengths`` — char counts of typed user prompts.
+        * ``approvals`` — counts of constraint_violations by status
+          (new / acknowledged / dismissed). Speaks to the user's
+          response cadence on Warden's destructive-action surfacings.
+        * ``verification`` — counts of verification_ledger rows by
+          status (verified / contradicted / unverifiable). Speaks to
+          how often the assistant's first-person completion claims
+          held up under grep-based verification.
+        """
+        import json as _json
+
+        daemon = request.app.state.daemon
+        try:
+            limit = int(request.query_params.get("limit", "500") or 500)
+        except ValueError:
+            limit = 500
+
+        rows = await daemon.ledger.user_turn_rows(ph, limit=limit)
+
+        intervals: list[float] = []
+        prompt_lengths: list[int] = []
+        synthesized_count = 0
+        prev_ts: float | None = None
+        prev_session: str | None = None
+        from datetime import datetime as _dt
+
+        for r in rows:
+            if r["event_type"] == "compact_summary":
+                synthesized_count += 1
+                # A compact_summary breaks the user-pacing chain — the
+                # next typed turn shouldn't be treated as adjacent to
+                # the previous one across a synthesis boundary.
+                prev_ts = None
+                continue
+            try:
+                ts = _dt.fromisoformat(r["created_at"]).timestamp()
+            except Exception:
+                ts = None
+            try:
+                payload = _json.loads(r["payload"]) if r.get("payload") else {}
+            except Exception:
+                payload = {}
+            chars = payload.get("chars")
+            if isinstance(chars, int) and chars > 0:
+                prompt_lengths.append(chars)
+            # Gap is intra-session only: switching sessions doesn't
+            # describe user pacing within a coherent task.
+            if ts is not None and prev_ts is not None and prev_session == r["session_id"]:
+                intervals.append(round(ts - prev_ts, 3))
+            prev_ts = ts
+            prev_session = r["session_id"]
+
+        approvals = await daemon.ledger.violation_status_counts(ph)
+        verification = await daemon.ledger.claim_status_counts(ph)
+
+        return JSONResponse({
+            "intervals_seconds": intervals,
+            "prompt_lengths_chars": prompt_lengths,
+            "synthesized_user_turns": synthesized_count,
+            "approvals": approvals,
+            "verification": verification,
+            "sample_size": len(rows),
+        })
+
     @app.get("/v2/sessions/recent")
     async def v2_recent_sessions(request: Request) -> JSONResponse:
         """Recent sessions across all watched projects, newest first.
