@@ -10,9 +10,6 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Glenn Walker", email = "glenn@glennw.net" }]
-
-[project.urls]
-Repository = "https://git.bifurcate.io/active/warden"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -36,7 +33,15 @@ dev = [
     "ruff>=0.6",
 ]
 
+[project.urls]
+Repository = "https://git.bifurcate.io/active/warden"
+
 [project.scripts]
+# ``warden`` is the canonical CLI binary as of v2.0.0. ``modmcp`` is
+# kept as a backward-compat alias for users who already have it in
+# their muscle memory or wired into Claude Code MCP / hook configs.
+# Both invoke the same entry point. Slated for removal in v3.0.0.
+warden = "modmcp.cli:main"
 modmcp = "modmcp.cli:main"
 
 [tool.hatch.build.targets.wheel]

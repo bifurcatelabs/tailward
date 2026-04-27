@@ -49,12 +49,19 @@ full cutover sequence.
 
 ### Changed
 
+- **CLI binary renamed** `modmcp` → `warden`. `modmcp` kept as a
+  backward-compat alias so wired-up Claude Code hook configs keep
+  working; both binaries invoke the same entry point. Slated for
+  removal in v3.0.0.
 - Rubric calibration: `qwen_max_tokens_rubric` raised 2500 → 6000 based
   on observed truncation rates. Per-call-kind sampler params introduced
   matching Qwen3's published profiles (rubric on precise-coding profile,
   others on general).
 - Default mode flips from implicit-build to explicit-permissive: yolo /
   unknown labels no longer trigger build-mode rubric framing.
+- Internal Python package retains the name `modmcp` (`src/modmcp/`,
+  `~/.modmcp/` state dir, `MODMCP_HOME` env var) — deliberate light-path
+  rebrand, see `memory/project_v2_cutover_plan.md`.
 
 ### Fixed
 

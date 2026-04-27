@@ -1,4 +1,4 @@
-# modmcp
+# warden
 
 A local-first, passive-first session-audit layer for Claude Code. A long-running local daemon tails Claude Code transcripts, scores them against 8 trust-breaking failure modes using deterministic rule checks plus a **local LLM rubric**, and surfaces the signal in a localhost web UI. No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
 
@@ -13,7 +13,7 @@ See [`V1 Proposal.md`](V1%20Proposal.md) for the original design, [`failure mode
 
 **v1 — session handoff and continuity (opt-in `active` mode — _unmaintained, see note below_)**
 
-- **Phase 1 (handoff):** `modmcp handoff` reads a Claude Code session's transcript and synthesizes a structured `intent.md` (active goal, open threads, active rules, known drift patterns, pending commitments, recent claims) for review in your editor.
+- **Phase 1 (handoff):** `warden handoff` reads a Claude Code session's transcript and synthesizes a structured `intent.md` (active goal, open threads, active rules, known drift patterns, pending commitments, recent claims) for review in your editor.
 - **Phase 2 (continuity):** on the next session's first turn, a `UserPromptSubmit` hook injects the intent as a preamble; for the first N turns, drift against the goal queues a corrective injection on the next turn and strong claims ("I removed all X") are grepped against the repo and logged verified / contradicted / unverifiable.
 - **MCP pull:** `get_captured_intent`, `get_active_rules`, `query_intent`, `record_decision`.
 
@@ -85,12 +85,12 @@ This is the recommended starting point. You can run it against a live Claude Cod
 
 ```bash
 # 1. Start the daemon.
-modmcp daemon start
+warden daemon start
 # -> prints pid + http://127.0.0.1:7878
 
 # 2. Seed a project so it shows up in the UI.
 cd ~/code/your-project
-modmcp handoff --no-edit         # creates ~/.modmcp/projects/<hash>/intent.md
+warden handoff --no-edit         # creates ~/.modmcp/projects/<hash>/intent.md
 
 # 3. Start using Claude Code in that same project as you normally would.
 #    The transcript watcher will pick up the session automatically.
@@ -103,7 +103,7 @@ start http://127.0.0.1:7878/     # Windows
 
 Click into your project → **Live** → you'll see turns and tool calls stream in real time. Violations, scope snapshots, rubric scores, and the end-of-session report card fill in as they're produced.
 
-Stop with `modmcp daemon stop`.
+Stop with `warden daemon stop`.
 
 ### Adding full Claude Code integration (only needed for `active` mode + MCP pull)
 
@@ -111,20 +111,20 @@ Stop with `modmcp daemon stop`.
 
 You only need this if you want the `UserPromptSubmit` preamble and the MCP tools (`get_captured_intent`, etc.). Neither is required for the audit layer.
 
-**0. Find the absolute path to your `modmcp` executable.** Claude Code spawns hook and MCP commands with the `PATH` it inherited at launch. For a venv install (`pip install -e .` inside `.venv`) that `PATH` almost never includes `.venv/Scripts` / `.venv/bin`, so a bare `command: "modmcp"` will silently fail to resolve. The preferred shape is the absolute path to the launcher `pip` / `pipx` created:
+**0. Find the absolute path to your `warden` executable.** Claude Code spawns hook and MCP commands with the `PATH` it inherited at launch. For a venv install (`pip install -e .` inside `.venv`) that `PATH` almost never includes `.venv/Scripts` / `.venv/bin`, so a bare `command: "warden"` will silently fail to resolve. The preferred shape is the absolute path to the launcher `pip` / `pipx` created:
 
 ```bash
 # Windows (inside the activated venv, or from anywhere if on PATH)
-where modmcp
-# -> C:\path\to\.venv\Scripts\modmcp.exe
+where warden
+# -> C:\path\to\.venv\Scripts\warden.exe
 
 # macOS / Linux
-which modmcp
-# -> /path/to/.venv/bin/modmcp          (venv install)
-# -> /home/you/.local/bin/modmcp        (pipx install)
+which warden
+# -> /path/to/.venv/bin/warden          (venv install)
+# -> /home/you/.local/bin/warden        (pipx install)
 ```
 
-Use that path verbatim in the snippets below. Bare `modmcp` works too **if** its install dir is on the user/system `PATH` that Claude Code inherits at launch (typical for `pipx install` after `pipx ensurepath`, plus a Claude Code restart). The absolute form survives PATH changes, venv activations, and ambiguous multi-install setups, so it's the recommended shape.
+Use that path verbatim in the snippets below. Bare `warden` works too **if** its install dir is on the user/system `PATH` that Claude Code inherits at launch (typical for `pipx install` after `pipx ensurepath`, plus a Claude Code restart). The absolute form survives PATH changes, venv activations, and ambiguous multi-install setups, so it's the recommended shape. The legacy `modmcp` binary is kept as a backward-compat alias and resolves to the same entry point.
 
 **1. Register the hook.** Edit `~/.claude/settings.json`:
 
@@ -136,7 +136,7 @@ Use that path verbatim in the snippets below. Bare `modmcp` works too **if** its
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\path\\to\\.venv\\Scripts\\modmcp.exe hook userpromptsubmit"
+            "command": "C:\\path\\to\\.venv\\Scripts\\warden.exe hook userpromptsubmit"
           }
         ]
       }
@@ -145,7 +145,7 @@ Use that path verbatim in the snippets below. Bare `modmcp` works too **if** its
 }
 ```
 
-On macOS / Linux the `command` becomes `"/path/to/.venv/bin/modmcp hook userpromptsubmit"`. Note the doubled backslashes in the Windows form — `settings.json` is JSON, so `\` must be escaped.
+On macOS / Linux the `command` becomes `"/path/to/.venv/bin/warden hook userpromptsubmit"`. Note the doubled backslashes in the Windows form — `settings.json` is JSON, so `\` must be escaped.
 
 The hook has a hard ≤400 ms budget and silently passes your prompt through on any failure, so it can never block you. In `warden_mode = "passive"` the daemon returns an empty response — the hook fires but injects nothing.
 
@@ -171,19 +171,19 @@ Same substitution on POSIX: `"command": "/path/to/.venv/bin/modmcp"`. If `MODMCP
 warden_mode = "active"
 ```
 
-...and `modmcp daemon stop && modmcp daemon start` to pick up the change.
+...and `warden daemon stop && warden daemon start` to pick up the change.
 
 ### Daily use
 
 ```bash
-modmcp daemon status                # is it running?
-modmcp daemon logs -n 200           # tail the daemon log
-modmcp daemon run                   # foreground mode for debugging
-modmcp handoff                      # re-capture intent (opens $EDITOR)
-modmcp handoff --auto               # same, but Qwen-synthesized (needs LLM up)
-modmcp handoff --no-edit            # skip $EDITOR
-modmcp link                         # symlink ~/.modmcp/.../intent.md into <repo>/.modmcp/
-modmcp version
+warden daemon status                # is it running?
+warden daemon logs -n 200           # tail the daemon log
+warden daemon run                   # foreground mode for debugging
+warden handoff                      # re-capture intent (opens $EDITOR)
+warden handoff --auto               # same, but Qwen-synthesized (needs LLM up)
+warden handoff --no-edit            # skip $EDITOR
+warden link                         # symlink ~/.modmcp/.../intent.md into <repo>/.modmcp/
+warden version
 ```
 
 ## Web UI
@@ -212,12 +212,12 @@ All routes live under `http://127.0.0.1:7878/`. Every project gets a 12-char has
 
 | command | what |
 |---|---|
-| `modmcp daemon start\|stop\|status\|logs\|run` | lifecycle (`run` = foreground) |
-| `modmcp handoff [--session ID] [--no-edit] [--auto\|--manual] [--project PATH]` | run Phase 1 synthesis |
-| `modmcp link [--project PATH]` | symlink `intent.md` into `<repo>/.modmcp/intent.md` |
-| `modmcp hook userpromptsubmit` | bridge for the Claude Code hook (stdin JSON → daemon → stdout JSON) |
-| `modmcp mcp` | run the stdio MCP server |
-| `modmcp version` | print version |
+| `warden daemon start\|stop\|status\|logs\|run` | lifecycle (`run` = foreground) |
+| `warden handoff [--session ID] [--no-edit] [--auto\|--manual] [--project PATH]` | run Phase 1 synthesis |
+| `warden link [--project PATH]` | symlink `intent.md` into `<repo>/.modmcp/intent.md` |
+| `warden hook userpromptsubmit` | bridge for the Claude Code hook (stdin JSON → daemon → stdout JSON) |
+| `warden mcp` | run the stdio MCP server |
+| `warden version` | print version |
 
 ## Configuration
 
@@ -336,7 +336,7 @@ All LLM calls serialize through a single queue so Warden doesn't contend with ot
 
 | kind | used by | typical cost |
 |---|---|---|
-| `synth` | `modmcp handoff --auto` | heavy (one-shot, up to 6k out + thinking) |
+| `synth` | `warden handoff --auto` | heavy (one-shot, up to 6k out + thinking) |
 | `drift` | Phase 2 drift worker | light (per-turn, in active mode) |
 | `query` | `query_intent` MCP tool | light (on-demand) |
 | `rubric` | rubric worker (v1.1) | medium (sampled, every N turns + triggers) |
@@ -348,12 +348,12 @@ If the LLM endpoint is unreachable, Warden degrades cleanly:
 
 | works without LLM | needs LLM |
 |---|---|
-| Transcript watcher + live feed | `modmcp handoff --auto` (falls back to manual template) |
+| Transcript watcher + live feed | `warden handoff --auto` (falls back to manual template) |
 | LiveBus + SSE | Drift classifier (active mode) |
 | Constraints worker + violations UI | Audit claim verification (uses LLM for claim extraction) |
 | Scope worker + creep detection | Rubric worker (silently skips samples) |
 | Ledger, trends, report rail (shell) | Session-close consolidator (skips, report stays "in progress") |
-| `modmcp handoff` (manual template) | `query_intent` MCP tool (keyword fallback) |
+| `warden handoff` (manual template) | `query_intent` MCP tool (keyword fallback) |
 
 In other words: the entire passive observation layer works fine with no model running at all. You just won't get rubric scores or the 8-mode report card until you bring one up.
 
@@ -388,7 +388,7 @@ Claude Code session
 ~/.claude/projects/<proj>/<session>.jsonl
       │ tailed by
       ▼
-┌─────────────────── modmcp daemon ───────────────────┐
+┌─────────────────── warden daemon ───────────────────┐
 │                                                     │
 │  TranscriptWatcher ──▶ on_event dispatch            │
 │                        │                            │
@@ -417,13 +417,13 @@ pytest -q          # 110 tests on v0.2-trust-layer, ~22s
 
 Troubleshooting:
 
-- `modmcp daemon logs -n 200` — everything interesting ends up here: hook failures, worker startup errors, LLM call failures with the call kind tagged.
-- `modmcp daemon run` — runs the daemon in the foreground with uvicorn logs on stdout; useful when you want live-reload visibility into what the audit layer is doing.
-- `MODMCP_HOME=/tmp/modmcp-dev modmcp daemon run` — isolated state dir for experimentation.
+- `warden daemon logs -n 200` — everything interesting ends up here: hook failures, worker startup errors, LLM call failures with the call kind tagged.
+- `warden daemon run` — runs the daemon in the foreground with uvicorn logs on stdout; useful when you want live-reload visibility into what the audit layer is doing.
+- `MODMCP_HOME=/tmp/modmcp-dev warden daemon run` — isolated state dir for experimentation.
 
 ## Platform notes
 
-- **Windows:** daemon uses `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`; `modmcp link` requires Developer Mode for symlinks and falls back to file copy otherwise.
-- **macOS / Linux:** daemon uses `setsid` detachment; `modmcp link` uses `os.symlink`.
+- **Windows:** daemon uses `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`; `warden link` requires Developer Mode for symlinks and falls back to file copy otherwise.
+- **macOS / Linux:** daemon uses `setsid` detachment; `warden link` uses `os.symlink`.
 
-Service units (systemd user unit, launchd plist, Task Scheduler XML) are not required — the lightweight `modmcp daemon start` is sufficient. A future `modmcp daemon install-service` subcommand may ship them.
+Service units (systemd user unit, launchd plist, Task Scheduler XML) are not required — the lightweight `warden daemon start` is sufficient. A future `warden daemon install-service` subcommand may ship them.
