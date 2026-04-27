@@ -77,17 +77,26 @@ full cutover sequence.
 - LiveBus payload envelope no longer bakes `id=0` into stored rows; the
   envelope is reconstructed from row columns at fetch.
 
-### Removed (planned in v2.0.0 cutover)
+### Removed
 
-- v1.1 Jinja-served surfaces (`live.html`, `violations.html`,
-  `trends.html`, `sessions.html`) and the legacy `live.js` partial
-  renderer.
-- `/p/<ph>/live/<sid>` non-`/v2` routes; `/v2` becomes the canonical
-  surface.
-- `src/modmcp/mcp/` server module + `modmcp mcp` CLI subcommand +
+- v1.1 Jinja-served audit surfaces and routes: `live.html`,
+  `violations.html`, `trends.html`, `session_report.html`,
+  `no_session.html`, `drift.html`, `ledger.html`, plus the legacy
+  `live.js` partial renderer.
+- The non-`/v2` route handlers: `/p/<ph>/live`, `/p/<ph>/live/<sid>`,
+  `/p/<ph>/violations` (Jinja list page; ack/dismiss POST endpoints
+  retained), `/p/<ph>/trends`, `/p/<ph>/sessions/<sid>`,
+  `/p/<ph>/drift`, `/p/<ph>/ledger`. Reflection-view panels cover the
+  cross-session aggregation use case.
+- `src/modmcp/mcp_server.py` + `warden mcp` CLI subcommand +
   `mcp>=1.0` dependency. The trust-layer surface is effective without
   MCP integration; MCP was an active-mode affordance and the project
   pivoted away from active mode.
+- `tests/test_mcp_server.py`, `tests/test_e2e_smoke.py` (the active-
+  mode smoke; `test_e2e_passive_smoke.py` is the canonical regression).
+- The `EVENT_TYPES`-vs-`live.js` regression test in `test_livebus.py`
+  is replaced with one pinning the Svelte `FeedItem.svelte` chip
+  branches and `live.svelte.js` `KNOWN_EVENT_TYPES` set.
 
 ## [v1.1.0] — passive-first audit pivot
 

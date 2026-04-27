@@ -5,8 +5,8 @@ from __future__ import annotations
 from modmcp.daemon.mode_profile import (
     ALL_RUBRIC_DIMENSIONS,
     DEFAULT_PROFILE,
-    profile_for,
     known_profile_names,
+    profile_for,
 )
 
 

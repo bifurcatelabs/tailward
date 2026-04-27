@@ -126,7 +126,7 @@ class ProbeWorker:
                     detail = None
             else:
                 error = f"HTTP {r.status_code}"
-        except (httpx.TimeoutException, asyncio.TimeoutError):
+        except (TimeoutError, httpx.TimeoutException):
             status = "timeout"
             error = f"timeout after {cfg.probe_timeout_seconds}s"
         except httpx.HTTPError as e:

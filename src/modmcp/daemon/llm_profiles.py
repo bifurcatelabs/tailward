@@ -15,17 +15,18 @@ shape changes, this module's output changes with it.
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from ..config import get_config
 from . import drift as drift_mod
-from . import rubric_worker
-from . import session_close
+from . import rubric_worker, session_close
 from .qwen import CallKind
 
-# Synth lives in modmcp.phase1, query in modmcp.mcp_server — both
-# imported lazily to avoid pulling MCP / fastmcp deps when the route
-# is hit before those subsystems are constructed.
+# Synth lives in modmcp.phase1, imported lazily so this module can be
+# imported even before phase1's transcript-denoiser deps are loaded.
+# The MCP server module + its ``query`` prompt was retired in v2.0.0;
+# the ``query`` CallKind remains as the generic fallback in
+# qwen.QwenClient.complete() but has no surfaced prompt template.
 
 
 def _synth_user_template() -> str:
@@ -95,16 +96,17 @@ def _kind_profile(kind: CallKind, system: str, user_template: str) -> dict[str, 
 
 
 def all_profiles() -> list[dict[str, Any]]:
-    """Return one entry per call kind in stable display order."""
-    # Lazy imports so this module can be imported even if the MCP
-    # extras (or phase1's transcript-denoiser) aren't loaded yet.
-    from .. import mcp_server
+    """Return one entry per call kind that has a surfaced prompt, in
+    stable display order. The ``query`` kind is omitted: its prompt
+    used to live in ``mcp_server.py`` which was retired in v2.0.0,
+    and no other code path uses it."""
+    # Lazy import so this module can be imported even if phase1's
+    # transcript-denoiser deps aren't loaded yet.
     from .. import phase1
 
     return [
         _kind_profile("synth", phase1.SYSTEM, _synth_user_template()),
         _kind_profile("drift", drift_mod.PROMPT_SYSTEM, drift_mod.PROMPT_USER_TEMPLATE),
-        _kind_profile("query", mcp_server.PROMPT_SYSTEM, mcp_server.PROMPT_USER_TEMPLATE),
         _kind_profile("rubric", rubric_worker.PROMPT_SYSTEM, rubric_worker.PROMPT_USER_TEMPLATE),
         _kind_profile(
             "consolidator", session_close.PROMPT_SYSTEM, session_close.PROMPT_USER_TEMPLATE

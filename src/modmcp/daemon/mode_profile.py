@@ -30,7 +30,7 @@ See ``project_emerging_failure_modes.md`` and
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..paths import intent_path

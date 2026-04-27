@@ -28,6 +28,11 @@ const KNOWN_EVENT_TYPES = new Set([
   // distinct kind so the feed can render it explicitly instead of as
   // a regular user turn. See memory: project_synthesized_turns.md.
   'compact_summary',
+  // Per-turn inference-path metrics (TTFT, TPS, cache hit ratio).
+  // The Platform view aggregates these via /p/<ph>/turn-metrics; the
+  // Session feed renders a small "perf" chip for moment-of-arrival
+  // visibility. Without this entry the SSE listener filters them out.
+  'turn_metric',
 ]);
 
 const FEED_CAP = 250;

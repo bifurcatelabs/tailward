@@ -22,6 +22,7 @@
     report_ready: 'report',
     session_closed: 'session closed',
     compact_summary: 'synthesized',
+    turn_metric: 'perf',
   };
 
   let p = $derived(event.payload || {});
@@ -175,6 +176,19 @@
       <div class="row">consolidation complete</div>
     {:else if kind === 'session_closed'}
       <div class="muted small">session marked closed</div>
+    {:else if kind === 'turn_metric'}
+      <div class="row">
+        <span class="muted">turn {p.turn_idx}</span>
+        {#if p.prompt_to_response_ms != null}
+          <span class="usage">{Math.round(p.prompt_to_response_ms)} ms ttft</span>
+        {/if}
+        {#if p.output_tps != null}
+          <span class="usage">{p.output_tps.toFixed(1)} tps</span>
+        {/if}
+        {#if p.cache_hit_ratio != null}
+          <span class="muted small">cache {(p.cache_hit_ratio * 100).toFixed(0)}%</span>
+        {/if}
+      </div>
     {/if}
   </div>
 </article>
@@ -232,6 +246,11 @@
     color: var(--accent);
     border-color: rgba(232,153,104,0.35);
     border-style: dashed;
+  }
+  .chip-turn_metric {
+    background: rgba(150,144,248,0.06);
+    color: var(--violet);
+    border-color: rgba(150,144,248,0.18);
   }
   /* User-side rubric tag — distinguishes self-rubric samples from
      the assistant-side rubric they share an event type with. */

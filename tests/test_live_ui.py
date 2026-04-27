@@ -39,18 +39,11 @@ def test_mode_pill_renders_in_header(tmp_path: Path) -> None:
         assert ">passive<" in r.text
 
 
-def test_live_index_redirects_to_latest_session(tmp_path: Path) -> None:
-    proj = tmp_path / "liveidx"
-    proj.mkdir()
-    ph = _seed(proj)
-    with TestClient(create_app()) as client:
-        r = client.get(f"/p/{ph}/live")
-        assert r.status_code == 200
-        # No session exists; the "waiting" template should render.
-        assert "Live session view" in r.text or "No active sessions" in r.text
-
-
-def test_live_session_page_renders_and_state_json(tmp_path: Path) -> None:
+def test_live_state_json_returns_session(tmp_path: Path) -> None:
+    """The live ``state`` JSON endpoint feeds the v0.2 Svelte chassis on
+    initial paint; the Jinja-rendered ``/p/<ph>/live/<sid>`` page that
+    used to ride alongside it was retired in v2.0.0.
+    """
     proj = tmp_path / "livesess"
     proj.mkdir()
     ph = _seed(proj)
@@ -61,11 +54,6 @@ def test_live_session_page_renders_and_state_json(tmp_path: Path) -> None:
             await daemon.ledger.upsert_session("s-live", ph, str(proj))
 
         _run(_seed_session())
-
-        r = client.get(f"/p/{ph}/live/s-live")
-        assert r.status_code == 200
-        assert "live-grid" in r.text
-        assert "data-session-id=\"s-live\"" in r.text
 
         state = client.get(f"/p/{ph}/live/s-live/state")
         assert state.status_code == 200

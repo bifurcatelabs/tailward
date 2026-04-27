@@ -147,6 +147,7 @@ async def test_filestate_rehydrates_project_from_session_state(
     the wrong hash, invisible to the canonical project's UI.
     """
     import json
+
     from modmcp.paths import project_hash
 
     claude_root = tmp_path / "claude"

@@ -1,7 +1,12 @@
-"""Web UI: project list + intent editor + live session view + failure-mode trends.
+"""Web UI: project list + intent editor + live session view (v0.2 Svelte) +
+the JSON endpoints the live + Reflection + Platform views read.
 
-FastAPI routes mounted onto the main daemon app. Pure server-rendered HTMX
-with a single SSE client for the live page. No build step.
+FastAPI routes mounted onto the main daemon app. The live audit surface
+is the v0.2 Svelte chassis served at ``/p/<ph>/live/<sid>/v2``. The
+legacy v1.1 Jinja audit pages (``live.html``, ``violations.html``,
+``trends.html``, ``session_report.html``, ``ledger.html``,
+``drift.html``, ``no_session.html``) and their routes were retired in
+v2.0.0; cross-session aggregation lives in the Reflection view now.
 """
 
 from __future__ import annotations
@@ -145,76 +150,17 @@ def mount_web(app: FastAPI) -> None:
             "<span style='color:green'>saved</span>", status_code=200
         )
 
-    @app.get("/p/{ph}/ledger", response_class=HTMLResponse)
-    async def project_ledger(request: Request, ph: str) -> HTMLResponse:
-        daemon = request.app.state.daemon
-        rows = await daemon.ledger.recent_claims(ph)
-        return templates.TemplateResponse(
-            request, "ledger.html", {**_base_ctx(), "ph": ph, "rows": rows}
-        )
-
-    @app.get("/p/{ph}/drift", response_class=HTMLResponse)
-    async def project_drift(request: Request, ph: str) -> HTMLResponse:
-        daemon = request.app.state.daemon
-        rows = await daemon.ledger.recent_drift(ph)
-        return templates.TemplateResponse(
-            request, "drift.html", {**_base_ctx(), "ph": ph, "rows": rows}
-        )
-
     # ------------------------------------------------------------------
-    # Live session view (v1.1 failure-mode audit UI anchor)
+    # Live session view — v0.2 Svelte chassis
     # ------------------------------------------------------------------
-
-    @app.get("/p/{ph}/live", response_class=HTMLResponse)
-    async def live_redirect(request: Request, ph: str) -> HTMLResponse:
-        daemon = request.app.state.daemon
-        sid = await daemon.ledger.latest_session_for_project(ph)
-        if not sid:
-            return templates.TemplateResponse(
-                request, "no_session.html", {**_base_ctx(), "ph": ph}
-            )
-        return await live_session(request, ph, sid)
-
-    @app.get("/p/{ph}/live/{session_id}", response_class=HTMLResponse)
-    async def live_session(request: Request, ph: str, session_id: str) -> HTMLResponse:
-        daemon = request.app.state.daemon
-        session = await daemon.ledger.get_session(session_id)
-        if session is None or session["project_hash"] != ph:
-            raise HTTPException(404)
-        close_status = await daemon.ledger.session_close_status(session_id)
-        # The session_close row records when the consolidator ran, but the
-        # session may resume writing afterwards (long-idle then back).
-        # Treat the close status as stale if last_seen_at is newer than
-        # the consolidation timestamp; show "active" in that case so the
-        # badge reflects current liveness, not yesterday's report state.
-        if close_status == "done":
-            close_row = await daemon.ledger.session_close_row(session_id)
-            last_seen = session.get("last_seen_at") if session else None
-            closed_at = close_row.get("closed_at") if close_row else None
-            if last_seen and closed_at and str(last_seen) > str(closed_at):
-                close_status = "active"
-        report_rows = await daemon.ledger.session_report(session_id)
-        return templates.TemplateResponse(
-            request,
-            "live.html",
-            {
-                **_base_ctx(),
-                "ph": ph,
-                "session": session,
-                "session_id": session_id,
-                "close_status": close_status or ("idle" if session else None),
-                "report_rows": report_rows,
-            },
-        )
 
     @app.get("/p/{ph}/live/{session_id}/v2", response_class=HTMLResponse)
     async def live_session_v2(request: Request, ph: str, session_id: str) -> HTMLResponse:
         """v0.2 chassis surface — Svelte bundle takes over from ``#app``.
 
-        Lives alongside ``/live/{session_id}`` (the production v1.1
-        surface) so v0.2 work doesn't disrupt active dogfooding. When
-        the v2 surface fully covers v1.1's features the legacy template
-        and ``live.js`` get retired in one pass.
+        Made the canonical live surface in v2.0.0; the legacy v1.1 Jinja
+        ``live.html`` + ``live.js`` partial-renderer were deleted in the
+        same release.
         """
         daemon = request.app.state.daemon
         session = await daemon.ledger.get_session(session_id)
@@ -246,14 +192,6 @@ def mount_web(app: FastAPI) -> None:
     # Violations page + ack/dismiss
     # ------------------------------------------------------------------
 
-    @app.get("/p/{ph}/violations", response_class=HTMLResponse)
-    async def violations_page(request: Request, ph: str) -> HTMLResponse:
-        daemon = request.app.state.daemon
-        rows = await daemon.ledger.recent_violations(ph, limit=200)
-        return templates.TemplateResponse(
-            request, "violations.html", {**_base_ctx(), "ph": ph, "rows": rows}
-        )
-
     @app.post("/p/{ph}/violations/{vid}/ack")
     async def violation_ack(request: Request, ph: str, vid: int) -> JSONResponse:
         daemon = request.app.state.daemon
@@ -278,68 +216,6 @@ def mount_web(app: FastAPI) -> None:
         note = body.get("note")
         await daemon.ledger.record_rubric_feedback(score_id, verdict, note)
         return JSONResponse({"ok": True})
-
-    # ------------------------------------------------------------------
-    # Session permalink + trends
-    # ------------------------------------------------------------------
-
-    @app.get("/p/{ph}/sessions/{session_id}", response_class=HTMLResponse)
-    async def session_report_page(
-        request: Request, ph: str, session_id: str
-    ) -> HTMLResponse:
-        daemon = request.app.state.daemon
-        session = await daemon.ledger.get_session(session_id)
-        if session is None or session["project_hash"] != ph:
-            raise HTTPException(404)
-        report_rows = await daemon.ledger.session_report(session_id)
-        violations = await daemon.ledger.violations_for_session(session_id)
-        rubric_rows = await daemon.ledger.rubric_scores_for_session(session_id)
-        return templates.TemplateResponse(
-            request,
-            "session_report.html",
-            {
-                **_base_ctx(),
-                "ph": ph,
-                "session": session,
-                "session_id": session_id,
-                "report_rows": report_rows,
-                "violations": violations,
-                "rubric_rows": rubric_rows,
-            },
-        )
-
-    @app.get("/p/{ph}/trends", response_class=HTMLResponse)
-    async def trends_page(request: Request, ph: str) -> HTMLResponse:
-        daemon = request.app.state.daemon
-        rows = await daemon.ledger.recent_session_reports(ph, limit=20)
-        by_mode: dict[int, list[dict]] = defaultdict(list)
-        by_session: dict[str, list[dict]] = defaultdict(list)
-        for r in rows:
-            by_mode[int(r["mode_id"])].append(r)
-            by_session[r["session_id"]].append(r)
-
-        violations = await daemon.ledger.recent_violations(ph, limit=200)
-        vcount: dict[str, int] = defaultdict(int)
-        for v in violations:
-            vcount[v["rule_id"]] += 1
-        top_rules = sorted(vcount.items(), key=lambda kv: -kv[1])[:10]
-
-        return templates.TemplateResponse(
-            request,
-            "trends.html",
-            {
-                **_base_ctx(),
-                "ph": ph,
-                "by_mode": by_mode,
-                "by_session": by_session,
-                "top_rules": top_rules,
-                "rule_texts": {v["rule_id"]: v["rule_text"] for v in violations},
-            },
-        )
-
-    # ------------------------------------------------------------------
-    # JSON helpers for live view initial paint
-    # ------------------------------------------------------------------
 
     # ------------------------------------------------------------------
     # v0.2 Platform endpoints — global telemetry not scoped to a session

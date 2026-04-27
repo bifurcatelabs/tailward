@@ -105,13 +105,13 @@ Click into your project → **Live** → you'll see turns and tool calls stream 
 
 Stop with `warden daemon stop`.
 
-### Adding full Claude Code integration (only needed for `active` mode + MCP pull)
+### Adding the active-mode hook (optional, unmaintained)
 
 > Heads up: `active` mode is **opt-in and unmaintained** (see the status note above). The audit layer (passive) does not need anything in this section. Skip unless you specifically want to wire up the preamble + drift-corrective loop yourself.
 
-You only need this if you want the `UserPromptSubmit` preamble and the MCP tools (`get_captured_intent`, etc.). Neither is required for the audit layer.
+The MCP-server affordance was retired in v2.0.0; only the `UserPromptSubmit` hook remains for users running active mode.
 
-**0. Find the absolute path to your `warden` executable.** Claude Code spawns hook and MCP commands with the `PATH` it inherited at launch. For a venv install (`pip install -e .` inside `.venv`) that `PATH` almost never includes `.venv/Scripts` / `.venv/bin`, so a bare `command: "warden"` will silently fail to resolve. The preferred shape is the absolute path to the launcher `pip` / `pipx` created:
+**0. Find the absolute path to your `warden` executable.** Claude Code spawns hook commands with the `PATH` it inherited at launch. For a venv install (`pip install -e .` inside `.venv`) that `PATH` almost never includes `.venv/Scripts` / `.venv/bin`, so a bare `command: "warden"` will silently fail to resolve. The preferred shape is the absolute path to the launcher `pip` / `pipx` created:
 
 ```bash
 # Windows (inside the activated venv, or from anywhere if on PATH)
@@ -149,23 +149,7 @@ On macOS / Linux the `command` becomes `"/path/to/.venv/bin/warden hook userprom
 
 The hook has a hard ≤400 ms budget and silently passes your prompt through on any failure, so it can never block you. In `warden_mode = "passive"` the daemon returns an empty response — the hook fires but injects nothing.
 
-**2. Register the MCP server per project.** In the project root, add `.claude/mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "modmcp": {
-      "command": "C:\\path\\to\\.venv\\Scripts\\modmcp.exe",
-      "args": ["mcp"],
-      "env": { "MODMCP_PROJECT": "${workspaceFolder}" }
-    }
-  }
-}
-```
-
-Same substitution on POSIX: `"command": "/path/to/.venv/bin/modmcp"`. If `MODMCP_PROJECT` isn't set, the MCP server falls back to its current working directory.
-
-**3. Flip the mode.** Edit `~/.modmcp/config.toml`:
+**2. Flip the mode.** Edit `~/.modmcp/config.toml`:
 
 ```toml
 warden_mode = "active"
@@ -216,7 +200,6 @@ All routes live under `http://127.0.0.1:7878/`. Every project gets a 12-char has
 | `warden handoff [--session ID] [--no-edit] [--auto\|--manual] [--project PATH]` | run Phase 1 synthesis |
 | `warden link [--project PATH]` | symlink `intent.md` into `<repo>/.modmcp/intent.md` |
 | `warden hook userpromptsubmit` | bridge for the Claude Code hook (stdin JSON → daemon → stdout JSON) |
-| `warden mcp` | run the stdio MCP server |
 | `warden version` | print version |
 
 ## Configuration
