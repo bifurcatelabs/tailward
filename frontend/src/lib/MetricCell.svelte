@@ -1,5 +1,5 @@
 <script>
-  import Sparkline from './Sparkline.svelte';
+  import Chart from './Chart.svelte';
   import { humanize } from './format.js';
 
   let {
@@ -10,6 +10,7 @@
     fill = 'transparent',
     formatValue,
     hint,
+    height = 140,
   } = $props();
 
   let latest = $derived(series.length ? series[series.length - 1] : null);
@@ -18,6 +19,29 @@
     const s = [...series].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
   });
+
+  let xValues = $derived(series.map((_, i) => i + 1));
+  let chartSeries = $derived([
+    {
+      label,
+      color: _resolveColor(color),
+      fill: fill !== 'transparent' ? fill : undefined,
+      data: series,
+    },
+  ]);
+
+  function _resolveColor(v) {
+    // uPlot paints to canvas and can't resolve CSS custom properties
+    // on its own. Read them off the document's computed style so the
+    // chart line picks up the same token the rest of the UI uses.
+    if (typeof v === 'string' && v.startsWith('var(')) {
+      const name = v.slice(4, -1).trim();
+      const root = getComputedStyle(document.documentElement);
+      const resolved = root.getPropertyValue(name).trim();
+      return resolved || '#fff';
+    }
+    return v;
+  }
 </script>
 
 <article class="cell">
@@ -40,8 +64,18 @@
       {/if}
     </span>
   </div>
-  <div class="spark" style:color={color}>
-    <Sparkline points={series} width={300} height={36} fill={fill} strokeWidth={1.6} />
+  <div class="chart">
+    {#if series.length >= 2}
+      <Chart
+        {xValues}
+        series={chartSeries}
+        formatY={formatValue}
+        xIsIndex={true}
+        {height}
+      />
+    {:else}
+      <div class="empty" style="height: {height}px;">awaiting samples</div>
+    {/if}
   </div>
 </article>
 
@@ -77,6 +111,7 @@
     align-items: baseline;
     justify-content: space-between;
     gap: 8px;
+    margin-bottom: 8px;
   }
   .value {
     font-family: var(--mono);
@@ -96,5 +131,19 @@
     font-size: 11px;
     color: var(--muted);
   }
-  .spark { margin-top: 6px; }
+  .chart {
+    margin-top: 4px;
+    /* uPlot canvas reads parent width; nothing to do here. */
+  }
+  .empty {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted-deep);
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border: 1px dashed var(--border);
+    border-radius: 6px;
+  }
 </style>

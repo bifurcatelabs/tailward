@@ -2,6 +2,7 @@
   import PathDiagram from './PathDiagram.svelte';
   import ProbePanel from './ProbePanel.svelte';
   import TurnMetricsPanel from './TurnMetricsPanel.svelte';
+  import LlmBudgetPanel from './LlmBudgetPanel.svelte';
 
   let { ph } = $props();
 </script>
@@ -19,6 +20,7 @@
 
   <PathDiagram />
   <TurnMetricsPanel {ph} />
+  <LlmBudgetPanel />
   <ProbePanel {ph} />
 </section>
 
