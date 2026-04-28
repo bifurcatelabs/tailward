@@ -63,8 +63,8 @@ def _sanitize_to_path(sanitized: str) -> str:
     events themselves (``cwd`` field) as soon as we see one; this is only a
     fallback.
     """
-    # Windows: "C--Users-glenn-code-example" -> "C:/Users/glenn/code/example"
-    # POSIX:   "-Users-glenn-code-example"   -> "/Users/glenn/code/example"
+    # Windows: "C--Users-example-code-repo" -> "C:/Users/example/code/repo"
+    # POSIX:   "-Users-example-code-repo"   -> "/Users/example/code/repo"
     s = sanitized
     if len(s) >= 2 and s[1] == "-" and s[0].isalpha():
         s = s[0] + ":" + s[2:]

@@ -19,8 +19,8 @@ def test_ensure_layout_creates_dirs(_isolated_home: Path) -> None:
 
 
 def test_project_hash_is_stable(_isolated_home: Path) -> None:
-    h1 = project_hash("/Users/glenn/code/example")
-    h2 = project_hash("/Users/glenn/code/example")
+    h1 = project_hash("/Users/example/code/repo")
+    h2 = project_hash("/Users/example/code/repo")
     assert h1 == h2
     assert len(h1) == 12
 
@@ -36,7 +36,7 @@ def test_canonicalize_lowercases_drive_on_windows(_isolated_home: Path, monkeypa
         # Only meaningful on Windows; just check it doesn't throw elsewhere.
         canonicalize_project_path("/tmp")
         return
-    out = canonicalize_project_path("C:\\Users\\Glenn")
+    out = canonicalize_project_path("C:\\Users\\Example")
     assert out.startswith("c:")
     assert "\\" not in out
 
