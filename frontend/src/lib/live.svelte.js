@@ -93,6 +93,12 @@ class LiveStore {
   hasMoreOlder = $state(true);
   loadingOlder = $state(false);
 
+  // Wall-clock timestamp (epoch seconds) of the most recent event
+  // arriving from the bus. Read by HeaderBar to render a "last
+  // contact 3s ago"-style indicator — concrete signal that the
+  // stream is producing, instead of trusting the ``conn`` label.
+  lastContactAt = $state(null);
+
   // Internals --------------------------------------------------------
   #renderedIds = new Set();
   #lastEventId = 0;
@@ -120,7 +126,11 @@ class LiveStore {
       const dur = humanizeDuration(tsSeconds - this.#lastEventAt);
       if (dur) deltaText = '+' + dur;
     }
-    if (tsSeconds != null) this.#lastEventAt = tsSeconds;
+    if (tsSeconds != null) {
+      this.#lastEventAt = tsSeconds;
+      // Mirror to public reactive state for HeaderBar / status displays.
+      this.lastContactAt = tsSeconds;
+    }
 
     this.events.push({
       id,

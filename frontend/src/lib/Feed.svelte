@@ -6,14 +6,76 @@
   // with the reactive ``live.events`` array; only newly appended
   // entries trigger inserts at the top, and ``loadOlder`` prepends
   // (in store order) so they land at the bottom of the rendered list.
-  let reversed = $derived([...live.events].reverse());
+
+  // Filter pills: groups related event types under a single toggle so
+  // the bar stays compact instead of one button per type. ``null``
+  // active group = show everything.
+  const FILTER_GROUPS = [
+    { key: 'user',      label: 'user',     types: ['user_turn', 'compact_summary'] },
+    { key: 'assistant', label: 'assistant',types: ['turn'] },
+    { key: 'tool',      label: 'tools',    types: ['tool_call'] },
+    { key: 'rubric',    label: 'rubric',   types: ['rubric_in_flight', 'rubric_sample', 'rubric_done'] },
+    { key: 'audit',     label: 'audit',    types: ['constraint_violation', 'scope_snapshot', 'scope_creep', 'drift', 'claim'] },
+    { key: 'perf',      label: 'perf',     types: ['turn_metric'] },
+    { key: 'session',   label: 'session',  types: ['report_progress', 'report_ready', 'session_closed'] },
+  ];
+
+  let activeFilter = $state(null); // null = show all
+
+  function setFilter(key) {
+    activeFilter = activeFilter === key ? null : key;
+  }
+
+  let visibleTypes = $derived.by(() => {
+    if (activeFilter == null) return null;
+    const group = FILTER_GROUPS.find((g) => g.key === activeFilter);
+    return group ? new Set(group.types) : null;
+  });
+
+  let reversed = $derived.by(() => {
+    const arr = [...live.events].reverse();
+    if (visibleTypes == null) return arr;
+    return arr.filter((ev) => visibleTypes.has(ev.eventType));
+  });
+
+  let totalCount = $derived(live.events.length);
+  let visibleCount = $derived(reversed.length);
 </script>
 
 <section class="feed">
+  <div class="filter-bar">
+    <button
+      type="button"
+      class="pill"
+      class:active={activeFilter == null}
+      onclick={() => (activeFilter = null)}
+    >all</button>
+    {#each FILTER_GROUPS as g (g.key)}
+      <button
+        type="button"
+        class="pill pill-{g.key}"
+        class:active={activeFilter === g.key}
+        onclick={() => setFilter(g.key)}
+      >{g.label}</button>
+    {/each}
+    <span class="filter-count">
+      {#if activeFilter == null}
+        {totalCount} event{totalCount === 1 ? '' : 's'}
+      {:else}
+        {visibleCount} / {totalCount}
+      {/if}
+    </span>
+  </div>
+
   {#if reversed.length === 0}
     <div class="empty">
-      <div class="hint">waiting for events…</div>
-      <div class="muted">the watcher will surface turns, tool calls, and findings as the session writes to its transcript.</div>
+      {#if activeFilter == null}
+        <div class="hint">waiting for events…</div>
+        <div class="muted">the watcher will surface turns, tool calls, and findings as the session writes to its transcript.</div>
+      {:else}
+        <div class="hint">no {activeFilter} events</div>
+        <div class="muted">try a different filter or click "all" to clear.</div>
+      {/if}
     </div>
   {:else}
     {#each reversed as ev (ev.id)}
@@ -46,6 +108,44 @@
     border-radius: 8px;
     overflow: hidden;
   }
+  .filter-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 14px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .pill {
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    padding: 3px 10px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    border-radius: 999px;
+    cursor: pointer;
+    font-family: inherit;
+    transition: color 120ms, border-color 120ms, background 120ms;
+  }
+  .pill:hover { color: var(--text-soft); border-color: var(--text-soft); }
+  .pill.active {
+    color: var(--accent);
+    border-color: rgba(232,153,104,0.40);
+    background: rgba(232,153,104,0.08);
+  }
+  .filter-count {
+    margin-left: auto;
+    color: var(--muted-deep);
+    font-size: 10px;
+    font-family: var(--mono);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
   .empty {
     padding: 32px;
     text-align: center;

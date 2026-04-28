@@ -2,6 +2,37 @@
   import { live } from './live.svelte.js';
   import SessionPicker from './SessionPicker.svelte';
   let { ph, sessionId } = $props();
+
+  // Tick once per second so the "last contact" relative time updates
+  // without us reaching for an extra dependency. Cheap; `now` reads
+  // are batched into Svelte's reactivity graph.
+  let now = $state(Math.floor(Date.now() / 1000));
+  $effect(() => {
+    const id = setInterval(() => {
+      now = Math.floor(Date.now() / 1000);
+    }, 1000);
+    return () => clearInterval(id);
+  });
+
+  let contactText = $derived.by(() => {
+    if (live.lastContactAt == null) return 'awaiting first event';
+    const delta = Math.max(0, now - live.lastContactAt);
+    if (delta < 5) return 'just now';
+    if (delta < 60) return `${delta}s ago`;
+    if (delta < 3600) return `${Math.floor(delta / 60)}m ago`;
+    return `${Math.floor(delta / 3600)}h ago`;
+  });
+
+  // Pulse color tracks staleness, not raw connection state. The user
+  // cares whether events are arriving — "polling" is fine if events
+  // still land within the polling cadence.
+  let staleness = $derived.by(() => {
+    if (live.lastContactAt == null) return 'pending';
+    const delta = Math.max(0, now - live.lastContactAt);
+    if (delta < 30) return 'fresh';
+    if (delta < 180) return 'idle';
+    return 'stale';
+  });
 </script>
 
 <header class="bar">
@@ -51,9 +82,13 @@
 
   <SessionPicker {ph} {sessionId} />
 
-  <div class="conn conn-{live.conn}">
+  <div
+    class="contact stale-{staleness}"
+    title={`stream: ${live.conn} · last event ${contactText}`}
+  >
     <span class="pulse"></span>
-    <span class="conn-label">{live.conn}</span>
+    <span class="contact-label">last event</span>
+    <span class="contact-when">{contactText}</span>
   </div>
 </header>
 
@@ -132,32 +167,45 @@
     letter-spacing: 0.06em;
   }
 
-  .conn {
+  .contact {
     display: flex;
-    align-items: center;
-    gap: 8px;
+    align-items: baseline;
+    gap: 6px;
     font-size: 11px;
     color: var(--muted);
+  }
+  .contact-label {
     text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
+    letter-spacing: 0.06em;
+    font-size: 10px;
+    color: var(--muted-deep);
+  }
+  .contact-when {
+    font-family: var(--mono);
+    font-variant-numeric: tabular-nums;
+    color: var(--text-soft);
+    min-width: 70px;
   }
   .pulse {
     width: 6px;
     height: 6px;
     border-radius: 50%;
+    align-self: center;
     background: var(--muted-deep);
   }
-  .conn-live .pulse {
+  /* Pulse color tracks staleness, not raw connection state. The user
+     cares whether events are arriving — pretty pulse for fresh, dim
+     for idle, red for genuinely stuck. */
+  .stale-fresh .pulse {
     background: var(--ok);
     box-shadow: 0 0 8px rgba(95,195,167,0.6);
     animation: pulse 2s ease-in-out infinite;
   }
-  .conn-live { color: var(--ok); }
-  .conn-polling .pulse { background: var(--warn); }
-  .conn-polling { color: var(--warn); }
-  .conn-offline .pulse { background: var(--err); }
-  .conn-offline { color: var(--err); }
+  .stale-fresh .contact-when { color: var(--ok); }
+  .stale-idle .pulse { background: var(--muted); }
+  .stale-stale .pulse { background: var(--err); }
+  .stale-stale .contact-when { color: var(--err); }
+  .stale-pending .pulse { background: var(--muted-deep); }
   @keyframes pulse {
     0%, 100% { opacity: 1; transform: scale(1); }
     50%      { opacity: 0.55; transform: scale(1.4); }
