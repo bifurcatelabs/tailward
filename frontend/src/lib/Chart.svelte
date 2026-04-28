@@ -32,6 +32,13 @@
   let plot = null;
   let lastShape = '';
 
+  // Floating value tag, top-right of the chart. Stays put rather
+  // than chasing the cursor so it doesn't add motion noise. Cleared
+  // when the cursor leaves the chart area.
+  let hoverIdx = $state(null);
+  let hoverValues = $state([]);
+  let hoverXLabel = $state('');
+
   // ----- styling that matches the warden palette ------------------
   // Resolved at build time off the design tokens declared in App.svelte's
   // ``:global(:root)``. We pass concrete colors to uPlot rather than
@@ -58,6 +65,30 @@
           stroke: (u, sIdx) => series[sIdx - 1]?.color || '#fff',
           fill: '#0b0c10',
         },
+      },
+      hooks: {
+        setCursor: [
+          (u) => {
+            const idx = u.cursor.idx;
+            if (idx == null || idx < 0) {
+              hoverIdx = null;
+              return;
+            }
+            hoverIdx = idx;
+            hoverValues = series.map((s) =>
+              Array.isArray(s.data) ? s.data[idx] : null
+            );
+            const x = xValues[idx];
+            if (xIsIndex) {
+              hoverXLabel = `turn ${Math.round(x)}`;
+            } else if (typeof x === 'number') {
+              const d = new Date(x * 1000);
+              hoverXLabel = d.toLocaleTimeString();
+            } else {
+              hoverXLabel = '';
+            }
+          },
+        ],
       },
       scales: {
         x: { time: !xIsIndex },
@@ -152,12 +183,71 @@
   });
 </script>
 
-<div class="chart" bind:this={container} style="height: {height}px;"></div>
+<div class="chart" bind:this={container} style="height: {height}px;">
+  {#if hoverIdx != null && hoverValues.some((v) => v != null)}
+    <div class="hover-tag">
+      {#if hoverXLabel}<span class="hover-x">{hoverXLabel}</span>{/if}
+      {#each series as s, i (s.label)}
+        {#if hoverValues[i] != null}
+          <span class="hover-row">
+            <span class="hover-dot" style="background: {s.color}"></span>
+            <span class="hover-label">{s.label}</span>
+            <span class="hover-val">{formatY ? formatY(hoverValues[i]) : hoverValues[i]}</span>
+          </span>
+        {/if}
+      {/each}
+    </div>
+  {/if}
+</div>
 
 <style>
   .chart {
     width: 100%;
     position: relative;
+  }
+  .hover-tag {
+    position: absolute;
+    top: 6px;
+    right: 12px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 6px 10px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-soft);
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    z-index: 4;
+  }
+  .hover-x {
+    color: var(--muted);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 2px;
+  }
+  .hover-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .hover-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .hover-label {
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .hover-val {
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+    margin-left: auto;
   }
   /* uPlot's default styling is light-themed; override what bleeds
      through into our dark surface. The values/axis colors come from
