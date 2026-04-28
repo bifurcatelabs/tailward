@@ -115,6 +115,13 @@
     {#if data.recent?.length}
       <div class="recent">
         <h4>recent feedback</h4>
+        <p class="recent-help">
+          Each row is one LLM call's verdict on a single dimension. The
+          <em>quote</em> is verbatim from your typed turns (the model's
+          evidence for the score); the <em>suggestion</em> is LLM-generated
+          and may not be actionable mid-session — these are reflection
+          prompts, not real-time corrections.
+        </p>
         <ul>
           {#each data.recent.slice(0, 10) as s (s.id)}
             <li>
@@ -126,10 +133,16 @@
                 <span class="swhen">{formatRelative(s.created_at)}</span>
               </div>
               {#if s.evidence}
-                <div class="sev">{s.evidence}</div>
+                <div class="sev">
+                  <span class="kind-label">quote</span>
+                  <span class="sev-text">"{s.evidence}"</span>
+                </div>
               {/if}
               {#if s.suggestion}
-                <div class="sugg">→ {s.suggestion}</div>
+                <div class="sugg">
+                  <span class="kind-label">suggestion</span>
+                  <span class="sugg-text">{s.suggestion}</span>
+                </div>
               {/if}
             </li>
           {/each}
@@ -267,18 +280,42 @@
     font-family: var(--mono);
     font-size: 10px;
   }
-  .sev {
+  .recent-help {
+    font-size: 10px;
+    color: var(--muted-deep);
+    line-height: 1.55;
+    margin: 0 0 12px;
+  }
+  .recent-help em {
+    color: var(--muted);
+    font-style: normal;
+    font-weight: 600;
+  }
+  .sev,
+  .sugg {
+    margin-top: 6px;
+    display: grid;
+    grid-template-columns: 70px 1fr;
+    gap: 8px;
+    align-items: baseline;
     font-size: 11px;
+    line-height: 1.5;
+    user-select: text;
+    -webkit-user-select: text;
+  }
+  .kind-label {
+    color: var(--muted-deep);
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    text-align: right;
+  }
+  .sev-text {
     color: var(--muted);
     font-style: italic;
-    line-height: 1.5;
-    margin-top: 2px;
   }
-  .sugg {
-    font-size: 11px;
+  .sugg-text {
     color: var(--text-soft);
-    line-height: 1.5;
-    margin-top: 4px;
   }
 
   .footnote {

@@ -166,12 +166,37 @@
         <button class="btn" onclick={() => live.rubricFeedback(p.id, 'disagree')}>disagree</button>
       </div>
     {:else if kind === 'rubric_in_flight'}
-      <div class="muted small">turn {p.turn_idx} · {(p.triggers || []).join(', ')}</div>
+      <div class="row">
+        <span class="inflight-dot"></span>
+        <strong>calling local LLM</strong>
+        {#if p.subject === 'user'}
+          <span class="subject-tag">self</span>
+        {/if}
+      </div>
+      <div class="muted small">
+        turn {p.turn_idx} · {(p.triggers || []).join(', ') || 'cadence'}
+        · expect 3-10s for the score to land
+      </div>
     {:else if kind === 'rubric_done'}
       {#if p.error}
-        <div class="row sev-high">{p.error}</div>
+        <div class="row sev-high"><strong>rubric failed</strong></div>
+        <div class="muted small">{p.error}</div>
       {:else}
-        <div class="muted small">turn {p.turn_idx}</div>
+        <div class="row">
+          {#if p.subject === 'user'}
+            <span class="subject-tag">self</span>
+          {/if}
+          <strong>rubric complete</strong>
+          <span class="muted small">turn {p.turn_idx}</span>
+        </div>
+        <div class="muted small">
+          per-dimension scores landed in the rubric_sample entries above this one
+          {#if p.subject === 'user'}
+            · also visible in the Reflection view's self-rubric panel
+          {:else}
+            · also rolled up in the right-rail rubric averages
+          {/if}
+        </div>
       {/if}
     {:else if kind === 'drift'}
       <div class="row"><strong>{p.detail}</strong></div>
@@ -274,6 +299,22 @@
     background: rgba(95,195,167,0.10);
     color: var(--ok);
     border: 1px solid rgba(95,195,167,0.25);
+  }
+  /* Visible "still working" dot for rubric_in_flight events. The
+     point is fail-loudly: a Qwen call is up, this might take 3-10s,
+     don't think the daemon's wedged. */
+  .inflight-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--violet);
+    box-shadow: 0 0 6px rgba(150,144,248,0.5);
+    animation: pulse 1.4s ease-in-out infinite;
+    align-self: center;
+  }
+  @keyframes pulse {
+    0%, 100% { opacity: 0.5; transform: scale(0.85); }
+    50%      { opacity: 1; transform: scale(1.15); }
   }
 
   .severity {
