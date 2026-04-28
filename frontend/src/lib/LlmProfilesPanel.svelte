@@ -203,7 +203,9 @@
     padding: 12px 16px;
     cursor: pointer;
     list-style: none;
-    user-select: none;
+    /* user-select intentionally NOT none — users want to copy the
+       kind name + sampler params from the summary header. The
+       toggle works on click; double-click selects without toggling. */
   }
   summary::-webkit-details-marker { display: none; }
   .kind {

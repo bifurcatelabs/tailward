@@ -38,3 +38,6 @@ Thumbs.db
 # Claude Code per-project config (local-only, may contain machine paths / hook wiring)
 .claude/
 .mcp.json
+
+# Scratch dir for working notes / drafts that aren't ready to commit
+.scratch/

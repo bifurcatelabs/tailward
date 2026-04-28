@@ -5,6 +5,17 @@
   let { event } = $props();
   let expanded = $state(false);
 
+  // Click handler that doesn't fire when the user is mid-selection.
+  // Without this, click-and-drag to select evidence text *also*
+  // toggles the expand state, which fights careful copy/paste.
+  function toggleExpanded() {
+    if (typeof window !== 'undefined') {
+      const sel = window.getSelection();
+      if (sel && sel.toString().length > 0) return;
+    }
+    expanded = !expanded;
+  }
+
   // Mapping from event type -> friendly chip label.
   const chipLabel = {
     turn: 'assistant',
@@ -75,7 +86,7 @@
           type="button"
           class="evidence"
           class:expanded
-          onclick={() => (expanded = !expanded)}
+          onclick={toggleExpanded}
         >{p.text_preview}</button>
       {/if}
     {:else if kind === 'user_turn'}
@@ -84,7 +95,7 @@
           type="button"
           class="evidence"
           class:expanded
-          onclick={() => (expanded = !expanded)}
+          onclick={toggleExpanded}
         >{p.text_preview}</button>
       {/if}
     {:else if kind === 'compact_summary'}
@@ -99,7 +110,7 @@
           type="button"
           class="evidence"
           class:expanded
-          onclick={() => (expanded = !expanded)}
+          onclick={toggleExpanded}
         >{p.text_preview}</button>
       {/if}
     {:else if kind === 'tool_call'}
@@ -307,6 +318,8 @@
     text-align: left;
     width: 100%;
     display: block;
+    user-select: text;
+    -webkit-user-select: text;
   }
   .evidence {
     border: 0;
@@ -316,6 +329,12 @@
     overflow: hidden;
     position: relative;
     transition: max-height 200ms ease;
+    /* Make button text selectable for copy/paste. Default user-agent
+       styles on <button> can disable text selection (notably Safari).
+       The click-guard in toggleExpanded prevents click-to-toggle from
+       firing when text is selected. */
+    user-select: text;
+    -webkit-user-select: text;
   }
   .evidence:not(.expanded)::after {
     content: '';

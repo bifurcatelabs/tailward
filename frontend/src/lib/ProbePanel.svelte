@@ -37,6 +37,19 @@
     const s = [...latencies].sort((a, b) => a - b);
     return s[Math.floor(s.length / 2)];
   });
+
+  // Rolling 3-point average for the chart series. Single-ms variations
+  // between probes are noise — the chart should communicate trend, not
+  // every spike. Stats (median, last) read the raw values.
+  let smoothedLatencies = $derived.by(() => {
+    if (latencies.length < 3) return latencies;
+    return latencies.map((_, i) => {
+      const lo = Math.max(0, i - 1);
+      const hi = Math.min(latencies.length, i + 2);
+      const slice = latencies.slice(lo, hi);
+      return slice.reduce((a, b) => a + b, 0) / slice.length;
+    });
+  });
   let secondsAgo = $derived.by(() => {
     if (!latest?.ts) return null;
     const t = Date.parse(latest.ts);
@@ -87,9 +100,9 @@
       </div>
     </div>
 
-    {#if latencies.length >= 2}
+    {#if smoothedLatencies.length >= 2}
       <div class="chart" style="color: var(--ok)">
-        <Sparkline points={latencies} width={680} height={56}
+        <Sparkline points={smoothedLatencies} width={680} height={56}
                    fill="rgba(95,195,167,0.10)" strokeWidth={1.6} />
       </div>
     {/if}

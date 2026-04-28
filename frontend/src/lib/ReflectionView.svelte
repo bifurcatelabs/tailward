@@ -277,7 +277,7 @@
 </section>
 
 <style>
-  .view { padding: 24px; max-width: 1100px; }
+  .view { padding: 24px; max-width: 1100px; margin: 0 auto; }
   .hd {
     display: flex;
     align-items: baseline;
