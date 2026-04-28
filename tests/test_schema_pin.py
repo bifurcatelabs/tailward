@@ -12,7 +12,14 @@ a major schema change — fields renamed, types reshaped, the
 ``isCompactSummary`` flag spelled differently — these assertions fire
 hard rather than letting the audit silently corrupt.
 
-**Pinned against:** Claude Code 2.1.121 (audited 2026-04-28).
+**Pinned against:** Claude Code 2.1.119 (writing-process at audit
+time on 2026-04-28). The binary on disk was already 2.1.121 —
+auto-updated in the background — but the Claude Code session
+holding open the JSONL had loaded 2.1.119 at start and was still
+emitting that version's schema. The upgrade lands on session
+restart. This is itself a load-bearing observation: ``claude
+--version`` is the binary; ``/doctor`` shows the running version;
+the JSONL is whichever process is doing the writing.
 
 Fixtures are synthetic and shape-faithful: they reproduce the
 structural skeleton observed in real transcripts without including
@@ -28,7 +35,7 @@ import json
 
 from modmcp.schema.events import parse_line
 
-CLAUDE_CODE_VERSION_TESTED = "2.1.121"
+CLAUDE_CODE_VERSION_TESTED = "2.1.119"
 
 # Fields the parser hard-depends on at the top level of every event.
 EXPECTED_TOP_LEVEL_FIELDS = {
