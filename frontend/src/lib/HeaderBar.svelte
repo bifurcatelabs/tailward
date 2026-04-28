@@ -16,7 +16,7 @@
 
   let contactText = $derived.by(() => {
     if (live.lastContactAt == null) return 'awaiting first event';
-    const delta = Math.max(0, now - live.lastContactAt);
+    const delta = Math.max(0, Math.floor(now - live.lastContactAt));
     if (delta < 5) return 'just now';
     if (delta < 60) return `${delta}s ago`;
     if (delta < 3600) return `${Math.floor(delta / 60)}m ago`;
@@ -28,7 +28,7 @@
   // still land within the polling cadence.
   let staleness = $derived.by(() => {
     if (live.lastContactAt == null) return 'pending';
-    const delta = Math.max(0, now - live.lastContactAt);
+    const delta = Math.max(0, Math.floor(now - live.lastContactAt));
     if (delta < 30) return 'fresh';
     if (delta < 180) return 'idle';
     return 'stale';
