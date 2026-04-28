@@ -10,6 +10,11 @@
     fill = 'transparent',
     formatValue,
     hint,
+    /** Long-form caveat text shown as a hover tooltip on the cell
+     *  header. Use this for the honest "what this measurement
+     *  actually represents vs what its label might imply" notes —
+     *  see TurnMetricsPanel for examples. */
+    tooltip,
     height = 140,
   } = $props();
 
@@ -45,7 +50,7 @@
 </script>
 
 <article class="cell">
-  <div class="head">
+  <div class="head" class:has-tooltip={tooltip} title={tooltip || ''}>
     <span class="label">{label}</span>
     {#if hint}<span class="hint">{hint}</span>{/if}
   </div>
@@ -92,6 +97,9 @@
     justify-content: space-between;
     gap: 8px;
     margin-bottom: 8px;
+  }
+  .head.has-tooltip {
+    cursor: help;
   }
   .label {
     font-size: 10px;

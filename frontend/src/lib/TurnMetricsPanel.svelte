@@ -72,7 +72,8 @@
         series={ttftSeries}
         color="var(--accent)"
         fill="rgba(232,153,104,0.10)"
-        hint="wall-clock between user prompt and first assistant block"
+        hint="first-block latency"
+        tooltip={"Time from your prompt to the first assistant content block written to JSONL.\n\nNot pure TTFT — Claude Code writes a block after it completes, not on the first streamed token. For thinking-enabled responses, this includes the full thinking duration since <thinking> is the first block."}
       />
       <MetricCell
         label="output throughput"
@@ -80,7 +81,8 @@
         series={tpsSeries}
         color="var(--violet)"
         fill="rgba(150,144,248,0.10)"
-        hint="output_tokens / response_duration"
+        hint="output_tokens / message_duration"
+        tooltip={"Output tokens divided by wall-clock duration from first to last block of one assistant message.\n\nMeasures \"tokens per second the model produced for this message,\" not raw inference rate. If a message contains text + tool_use blocks, the duration spans both. Suppressed (—) when block-emit duration is under 100ms (single-block turns produce nonsense divisions)."}
       />
       <MetricCell
         label="cache hit ratio"
@@ -88,7 +90,8 @@
         color="var(--ok)"
         fill="rgba(95,195,167,0.10)"
         formatValue={pct}
-        hint="cache_read / total context tokens"
+        hint="cache_read / input-side total"
+        tooltip={"Fraction of input-side tokens that came from prompt cache.\n\nDenominator is cache_read + input_tokens + cache_creation — every token Anthropic billed on the input side. Higher is cheaper and faster; sustained low values mean cache is being invalidated frequently."}
       />
       <article class="cell stop-cell">
         <div class="head">
