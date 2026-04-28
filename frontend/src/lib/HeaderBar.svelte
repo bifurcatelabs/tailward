@@ -62,6 +62,12 @@
   <div class="session">
     <span class="muted">session</span>
     <code title={sessionId}>{sessionId.slice(0, 8)}</code>
+    {#if live.closeStatus === 'closed' || live.closeStatus === 'consolidated' || live.closeStatus === 'done'}
+      <span
+        class="closed-badge"
+        title="this session has been auto-closed by the consolidator after 10+ minutes idle. JSONL is no longer being written; new events will not arrive."
+      >closed</span>
+    {/if}
     <span class="muted">·</span>
     <span class="muted">project</span>
     <code class="thin" title={ph}>{ph.slice(0, 8)}</code>
@@ -159,6 +165,18 @@
     background: var(--surface-2);
     border-color: var(--border);
     color: var(--muted);
+  }
+  .closed-badge {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 7px;
+    border-radius: 999px;
+    background: rgba(125,134,147,0.10);
+    color: var(--muted);
+    border: 1px dashed var(--border-strong);
+    cursor: help;
   }
   .muted {
     color: var(--muted);
