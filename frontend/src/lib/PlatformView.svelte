@@ -4,13 +4,17 @@
   import TurnMetricsPanel from './TurnMetricsPanel.svelte';
   import LlmBudgetPanel from './LlmBudgetPanel.svelte';
   import LlmProfilesPanel from './LlmProfilesPanel.svelte';
+  import ProjectQuickPicker from './ProjectQuickPicker.svelte';
 
   let { ph } = $props();
 </script>
 
 <section class="view">
   <header class="hd">
-    <h2>platform</h2>
+    <div class="hd-row">
+      <h2>platform</h2>
+      <ProjectQuickPicker {ph} />
+    </div>
     <p>
       is the platform serving me consistently — derived from your
       actual sessions plus the local model server you control.
@@ -33,6 +37,11 @@
     margin: 0 auto;
     display: flex;
     flex-direction: column;
+    gap: 16px;
+  }
+  .hd-row {
+    display: flex;
+    align-items: center;
     gap: 16px;
   }
   .hd h2 {
