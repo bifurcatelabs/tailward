@@ -155,7 +155,7 @@
 <section class="view">
   <header class="hd">
     <h2>reflection</h2>
-    <p>am I behaving — bidirectional honesty about who's drifting, the human or the agent.</p>
+    <p>your patterns across typed prompts — pacing, intent, verification habits.</p>
     <button class="reload" onclick={load} disabled={loading} title="refresh">↻</button>
   </header>
 

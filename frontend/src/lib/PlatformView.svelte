@@ -16,10 +16,9 @@
       <ProjectQuickPicker {ph} />
     </div>
     <p>
-      is the platform serving me consistently — derived from your
-      actual sessions plus the local model server you control.
-      <strong>evidence, not verdict</strong>: this view shows variance
-      and trend, it does not prove tier swaps or routing changes.
+      in-band metrics from real sessions plus probes of the local
+      model server. <strong>evidence: variance and trend</strong> —
+      read it how you want.
     </p>
   </header>
 

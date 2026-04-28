@@ -1,13 +1,14 @@
 <script>
-  // Top-tab navigation. The four trust questions become the four
-  // surfaces; copy here is intentionally first-person so the tabs
-  // read as "what do I want to know" rather than feature labels.
+  // Top-tab navigation. Subtitles describe what each surface
+  // actually shows rather than the trust-question framing — less
+  // wordy and avoids overclaim ("session" includes user turns too,
+  // so "agent activity" was wrong).
   let { view, setView } = $props();
 
   const tabs = [
-    { id: 'session',    label: 'session',    sub: 'is the agent behaving' },
-    { id: 'reflection', label: 'reflection', sub: 'am I behaving' },
-    { id: 'platform',   label: 'platform',   sub: 'is the platform serving me' },
+    { id: 'session',    label: 'session',    sub: 'live activity' },
+    { id: 'reflection', label: 'reflection', sub: 'your patterns' },
+    { id: 'platform',   label: 'platform',   sub: 'inference path' },
   ];
 </script>
 
