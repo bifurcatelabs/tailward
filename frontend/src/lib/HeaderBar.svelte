@@ -173,9 +173,13 @@
     letter-spacing: 0.06em;
     padding: 2px 7px;
     border-radius: 999px;
-    background: rgba(125,134,147,0.10);
-    color: var(--muted);
-    border: 1px dashed var(--border-strong);
+    /* Cool slate — reads as "archived / dormant" rather than warning
+       (amber) or error (red). Dashed border reinforces "not active."
+       Subtle desaturation distinguishes it from the warm copper /
+       violet palette used for active surfaces. */
+    background: rgba(102,117,140,0.10);
+    color: #8a96a8;
+    border: 1px dashed rgba(102,117,140,0.40);
     cursor: help;
   }
   .muted {
