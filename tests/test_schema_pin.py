@@ -12,30 +12,36 @@ a major schema change — fields renamed, types reshaped, the
 ``isCompactSummary`` flag spelled differently — these assertions fire
 hard rather than letting the audit silently corrupt.
 
-**Pinned against:** Claude Code 2.1.119 (writing-process at audit
-time on 2026-04-28). The binary on disk was already 2.1.121 —
-auto-updated in the background — but the Claude Code session
-holding open the JSONL had loaded 2.1.119 at start and was still
-emitting that version's schema. The upgrade lands on session
-restart. This is itself a load-bearing observation: ``claude
---version`` is the binary; ``/doctor`` shows the running version;
-the JSONL is whichever process is doing the writing.
+**Pinned against:** the set of Claude Code versions in
+``modmcp.schema.audit.VALIDATED_VERSIONS`` (currently 2.1.117,
+2.1.119, 2.1.121). 2.1.119 was the running session at the original
+audit on 2026-04-28; 2.1.121 was verified compatible after a fresh
+session post-restart. The audit script (``audit_jsonl``) is the
+authoritative re-audit tool — see the upstream-fragility memory
+for the version-drift-during-restart finding.
 
 Fixtures are synthetic and shape-faithful: they reproduce the
 structural skeleton observed in real transcripts without including
-verbatim user-prompt content. When updating for a new Claude Code
-version, audit a real recent JSONL, update the fixtures + the
-``CLAUDE_CODE_VERSION_TESTED`` constant, and document the
-field-inventory delta in the upstream-fragility memory.
+verbatim user-prompt content. When validating against a new Claude
+Code version: re-run ``audit_jsonl`` against a representative recent
+transcript, compare against the field inventory documented in the
+upstream-fragility memory, and add the new version to
+``VALIDATED_VERSIONS`` when the diff is empty.
 """
 
 from __future__ import annotations
 
 import json
 
+from modmcp.schema.audit import VALIDATED_VERSIONS
 from modmcp.schema.events import parse_line
 
-CLAUDE_CODE_VERSION_TESTED = "2.1.119"
+# Most-recent version we've audited against. Used as the value for
+# the synthetic ``version`` field in fixtures; the structural
+# assertions are version-agnostic but representative fixtures should
+# reflect what's actually in the wild.
+CLAUDE_CODE_VERSION_TESTED = "2.1.121"
+assert CLAUDE_CODE_VERSION_TESTED in VALIDATED_VERSIONS
 
 # Fields the parser hard-depends on at the top level of every event.
 EXPECTED_TOP_LEVEL_FIELDS = {

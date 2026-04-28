@@ -120,10 +120,16 @@ def audit_jsonl(path: Path | str) -> AuditReport:
 # evolves, update ``memory/project_upstream_fragility.md`` and re-run
 # ``audit_jsonl`` against a representative recent transcript.
 VALIDATED_VERSIONS: frozenset[str] = frozenset({
-    # Audited 2026-04-28 (running session was 2.1.119 even though
-    # binary on disk had auto-updated to 2.1.121).
+    # Audited 2026-04-28. 2.1.119 was the running session at audit
+    # time; 2.1.121 was verified compatible after a separate fresh
+    # session (started post-binary-update) emitted the same field
+    # shapes — same top-level keys, same message keys (role, content,
+    # id, model, stop_reason, stop_details, stop_sequence, usage,
+    # diagnostics), same content block types (text, thinking,
+    # tool_use, tool_result), same set of known-unhandled types.
     "2.1.117",
     "2.1.119",
+    "2.1.121",
 })
 
 
