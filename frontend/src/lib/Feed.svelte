@@ -9,15 +9,45 @@
 
   // Filter pills: groups related event types under a single toggle so
   // the bar stays compact instead of one button per type. ``null``
-  // active group = show everything.
+  // active group = show everything. ``description`` powers the hover
+  // tooltip — explicit about what's included so the user doesn't have
+  // to guess what each label covers.
   const FILTER_GROUPS = [
-    { key: 'user',      label: 'user',     types: ['user_turn', 'compact_summary'] },
-    { key: 'assistant', label: 'assistant',types: ['turn'] },
-    { key: 'tool',      label: 'tools',    types: ['tool_call'] },
-    { key: 'rubric',    label: 'rubric',   types: ['rubric_in_flight', 'rubric_sample', 'rubric_done'] },
-    { key: 'audit',     label: 'audit',    types: ['constraint_violation', 'scope_snapshot', 'scope_creep', 'drift', 'claim'] },
-    { key: 'perf',      label: 'perf',     types: ['turn_metric'] },
-    { key: 'session',   label: 'session',  types: ['report_progress', 'report_ready', 'session_closed'] },
+    {
+      key: 'user', label: 'user',
+      types: ['user_turn', 'compact_summary'],
+      description: 'typed prompts you sent + synthesized /compact summaries (Claude Code injects these as user-shaped events; we flag them separately)',
+    },
+    {
+      key: 'assistant', label: 'assistant',
+      types: ['turn'],
+      description: 'model turns — one entry per logical turn, coalesced from the per-block JSONL stream (thinking + text + tool_use blocks all collapse to one)',
+    },
+    {
+      key: 'tool', label: 'tools',
+      types: ['tool_call'],
+      description: 'tool_use calls (Read, Edit, Bash, Glob, etc.) and their inputs',
+    },
+    {
+      key: 'rubric', label: 'rubric',
+      types: ['rubric_in_flight', 'rubric_sample', 'rubric_done'],
+      description: 'Qwen-judged scoring runs — in-flight indicator, per-dimension score samples, and the done marker. Includes both assistant-side and self (user-side) rubric',
+    },
+    {
+      key: 'audit', label: 'audit',
+      types: ['constraint_violation', 'scope_snapshot', 'scope_creep', 'drift', 'claim'],
+      description: 'failure-mode signals — rule violations, scope snapshots and creep, drift detection, claim verification verdicts',
+    },
+    {
+      key: 'perf', label: 'perf',
+      types: ['turn_metric'],
+      description: 'per-turn inference-path metrics — TTFT, output TPS, cache hit ratio. Derived from JSONL timestamps + the usage block; no synthetic probes',
+    },
+    {
+      key: 'session', label: 'session',
+      types: ['report_progress', 'report_ready', 'session_closed'],
+      description: 'session-close consolidator output — runs after 10 min idle, produces the 8-mode report card',
+    },
   ];
 
   let activeFilter = $state(null); // null = show all
@@ -49,6 +79,7 @@
       class="pill"
       class:active={activeFilter == null}
       onclick={() => (activeFilter = null)}
+      title="show every event type (no filter)"
     >all</button>
     {#each FILTER_GROUPS as g (g.key)}
       <button
@@ -56,6 +87,7 @@
         class="pill pill-{g.key}"
         class:active={activeFilter === g.key}
         onclick={() => setFilter(g.key)}
+        title={g.description}
       >{g.label}</button>
     {/each}
     <span class="filter-count">
