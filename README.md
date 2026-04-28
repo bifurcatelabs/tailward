@@ -4,6 +4,14 @@ A local-first **trust layer for AI coding workflows**. A long-running local daem
 
 See [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the audit layer and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which failure modes Warden currently detects and how. [`V1 Proposal.md`](V1%20Proposal.md) is the original design and is preserved as a historical artifact — the project pivoted away from active prompt injection in v1.1 and reframed as a trust layer in v2.0.0.
 
+## Status
+
+Actively iterated. Current release: **v2.1.0**.
+
+The **passive audit surface** (Session / Reflection / Platform views) is the supported daily-driver. **Active mode** (preamble injection + drift correctives, the original v1 design) is preserved as opt-in scaffolding but is not maintained beyond what the passive layer requires — see [Operating modes](#operating-modes).
+
+Solo-dev work; expect rough edges. Issues and discussion welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## What it does
 
 **Audit (passive by default)**
