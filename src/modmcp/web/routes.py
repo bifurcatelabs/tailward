@@ -548,7 +548,25 @@ def mount_web(app: FastAPI) -> None:
         rubric_rows = await daemon.ledger.rubric_scores_for_session(session_id)
         violations = await daemon.ledger.violations_for_session(session_id)
         report_rows = await daemon.ledger.session_report(session_id)
-        close_status = await daemon.ledger.session_close_status(session_id)
+
+        # Close-status with resume detection. The close worker stamps
+        # session_close.consolidation_status when the session goes idle
+        # past ``session_idle_seconds``; that status sticks even if the
+        # user comes back and resumes the session (the worker's tick
+        # skips already-closed sessions). Without resume awareness, the
+        # frontend's closed-session badge would fire for every session
+        # that's ever been auto-closed once. Compare last_seen_at vs.
+        # closed_at — if the session has activity past the close, treat
+        # it as null (live again) for UI purposes.
+        close_row = await daemon.ledger.session_close_row(session_id)
+        close_status = None
+        if close_row:
+            closed_at = close_row.get("closed_at")
+            last_seen = (session or {}).get("last_seen_at") if session else None
+            if closed_at and last_seen and str(last_seen) > str(closed_at):
+                close_status = None  # resumed past the close
+            else:
+                close_status = close_row.get("consolidation_status")
 
         dim_avgs: dict[str, list[float]] = defaultdict(list)
         for r in rubric_rows:
