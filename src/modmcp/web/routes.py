@@ -164,21 +164,24 @@ def mount_web(app: FastAPI) -> None:
         """Backward-compat redirect: the Svelte chassis used to live at
         ``/v2``; in v2.0.0 it became the default. 308 keeps any bookmarks
         working without a content-type ambiguity."""
-        # Defensive re-validation. FastAPI's Path() pattern argument
+        # Defensive re-validation, with the matched substring rebound
+        # to fresh variables. FastAPI's Path() pattern argument
         # already rejects malformed inputs before this body runs, but
-        # CodeQL's data-flow analysis can't see that the framework's
-        # validator acts as a sanitizer for the redirect-URL sink.
-        # Repeating the regex check inline gives CodeQL a visible
-        # sanitizer between input and sink, closing the alert without
-        # weakening the actual contract (the values are already
-        # validated; this is belt-and-suspenders for the static
-        # analyzer's benefit).
-        if not re.fullmatch(r"[0-9a-f]{12}", ph) or not re.fullmatch(
-            r"[0-9a-f-]{8,}", session_id
-        ):
+        # CodeQL's data-flow analysis only treats a value as
+        # sanitized if it flows through a *transformation* — a bare
+        # `if not re.fullmatch(...): raise` doesn't change the
+        # variable, so the original tainted ph / session_id still
+        # reaches the f-string sink. Pulling the match's .group()
+        # into new variables (clean_ph, clean_sid) gives CodeQL a
+        # visible sanitizer step.
+        m_ph = re.fullmatch(r"[0-9a-f]{12}", ph)
+        m_sid = re.fullmatch(r"[0-9a-f-]{8,}", session_id)
+        if m_ph is None or m_sid is None:
             raise HTTPException(422, "invalid path parameters")
+        clean_ph = m_ph.group()
+        clean_sid = m_sid.group()
         return RedirectResponse(
-            url=f"/p/{ph}/live/{session_id}", status_code=308
+            url=f"/p/{clean_ph}/live/{clean_sid}", status_code=308
         )
 
     @app.get("/p/{ph}/live/{session_id}/stream")
