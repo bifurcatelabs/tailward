@@ -51,7 +51,7 @@
     <HeaderBar {ph} {sessionId} />
     <TabNav {view} {setView} />
     {#if view === 'session'}
-      <SessionView />
+      <SessionView {sessionId} />
     {:else if view === 'reflection'}
       <ReflectionView {ph} />
     {:else if view === 'platform'}

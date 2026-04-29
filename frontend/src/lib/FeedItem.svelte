@@ -2,8 +2,12 @@
   import { live } from './live.svelte.js';
   import { fmtClock, humanize, humanizeBytes, toEpochSeconds } from './format.js';
 
-  let { event } = $props();
+  let { event, sessionId } = $props();
   let expanded = $state(false);
+  // Brief "copied" feedback for the per-row copy button. Cleared
+  // 1.2s after the click. Mirrors the SearchPanel pattern so the
+  // copy UX is consistent wherever a turn can be grabbed from.
+  let copied = $state(false);
 
   // Click handler that doesn't fire when the user is mid-selection.
   // Without this, click-and-drag to select evidence text *also*
@@ -48,6 +52,77 @@
     const sec = toEpochSeconds(event.createdAt);
     return sec ? fmtClock(new Date(sec * 1000)) : fmtClock();
   });
+
+  // Full ISO timestamp (local tz) for the copy header — matches the
+  // SearchPanel format so a copied feed event reads identically to
+  // a copied search result. The compact HH:MM:SS clock above stays
+  // for the inline display; ISO only appears in the copied text.
+  function fmtIsoTs(ts) {
+    if (!ts) return '';
+    try {
+      const d = new Date(ts);
+      const pad = (n) => String(n).padStart(2, '0');
+      const off = -d.getTimezoneOffset();
+      const sign = off >= 0 ? '+' : '-';
+      const ah = pad(Math.floor(Math.abs(off) / 60));
+      const am = pad(Math.abs(off) % 60);
+      return (
+        `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+        `T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` +
+        `${sign}${ah}:${am}`
+      );
+    } catch {
+      return String(ts);
+    }
+  }
+
+  // Pick the most useful body text for the clipboard, per event type.
+  // Mirrors SearchPanel.previewText so format is consistent across
+  // both surfaces.
+  function previewBody() {
+    switch (kind) {
+      case 'turn':
+      case 'user_turn':
+      case 'compact_summary':
+        return p.text_preview ?? '';
+      case 'tool_call':
+        return `${p.tool ?? '?'}\n${p.input_preview ?? ''}`;
+      case 'claim':
+        return `${p.text ?? ''}${p.evidence ? '\n\n' + p.evidence : ''}`;
+      case 'away_summary':
+        return p.content ?? '';
+      case 'permission_mode_change':
+        return `${p.previous_mode ?? '?'} → ${p.mode ?? '?'}`;
+      case 'tool_interrupted':
+        return `${p.tool ?? '?'} interrupted${p.permission_mode ? ` (${p.permission_mode} mode)` : ''}`;
+      case 'rubric_sample':
+        return `${p.dim ?? '?'}: ${p.score ?? '?'}/5${p.evidence ? ' — ' + p.evidence : ''}`;
+      case 'constraint_violation':
+        return `${p.rule_text ?? p.rule_id ?? '?'}${p.evidence ? '\n\n' + p.evidence : ''}`;
+      case 'drift':
+        return `${p.detail ?? ''}${p.corrective ? '\n\n' + p.corrective : ''}`;
+      default:
+        return JSON.stringify(p, null, 2);
+    }
+  }
+
+  function buildCopyText() {
+    const type = chipLabel[kind] ?? kind;
+    const sid = sessionId ? sessionId.slice(0, 8) : '?';
+    const head = `[${type} · #${event.id} · session ${sid} · ${fmtIsoTs(event.createdAt)}]`;
+    return `${head}\n${previewBody()}`;
+  }
+
+  async function copyEvent(e) {
+    e.stopPropagation();
+    try {
+      await navigator.clipboard.writeText(buildCopyText());
+      copied = true;
+      setTimeout(() => { copied = false; }, 1200);
+    } catch (err) {
+      console.warn(`[feed-item #${event.id}] copy failed`, err);
+    }
+  }
 </script>
 
 <article class="item" data-kind={kind} id="event-{event.id}">
@@ -63,6 +138,15 @@
       <span class="severity sev-claim-{p.status}">{p.status}</span>
     {/if}
     <span class="grow"></span>
+    <code class="eid" title="event id">#{event.id}</code>
+    <button
+      type="button"
+      class="copy-btn"
+      class:copied
+      onclick={copyEvent}
+      title="copy event header + content to clipboard"
+      aria-label="copy event"
+    >{copied ? '✓' : '⧉'}</button>
     <time>{clock}</time>
     {#if event.deltaText}
       <span class="delta">{event.deltaText}</span>
@@ -288,6 +372,34 @@
   .grow { flex: 1; }
   time { color: var(--muted); font-family: var(--mono); }
   .delta { color: var(--muted-deep); font-family: var(--mono); }
+  /* Event ID — referenceable token. Small, muted, ``user-select: all``
+     so a single click selects the whole ``#<id>`` for copy. Lets the
+     user paste an event reference back without going through the
+     copy button. */
+  .eid {
+    font-family: var(--mono);
+    color: var(--muted-deep);
+    font-size: 10px;
+    user-select: all;
+  }
+  /* Per-row copy button — same icon language as the search panel for
+     consistency. Faded by default; on header hover it lights up so
+     it's discoverable without dominating the row. */
+  .copy-btn {
+    background: transparent;
+    border: 0;
+    color: var(--muted-deep);
+    cursor: pointer;
+    font-size: 12px;
+    padding: 2px 4px;
+    line-height: 1;
+    border-radius: 3px;
+    transition: color 120ms, background 120ms, opacity 120ms;
+    opacity: 0.5;
+  }
+  header:hover .copy-btn { opacity: 1; }
+  .copy-btn:hover { color: var(--text); background: var(--surface-2); }
+  .copy-btn.copied { color: var(--ok); opacity: 1; }
 
   .chip {
     font-size: 10px;

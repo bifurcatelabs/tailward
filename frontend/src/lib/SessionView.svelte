@@ -3,12 +3,14 @@
   import SessionTimeline from './SessionTimeline.svelte';
   import Feed from './Feed.svelte';
   import Rail from './Rail.svelte';
+
+  let { sessionId = null } = $props();
 </script>
 
 <HeroStrip />
 <SessionTimeline />
 <main class="layout">
-  <Feed />
+  <Feed {sessionId} />
   <Rail />
 </main>
 

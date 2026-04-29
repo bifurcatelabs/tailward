@@ -2,6 +2,8 @@
   import { live } from './live.svelte.js';
   import FeedItem from './FeedItem.svelte';
 
+  let { sessionId = null } = $props();
+
   // Newest-first iteration. Svelte's keyed each block plays nicely
   // with the reactive ``live.events`` array; only newly appended
   // entries trigger inserts at the top, and ``loadOlder`` prepends
@@ -163,7 +165,7 @@
     </div>
   {:else}
     {#each reversed as ev (ev.id)}
-      <FeedItem event={ev} />
+      <FeedItem event={ev} {sessionId} />
     {/each}
 
     {#if live.hasMoreOlder}
