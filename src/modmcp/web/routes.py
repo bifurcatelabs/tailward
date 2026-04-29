@@ -362,6 +362,7 @@ def mount_web(app: FastAPI) -> None:
 
         approvals = await daemon.ledger.violation_status_counts(ph)
         verification = await daemon.ledger.claim_status_counts(ph)
+        tool_modes = await daemon.ledger.tool_calls_by_mode(ph)
 
         return JSONResponse({
             "intervals_seconds": intervals,
@@ -369,6 +370,7 @@ def mount_web(app: FastAPI) -> None:
             "synthesized_user_turns": synthesized_count,
             "approvals": approvals,
             "verification": verification,
+            "tool_calls_by_mode": tool_modes,
             "sample_size": len(rows),
         })
 

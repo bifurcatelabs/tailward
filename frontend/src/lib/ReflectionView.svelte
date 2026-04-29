@@ -150,6 +150,61 @@
       { label: 'unverifiable', n: v.unverifiable || 0, total, kind: 'muted' },
     ];
   });
+
+  // Tool-calls-by-permission-mode matrix. Rows = tool kinds, columns
+  // = modes (default / acceptEdits / bypassPermissions / plan) +
+  // an "interrupted" column. Computed by pivoting the flat
+  // {tool, permission_mode, count} entries the backend returns.
+  let toolModeMatrix = $derived.by(() => {
+    const t = data?.tool_calls_by_mode;
+    if (!t) return null;
+    const toolCalls = t.tool_calls || [];
+    const interruptions = t.interruptions || [];
+    if (toolCalls.length === 0 && interruptions.length === 0) return null;
+
+    // Mode order (deterministic): canonical Claude Code modes first,
+    // then any unknown modes alphabetically. Unknown/null modes
+    // collapse into "—" (older events without permission_mode tagged).
+    const canonical = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
+    const seenModes = new Set();
+    for (const e of toolCalls) seenModes.add(e.permission_mode || '—');
+    const modes = [
+      ...canonical.filter((m) => seenModes.has(m)),
+      ...[...seenModes].filter((m) => !canonical.includes(m) && m !== '—').sort(),
+      ...(seenModes.has('—') ? ['—'] : []),
+    ];
+
+    // Tool list: union of tools in calls + interruptions.
+    const toolSet = new Set();
+    for (const e of toolCalls) if (e.tool) toolSet.add(e.tool);
+    for (const e of interruptions) if (e.tool) toolSet.add(e.tool);
+    const tools = [...toolSet].sort();
+
+    // Matrix lookup
+    const cellCount = (tool, mode) => {
+      const entries = toolCalls.filter(
+        (e) => e.tool === tool && (e.permission_mode || '—') === mode,
+      );
+      return entries.reduce((s, e) => s + (e.count || 0), 0);
+    };
+    const interruptCount = (tool) =>
+      interruptions
+        .filter((e) => e.tool === tool)
+        .reduce((s, e) => s + (e.count || 0), 0);
+
+    const rows = tools.map((tool) => ({
+      tool,
+      cells: modes.map((m) => ({ mode: m, count: cellCount(tool, m) })),
+      interrupted: interruptCount(tool),
+      total: modes.reduce((s, m) => s + cellCount(tool, m), 0) + interruptCount(tool),
+    }));
+
+    return {
+      modes,
+      rows,
+      totals: t.totals || { tool_calls: 0, interruptions: 0 },
+    };
+  });
 </script>
 
 <section class="view">
@@ -242,6 +297,44 @@
         </div>
       </div>
 
+      <!-- TOOL CALLS BY PERMISSION MODE -->
+      <div class="card card-wide">
+        <h3>tool calls by permission mode</h3>
+        {#if toolModeMatrix}
+          <table class="tool-mode">
+            <thead>
+              <tr>
+                <th class="tool-col">tool</th>
+                {#each toolModeMatrix.modes as m (m)}
+                  <th><code>{m}</code></th>
+                {/each}
+                <th class="interrupted-col">declined</th>
+                <th class="total-col">total</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each toolModeMatrix.rows as r (r.tool)}
+                <tr>
+                  <td class="tool-col"><strong>{r.tool}</strong></td>
+                  {#each r.cells as c (c.mode)}
+                    <td class:zero={c.count === 0}>{c.count}</td>
+                  {/each}
+                  <td class="interrupted-col" class:zero={r.interrupted === 0}>{r.interrupted}</td>
+                  <td class="total-col">{r.total}</td>
+                </tr>
+              {/each}
+            </tbody>
+          </table>
+          <div class="footnote">
+            {toolModeMatrix.totals.tool_calls} tool calls, {toolModeMatrix.totals.interruptions} interrupted across this project.
+            "—" column is older events that pre-date permission-mode tagging.
+            Neutral counts: how often each tool ran under which permission posture.
+          </div>
+        {:else}
+          <div class="empty inline">no tool calls captured yet for this project</div>
+        {/if}
+      </div>
+
       <!-- VERIFICATION -->
       <div class="card">
         <h3>claim verification verdicts</h3>
@@ -319,6 +412,53 @@
     border: 1px solid var(--border);
     border-radius: 10px;
     padding: 16px 18px;
+  }
+  /* Wide card spans both columns of the grid — used by the
+     tool-mode matrix which is too wide to fit in a single column
+     comfortably. */
+  .card-wide { grid-column: 1 / -1; }
+  .tool-mode {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .tool-mode th, .tool-mode td {
+    padding: 6px 10px;
+    text-align: right;
+    border-bottom: 1px solid var(--border);
+  }
+  .tool-mode th {
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .tool-mode td {
+    font-family: var(--mono);
+    color: var(--text-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .tool-mode .tool-col {
+    text-align: left;
+    font-family: inherit;
+  }
+  .tool-mode tbody td.zero { color: var(--muted-deep); }
+  .tool-mode .interrupted-col {
+    color: var(--warn);
+  }
+  .tool-mode tbody td.interrupted-col.zero { color: var(--muted-deep); }
+  .tool-mode .total-col {
+    color: var(--text);
+    font-weight: 600;
+  }
+  .tool-mode tbody tr:last-child td { border-bottom: 0; }
+  .tool-mode th code {
+    font-family: var(--mono);
+    background: transparent;
+    padding: 0;
+    color: var(--muted);
+    font-size: 10px;
   }
   .card h3 {
     margin: 0 0 14px;

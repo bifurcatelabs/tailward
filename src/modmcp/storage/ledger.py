@@ -1033,3 +1033,70 @@ class Ledger:
         for r in rows:
             out[str(r["status"])] = int(r["n"])
         return out
+
+    async def tool_calls_by_mode(self, project_hash: str) -> dict:
+        """Aggregate ``tool_call`` and ``tool_interrupted`` events
+        grouped by tool name and active permission_mode at the time
+        of the call.
+
+        Maps to the Reflection view's "tool calls by permission mode"
+        panel: surfaces which tools ran under which mode (default vs
+        acceptEdits vs bypassPermissions vs plan) and how many were
+        explicitly interrupted by the user.
+
+        Counts are computed in Python after fetching matching rows —
+        the live_events.payload JSON is opaque to SQLite without
+        per-event json_extract calls, and the row volume per project
+        is small enough that round-tripping in Python is cheaper than
+        adding json_extract complexity. Returns separate buckets for
+        emits vs interruptions so the UI can render them as
+        complementary slices, not mixed.
+        """
+        import json as _json
+        from collections import Counter
+
+        async with self.conn.execute(
+            """SELECT event_type, payload
+               FROM live_events
+               WHERE project_hash=?
+                 AND event_type IN ('tool_call', 'tool_interrupted')""",
+            (project_hash,),
+        ) as cur:
+            rows = await cur.fetchall()
+
+        counts: Counter[tuple[str, str | None, str | None]] = Counter()
+        for r in rows:
+            raw_payload = r["payload"]
+            try:
+                payload = _json.loads(raw_payload) if raw_payload else {}
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            tool = payload.get("tool")
+            mode = payload.get("permission_mode")
+            counts[(r["event_type"], tool, mode)] += 1
+
+        tool_calls: list[dict] = []
+        interruptions: list[dict] = []
+        total_calls = 0
+        total_interruptions = 0
+        for (event_type, tool, mode), n in sorted(
+            counts.items(), key=lambda kv: (kv[0][0], kv[0][1] or "", kv[0][2] or "")
+        ):
+            entry = {"tool": tool, "permission_mode": mode, "count": int(n)}
+            if event_type == "tool_call":
+                tool_calls.append(entry)
+                total_calls += int(n)
+            else:
+                interruptions.append(entry)
+                total_interruptions += int(n)
+
+        return {
+            "tool_calls": tool_calls,
+            "interruptions": interruptions,
+            "totals": {
+                "tool_calls": total_calls,
+                "interruptions": total_interruptions,
+            },
+        }
