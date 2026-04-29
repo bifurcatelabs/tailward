@@ -1,8 +1,10 @@
-# warden
+# tailward
 
-A local-first **audit underlay for Claude Code**. Your session sits in the foreground; warden quietly captures it from below — tailing the JSONL transcripts Claude Code writes, scoring them against documented failure modes via deterministic rule checks plus a **local LLM rubric**, deriving in-band inference-path metrics, probing the local LLM endpoint, and surfacing everything in a multi-view localhost web UI (Session / Reflection / Platform). No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
+A local-first **audit underlay for Claude Code**. Your session sits in the foreground; tailward quietly captures it from below — tailing the JSONL transcripts Claude Code writes, scoring them against documented failure modes via deterministic rule checks plus a **local LLM rubric**, deriving in-band inference-path metrics, probing the local LLM endpoint, and surfacing everything in a multi-view localhost web UI (Session / Reflection / Platform). No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
 
-See [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the audit layer and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which failure modes Warden currently detects and how. [`V1 Proposal.md`](V1%20Proposal.md) is the original design and is preserved as a historical artifact — the project pivoted away from active prompt injection in v1.1 and reframed as a trust layer in v2.0.0.
+> **Three names, one tool.** `tailward` is the public name (PyPI, GitHub repo). `warden` is the CLI binary you'll type (`warden daemon start`). `modmcp` is the internal Python package, surfaced only as the path of the state directory (`~/.modmcp/`). Layout reasoning lives in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+See [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the audit layer and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which failure modes tailward currently detects and how. [`V1 Proposal.md`](V1%20Proposal.md) is the original design and is preserved as a historical artifact — the project pivoted away from active prompt injection in v1.1 and reframed as a trust layer in v2.0.0.
 
 ## Status
 
@@ -32,9 +34,9 @@ Solo-dev work; expect rough edges. Issues and discussion welcome — see [CONTRI
 **Platform — is the platform serving me consistently?**
 
 - **In-band turn metrics.** TTFT, output TPS, cache hit ratio derived from JSONL timestamps + the `usage` block. No synthetic traffic — every metric is from a real prompt the user actually sent.
-- **Local LLM probe worker.** Periodic probes of the OpenAI-compatible endpoint Warden talks to. Deliberately *not* probing `api.anthropic.com` — that mostly measures the user's ISP and CDN edge, not Anthropic's service.
-- **LLM call budget panel.** Per-call-kind aggregates of Warden's own Qwen calls (max_tokens vs avg completion, finish_reason distribution) so you can spot truncation before it costs you.
-- **Transparency panel.** Per-call-kind config (model, sampler params, max_tokens) plus the verbatim system + user prompt templates Warden sends. Read directly from the worker constants — drift between display and runtime is impossible.
+- **Local LLM probe worker.** Periodic probes of the OpenAI-compatible endpoint tailward talks to. Deliberately *not* probing `api.anthropic.com` — that mostly measures the user's ISP and CDN edge, not Anthropic's service.
+- **LLM call budget panel.** Per-call-kind aggregates of tailward's own Qwen calls (max_tokens vs avg completion, finish_reason distribution) so you can spot truncation before it costs you.
+- **Transparency panel.** Per-call-kind config (model, sampler params, max_tokens) plus the verbatim system + user prompt templates tailward sends. Read directly from the worker constants — drift between display and runtime is impossible.
 
 **Handoff (opt-in active mode — _unmaintained_)**
 
@@ -43,7 +45,7 @@ Solo-dev work; expect rough edges. Issues and discussion welcome — see [CONTRI
 
 ## Operating modes
 
-Warden has one top-level knob: `warden_mode` in `~/.modmcp/config.toml`.
+tailward has one top-level knob: `warden_mode` in `~/.modmcp/config.toml`.
 
 | mode | hook preamble? | drift correctives? | auditing? | UI? | status |
 |---|---|---|---|---|---|
@@ -56,23 +58,23 @@ Warden has one top-level knob: `warden_mode` in `~/.modmcp/config.toml`.
 
 The whole point of this tool is to tell you whether your coding agent is behaving. That measurement is only trustworthy if the act of measuring doesn't shape the thing being measured. The original v1 design injected preambles and corrective turns into the prompt stream, which had three problems we only saw clearly once we started dogfooding:
 
-1. **Observer effect.** Any content Warden injects becomes part of the agent's context and changes the next turn. A "drift score" measured on a session Warden is actively steering is really measuring Warden's own intervention quality, not the agent's baseline behavior. You can't A/B your own tooling if the A and B arms can't be isolated.
+1. **Observer effect.** Any content tailward injects becomes part of the agent's context and changes the next turn. A "drift score" measured on a session tailward is actively steering is really measuring tailward's own intervention quality, not the agent's baseline behavior. You can't A/B your own tooling if the A and B arms can't be isolated.
 2. **Model trust.** When the audit layer is invisible to the session, the agent has no incentive to perform for the audit. You get honest trajectories. The second a model can see it's being scored, the scoring task competes with the actual task.
-3. **Blast radius.** Injected preambles and corrective turns are a live wire into every prompt. A bad rubric, a regex false positive, or a daemon bug can derail a real session. In passive mode the worst Warden can do is log a wrong row in SQLite or render an ugly widget in a browser tab.
+3. **Blast radius.** Injected preambles and corrective turns are a live wire into every prompt. A bad rubric, a regex false positive, or a daemon bug can derail a real session. In passive mode the worst tailward can do is log a wrong row in SQLite or render an ugly widget in a browser tab.
 
 Passive mode moves the human (you) into the loop at a decision boundary — the web UI — instead of hotwiring corrections into the model's context. You still get every signal; you just decide what to do with it.
 
-Flip to `active` when you specifically want the agent reacting to Warden's corrections in real time — typically at the start of a new session after a handoff, where the preamble is carrying context the agent genuinely needs — and flip back to `passive` after the first few turns. Active is unmaintained scaffolding (see table above): it works, but the preamble contents, drift-corrective shape, and rough ergonomics are yours to own. The passive audit layer is the supported surface.
+Flip to `active` when you specifically want the agent reacting to tailward's corrections in real time — typically at the start of a new session after a handoff, where the preamble is carrying context the agent genuinely needs — and flip back to `passive` after the first few turns. Active is unmaintained scaffolding (see table above): it works, but the preamble contents, drift-corrective shape, and rough ergonomics are yours to own. The passive audit layer is the supported surface.
 
 ### Why local-first
 
-An audit is only as trustworthy as its supply chain. If Warden shipped your prompts, tool calls, or code diffs to a SaaS scoring API, it would be asking you to trust a third party with the exact artifacts it's supposed to be auditing on your behalf. That undercuts the whole point of the tool and also makes it unusable on any codebase you can't legally egress.
+An audit is only as trustworthy as its supply chain. If tailward shipped your prompts, tool calls, or code diffs to a SaaS scoring API, it would be asking you to trust a third party with the exact artifacts it's supposed to be auditing on your behalf. That undercuts the whole point of the tool and also makes it unusable on any codebase you can't legally egress.
 
-So Warden is local-first, top to bottom:
+So tailward is local-first, top to bottom:
 
 - **Transcripts never leave the machine.** The watcher reads JSONL from `~/.claude/projects/`, the ledger writes to `~/.modmcp/ledger.db`, the HTTP server binds to `127.0.0.1`. No cloud writes, no telemetry, no opt-out required because there's nothing to opt out of.
-- **The scoring LLM is yours too.** Warden talks to an OpenAI-compatible endpoint at `http://127.0.0.1:<port>/v1` — llama.cpp, Ollama, LM Studio, vLLM, whatever you prefer. There is deliberately no fallback to a hosted API: if the endpoint is unreachable, Warden skips the LLM-judged checks and keeps the deterministic ones running.
-- **Deterministic first, LLM for depth.** The constraints worker (path / immutable-file / forbidden-bash), scope worker, and claim-grep path all run with zero LLM present — those are the load-bearing "is this session in bounds?" signals and they're regex-fast on CPU. The local model adds the softer trust dimensions (invariants awareness, uncertainty honesty, maintainability, provenance) and the end-of-session 8-mode consolidation. You can run Warden fully airgapped and still see live violations, scope creep, and claim verdicts; the rubric bar and report card just stay blank until a model comes online.
+- **The scoring LLM is yours too.** tailward talks to an OpenAI-compatible endpoint at `http://127.0.0.1:<port>/v1` — llama.cpp, Ollama, LM Studio, vLLM, whatever you prefer. There is deliberately no fallback to a hosted API: if the endpoint is unreachable, tailward skips the LLM-judged checks and keeps the deterministic ones running.
+- **Deterministic first, LLM for depth.** The constraints worker (path / immutable-file / forbidden-bash), scope worker, and claim-grep path all run with zero LLM present — those are the load-bearing "is this session in bounds?" signals and they're regex-fast on CPU. The local model adds the softer trust dimensions (invariants awareness, uncertainty honesty, maintainability, provenance) and the end-of-session 8-mode consolidation. You can run tailward fully airgapped and still see live violations, scope creep, and claim verdicts; the rubric bar and report card just stay blank until a model comes online.
 
 The cost of this posture is one extra piece of infra (a local model server, eventually). The payoff is that the audit lives inside the same trust boundary as the thing being audited — and nothing you care about ends up in someone else's log pipeline.
 
@@ -330,21 +332,21 @@ max_watch_projects = 32
 ```
 
 Environment overrides:
-- `MODMCP_HOME` — relocate the state directory (default `~/.modmcp`). The internal package and state directory keep the historical `modmcp` name; user-facing CLI and product surface are `warden`.
+- `MODMCP_HOME` — relocate the state directory (default `~/.modmcp`). The internal package and state directory keep the historical `modmcp` name; the public name is `tailward` (PyPI / GitHub) and the CLI binary is `warden`. Eventual goal is to align all three names — see CONTRIBUTING.md.
 - `CLAUDE_PROJECTS_ROOT` — relocate the Claude Code transcript root (default `~/.claude/projects`).
 
 ## Qwen / local LLM endpoint
 
-Warden expects an OpenAI-compatible HTTP endpoint on `localhost` (see [Why local-first](#why-local-first) for the reasoning). Any of these work:
+tailward expects an OpenAI-compatible HTTP endpoint on `localhost` (see [Why local-first](#why-local-first) for the reasoning). Any of these work:
 
 - [llama.cpp server](https://github.com/ggml-org/llama.cpp) with an OpenAI-compat flag
 - [Ollama](https://ollama.com/) — set `qwen_endpoint = "http://127.0.0.1:11434/v1"`, `qwen_model = "qwen2.5:7b"`
 - LM Studio's local server
 - `vllm` with `--served-model-name`
 
-Pointing `qwen_endpoint` at a remote host isn't explicitly blocked, but it defeats the audit-integrity argument; Warden will happily send your transcripts wherever you tell it to.
+Pointing `qwen_endpoint` at a remote host isn't explicitly blocked, but it defeats the audit-integrity argument; tailward will happily send your transcripts wherever you tell it to.
 
-All LLM calls serialize through a single queue so Warden doesn't contend with other GPU workloads. Distinct call kinds are routed with their own token budgets and thinking-mode settings:
+All LLM calls serialize through a single queue so tailward doesn't contend with other GPU workloads. Distinct call kinds are routed with their own token budgets and thinking-mode settings:
 
 | kind | used by | typical cost |
 |---|---|---|
@@ -355,7 +357,7 @@ All LLM calls serialize through a single queue so Warden doesn't contend with ot
 
 ### What requires an LLM vs what doesn't
 
-If the LLM endpoint is unreachable, Warden degrades cleanly:
+If the LLM endpoint is unreachable, tailward degrades cleanly:
 
 | works without LLM | needs LLM |
 |---|---|
