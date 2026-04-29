@@ -6,7 +6,7 @@ See [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the au
 
 ## Status
 
-Actively iterated. Current release: **v2.1.0**.
+Actively iterated. Current release: **v2.2.0**.
 
 The **passive audit surface** (Session / Reflection / Platform views) is the supported daily-driver. **Active mode** (preamble injection + drift correctives, the original v1 design) is preserved as opt-in scaffolding but is not maintained beyond what the passive layer requires — see [Operating modes](#operating-modes).
 

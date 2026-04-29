@@ -5,7 +5,91 @@ All notable changes to warden are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] — v2.1.0
+## [v2.2.0] — 2026-04-28
+
+Pre-publish polish + schema-fragility audit. UX refinements across all
+three views; tooling hygiene for first-time GitHub publish; rebrand to
+`tailward` as the public name.
+
+### Added
+
+- **Schema-pinning regression** (`tests/test_schema_pin.py`) — 9 cases
+  pinning structural assumptions Warden makes about Claude Code's JSONL
+  shape (assistant text/tool_use/thinking blocks, user typed /
+  compact_summary / tool_result, system events, top-level field inventory).
+  Catches schema drift before silent corruption.
+- **Schema-audit helper** (`src/modmcp/schema/audit.py`) — `audit_jsonl()`
+  + `VALIDATED_VERSIONS` frozenset (2.1.117, 2.1.119, 2.1.121) + 
+  `is_validated_version()` check. Surfaces what fraction of events fall
+  to "unknown" against the pinned schema.
+- **Inline project picker** in the Platform view header
+  (`ProjectQuickPicker.svelte`); reads `/v2/projects` and navigates to
+  the chosen project's most-recent session at the Platform tab.
+- **uPlot hover-value tag** on charts — floating top-right indicator
+  showing the value at the cursor position with color-coded series dots.
+- **Filter pills** on the live event feed (user / assistant / tool /
+  rubric / audit / perf / session) with per-pill hover-tooltips.
+- **Last-contact indicator** in the HeaderBar replacing the prior
+  "live/polling/offline" status. Surfaces concrete time deltas
+  ("just now" / "Ns ago" / "Nm ago" / "Nh ago") instead of an
+  unfalsifiable liveness claim.
+- **Closed-session badge** in the HeaderBar (slate tint) when viewing
+  a closed/consolidated/done session.
+- **Hover tooltips on Platform metric cards** — measurement caveats
+  for prompt→response latency (first-block, includes thinking duration),
+  output throughput (per-message wall-clock, not raw inference rate),
+  cache hit ratio (input-side fraction). Designed to disclose what each
+  number is and isn't.
+- **Rubric in-flight indicator** — pulsing violet "calling local LLM"
+  label visible during rubric scoring (fail-loudly campaign).
+- **Rubric-done artifact pointer** — surfaces "scores landed in
+  rubric_sample entries above" so users know where to find the result.
+- **Self-rubric clarity** — distinguishes "quote" (verbatim italic from
+  user) vs. "suggestion" (LLM-generated reflection prompt). Help line
+  framed as reflection prompts not real-time corrections.
+- **Latency-graph smoothing** — 3-point rolling average on ProbePanel
+  Sparkline; raw latencies still drive the stats numbers.
+- **GitHub Actions workflow** (`.github/workflows/test.yml`) — pytest
+  + ruff + frontend build, parallels existing GitLab CI.
+- **CONTRIBUTING.md** — project posture (in/out of scope), dev setup,
+  test commands, PR shape guidance.
+- **Status section** in README signaling actively-iterated work,
+  current release, and which surfaces are supported vs. opt-in.
+
+### Changed
+
+- **Public name → `tailward`.** PyPI distribution name flipped from
+  `modmcp` to `tailward`. CLI binary stays `warden`; internal Python
+  package stays `modmcp`. Three-name layout — public, command, plumbing
+  — chosen for the light-path rebrand.
+- **`[project.urls]`** Repository points at
+  `github.com/bifurcatelabs/tailward`; existing GitLab CE URL kept as
+  `Mirror`.
+- **README install instructions** updated for `pipx install tailward`
+  (PyPI) and `pipx install git+https://github.com/bifurcatelabs/...`
+  (latest commit) paths.
+- **Tab subtitles** changed from trust-question framing to plain
+  surface-description: session "live activity", reflection "your
+  patterns", platform "inference path".
+- **Last-event delta** floors fractional seconds (`3s ago`, not
+  `3.2s ago`) below the one-minute threshold.
+- **Closed-session badge tint** changed from muted-gray to slate to
+  better signal "session is done" without reading as an error state.
+- **Centering** on Reflection and Platform views (`margin: 0 auto`)
+  to match Session view layout.
+- **Genericized example user paths** in test fixtures
+  (`/Users/glenn/...` → `/Users/example/...`) and illustrative
+  comments. Pre-publish privacy pass; author attribution in
+  `pyproject.toml` and `LICENSE` intentionally retained.
+- **2.1.121 added to `VALIDATED_VERSIONS`** after audit confirmed no
+  schema diffs vs. 2.1.119 in the fields Warden reads.
+
+### Fixed
+
+- **HeaderBar last-event delta** no longer leaks fractional seconds
+  in the sub-minute display.
+
+## [v2.1.0] — 2026-04-27
 
 ### Added
 
@@ -35,8 +119,6 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
   and the `intent.html` / `index.html` / `base.html` templates.
   `intent.md` remains the source of truth — users hand-edit it; the
   daemon re-reads on each turn so changes land without restart.
-  Decided per `memory/project_v3_handoff_deprecation.md` and the
-  `memory/project_no_injection_position.md` framing.
 
 ## [v2.0.0] — trust layer cutover
 
