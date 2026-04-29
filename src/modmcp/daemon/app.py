@@ -287,13 +287,18 @@ def create_app() -> FastAPI:
             # Tool-call markers fire whenever a tool_use is present, whether
             # the event is a bare ``tool_use`` or an assistant message that
             # wraps the block in its content list. Real Claude Code only
-            # emits the latter. ``permission_mode`` is captured from the
-            # event itself (not the carry-forward FileState value) so the
-            # aggregate breakdown reflects what mode was actually active
-            # at the moment of the tool emit. The tool_use_id → name
+            # emits the latter. ``permission_mode`` falls back to the
+            # carry-forward FileState value because assistant events
+            # (where tool_use blocks live) do NOT carry the
+            # ``permissionMode`` field directly — only dedicated
+            # ``permission-mode`` events and a fraction of user events
+            # do. Without the fallback, every tool_call would tag as
+            # null and the Reflection-view matrix would show every
+            # call under the "untagged" column. The tool_use_id → name
             # mapping is cached so a later interrupted tool_result can
             # resolve the original tool name.
             if fs.session_id and fs.project_hash and ev.tool_name:
+                mode_at_call = ev.permission_mode or fs.last_permission_mode
                 await daemon.live.publish(
                     fs.session_id,
                     fs.project_hash,
@@ -301,7 +306,7 @@ def create_app() -> FastAPI:
                     {
                         "tool": ev.tool_name,
                         "input_preview": _shorten_tool_input(ev.tool_input),
-                        "permission_mode": ev.permission_mode,
+                        "permission_mode": mode_at_call,
                     },
                 )
                 if ev.tool_use_id:
@@ -331,6 +336,10 @@ def create_app() -> FastAPI:
                 and ev.tool_use_id
             ):
                 tool_name = fs.tool_use_names.pop(ev.tool_use_id, None)
+                # Same fallback as the tool_call branch above — the
+                # tool_result event is wrapped as a user message and
+                # often does not carry permissionMode directly.
+                mode_at_interrupt = ev.permission_mode or fs.last_permission_mode
                 await daemon.live.publish(
                     fs.session_id,
                     fs.project_hash,
@@ -338,7 +347,7 @@ def create_app() -> FastAPI:
                     {
                         "tool": tool_name,
                         "tool_use_id": ev.tool_use_id,
-                        "permission_mode": ev.permission_mode,
+                        "permission_mode": mode_at_interrupt,
                     },
                 )
 
