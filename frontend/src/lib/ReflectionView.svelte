@@ -164,14 +164,17 @@
 
     // Mode order (deterministic): canonical Claude Code modes first,
     // then any unknown modes alphabetically. Unknown/null modes
-    // collapse into "—" (older events without permission_mode tagged).
+    // collapse into "untagged" (older events without permission_mode
+    // tagged — events emitted before the permission_mode field was
+    // added to tool_call payloads).
+    const UNTAGGED = 'untagged';
     const canonical = ['default', 'acceptEdits', 'bypassPermissions', 'plan'];
     const seenModes = new Set();
-    for (const e of toolCalls) seenModes.add(e.permission_mode || '—');
+    for (const e of toolCalls) seenModes.add(e.permission_mode || UNTAGGED);
     const modes = [
       ...canonical.filter((m) => seenModes.has(m)),
-      ...[...seenModes].filter((m) => !canonical.includes(m) && m !== '—').sort(),
-      ...(seenModes.has('—') ? ['—'] : []),
+      ...[...seenModes].filter((m) => !canonical.includes(m) && m !== UNTAGGED).sort(),
+      ...(seenModes.has(UNTAGGED) ? [UNTAGGED] : []),
     ];
 
     // Tool list: union of tools in calls + interruptions.
@@ -183,7 +186,7 @@
     // Matrix lookup
     const cellCount = (tool, mode) => {
       const entries = toolCalls.filter(
-        (e) => e.tool === tool && (e.permission_mode || '—') === mode,
+        (e) => e.tool === tool && (e.permission_mode || UNTAGGED) === mode,
       );
       return entries.reduce((s, e) => s + (e.count || 0), 0);
     };
@@ -327,7 +330,7 @@
           </table>
           <div class="footnote">
             {toolModeMatrix.totals.tool_calls} tool calls, {toolModeMatrix.totals.interruptions} interrupted across this project.
-            "—" column is older events that pre-date permission-mode tagging.
+            <code>untagged</code> column is events from before the permission_mode field was added to tool_call payloads — they'll fade as new sessions accumulate.
             Neutral counts: how often each tool ran under which permission posture.
           </div>
         {:else}
