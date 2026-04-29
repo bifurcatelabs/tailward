@@ -20,6 +20,12 @@
   let loading = $state(false);
   let open = $state(false);
   let error = $state(null);
+  // Which result row is expanded (showing full payload). null = none.
+  let expandedId = $state(null);
+  // Failure message for "view in session" when the matched FeedItem
+  // isn't in the loaded feed window. Shown inline; carries the event
+  // ID so the user has a referenceable token if reporting an issue.
+  let viewError = $state(null);
 
   let debounceTimer = null;
 
@@ -83,16 +89,76 @@
   }
 
   function urlFor(r) {
-    return `/p/${ph}/live/${r.session_id}`;
+    // Deep-link includes ``#event-<id>``; the Feed component's
+    // hashchange listener scrolls the matching FeedItem into view
+    // and CSS :target gives it a brief highlight flash. Different
+    // sessions still navigate (full page load + hash); same-session
+    // results just shift the hash without reloading.
+    return `/p/${ph}/live/${r.session_id}#event-${r.event_id}`;
   }
 
-  function onResultClick(r, e) {
-    // If clicking a result for the current session, just close the
-    // popover (the user's already on that page; full navigation
-    // would lose any panel state). Otherwise, follow the link.
+  function toggleExpand(r) {
+    expandedId = expandedId === r.event_id ? null : r.event_id;
+  }
+
+  function dismissViewError() { viewError = null; }
+
+  function onViewInSession(r, e) {
+    viewError = null;
     if (r.session_id === currentSessionId) {
       e.preventDefault();
-      open = false;
+      window.dispatchEvent(new CustomEvent('search:clear-filter'));
+      const newHash = `#event-${r.event_id}`;
+      if (window.location.hash === newHash) {
+        window.location.hash = '';
+      }
+      window.location.hash = newHash;
+      // Defer a check so we can surface a visible status if the
+      // element didn't come into the DOM (older than the loaded
+      // window). The inline preview already shows the content; this
+      // status just makes the limitation explicit.
+      setTimeout(() => {
+        if (!document.getElementById(`event-${r.event_id}`)) {
+          viewError = {
+            event_id: r.event_id,
+            message: `Event #${r.event_id} not in the loaded feed window. The inline preview above shows the content; to audit events around it, click "load older" in the feed until this event scrolls into view.`,
+          };
+        } else {
+          open = false;
+        }
+      }, 200);
+    }
+  }
+
+  function parsePayload(payloadStr) {
+    if (!payloadStr) return null;
+    try {
+      return JSON.parse(payloadStr);
+    } catch {
+      return null;
+    }
+  }
+
+  // Pull the most useful text content out of a parsed payload by
+  // event type. The endpoint returns the raw JSON string; we parse
+  // and shape per-type so the preview reads cleanly instead of as
+  // raw JSON.
+  function previewText(r) {
+    const p = parsePayload(r.payload);
+    if (!p) return r.snippet;
+    switch (r.event_type) {
+      case 'user_turn':
+      case 'turn':
+      case 'compact_summary':
+        return p.text_preview || r.snippet;
+      case 'tool_call':
+        return `${p.tool ?? '?'}\n${p.input_preview ?? ''}`;
+      case 'claim':
+        return `${p.text ?? ''}${p.evidence ? '\n\n' + p.evidence : ''}`;
+      case 'away_summary':
+        return p.content || r.snippet;
+      default:
+        return r.snippet;
     }
   }
 
@@ -143,20 +209,37 @@
         <div class="status">no matches</div>
       {:else}
         <div class="result-count">{results.length} match{results.length === 1 ? '' : 'es'}</div>
+        {#if viewError}
+          <div class="view-error">
+            <span class="view-error-msg">{viewError.message}</span>
+            <button type="button" class="view-error-close" onclick={dismissViewError} title="dismiss">×</button>
+          </div>
+        {/if}
         {#each results as r (r.event_id)}
-          <a
-            class="result"
-            class:active={r.session_id === currentSessionId}
-            href={urlFor(r)}
-            onclick={(e) => onResultClick(r, e)}
-          >
-            <div class="result-head">
-              <span class="type-tag type-{r.event_type}">{typeLabel[r.event_type] ?? r.event_type}</span>
-              <code class="sid" title={r.session_id}>{shortSession(r.session_id)}</code>
-              <span class="ts">{fmtTs(r.created_at)}</span>
-            </div>
-            <div class="snippet">{r.snippet}</div>
-          </a>
+          {@const isExpanded = expandedId === r.event_id}
+          <div class="result" class:active={r.session_id === currentSessionId} class:expanded={isExpanded}>
+            <button type="button" class="result-row" onclick={() => toggleExpand(r)}>
+              <div class="result-head">
+                <span class="type-tag type-{r.event_type}">{typeLabel[r.event_type] ?? r.event_type}</span>
+                <code class="sid" title={r.session_id}>{shortSession(r.session_id)}</code>
+                <span class="ts">{fmtTs(r.created_at)}</span>
+              </div>
+              <div class="snippet">{r.snippet}</div>
+            </button>
+            {#if isExpanded}
+              <div class="expand-body">
+                <pre class="payload-text">{previewText(r)}</pre>
+                <a
+                  class="view-link"
+                  href={urlFor(r)}
+                  onclick={(e) => onViewInSession(r, e)}
+                  title={r.session_id === currentSessionId
+                    ? 'jump to this event in the current feed (best-effort; only works if event is loaded)'
+                    : 'open the session containing this event'}
+                >view in session →</a>
+              </div>
+            {/if}
+          </div>
         {/each}
       {/if}
     </div>
@@ -228,17 +311,77 @@
   }
   .result {
     display: block;
-    padding: 10px 12px;
-    text-decoration: none;
-    color: var(--text-soft);
     border-bottom: 1px solid var(--border);
-    transition: background 120ms;
+    color: var(--text-soft);
   }
   .result:last-child { border-bottom: 0; }
-  .result:hover { background: var(--surface-2); color: var(--text); }
-  .result.active {
-    background: rgba(232, 153, 104, 0.06);
+  .result.active .result-row { background: rgba(232, 153, 104, 0.06); }
+  .result.expanded .result-row { background: var(--surface-2); }
+  .result-row {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: 0;
+    padding: 10px 12px;
+    color: inherit;
+    font-family: inherit;
+    cursor: pointer;
+    transition: background 120ms;
   }
+  .result-row:hover { background: var(--surface-2); color: var(--text); }
+  .expand-body {
+    padding: 8px 12px 12px;
+    background: var(--surface-2);
+    border-top: 1px solid var(--border);
+  }
+  .payload-text {
+    margin: 0 0 8px;
+    font-size: 11px;
+    color: var(--text);
+    font-family: var(--mono);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 240px;
+    overflow-y: auto;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 10px;
+    line-height: 1.5;
+  }
+  .view-link {
+    display: inline-block;
+    color: var(--accent);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    text-decoration: none;
+    font-weight: 600;
+  }
+  .view-link:hover { color: var(--text); text-decoration: underline; }
+  .view-error {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 12px;
+    background: rgba(230,192,84,0.08);
+    border-bottom: 1px solid rgba(230,192,84,0.25);
+    color: var(--text-soft);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+  .view-error-msg { flex: 1; }
+  .view-error-close {
+    background: transparent;
+    border: 0;
+    color: var(--muted);
+    cursor: pointer;
+    font-size: 14px;
+    padding: 0;
+    flex-shrink: 0;
+  }
+  .view-error-close:hover { color: var(--text); }
   .result-head {
     display: flex;
     align-items: center;

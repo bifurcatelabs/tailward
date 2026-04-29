@@ -50,7 +50,7 @@
   });
 </script>
 
-<article class="item" data-kind={kind}>
+<article class="item" data-kind={kind} id="event-{event.id}">
   <header>
     <span class="chip chip-{kind}">{chipLabel[kind] ?? kind}</span>
     {#if kind === 'constraint_violation' && p.severity}
@@ -324,6 +324,18 @@
     background: rgba(150,144,248,0.06);
     color: var(--violet);
     border-color: rgba(150,144,248,0.18);
+  }
+  /* Search-result deep-link highlight. The :target pseudo-class
+     fires when the URL hash matches the element id. One-shot flash
+     animation only — no persistent border — so once the user has
+     spotted the event the visual returns to normal. The URL hash
+     itself persists for bookmarking / sharing. */
+  .item:target {
+    animation: search-target-flash 1.6s ease-out;
+  }
+  @keyframes search-target-flash {
+    0%   { background: rgba(232,153,104,0.18); }
+    100% { background: transparent; }
   }
   /* Permission-mode change reads as a state indicator (neither alarming
      nor decisive). Slate palette mirrors the closed-session badge —

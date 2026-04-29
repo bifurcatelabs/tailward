@@ -70,6 +70,58 @@
 
   let totalCount = $derived(live.events.length);
   let visibleCount = $derived(reversed.length);
+
+  // Deep-link target for the search panel — clicking a search result
+  // sets the URL hash to ``#event-<id>`` and the matching FeedItem's
+  // article element gets scrolled into view + receives the :target
+  // highlight. Re-fires whenever the events array changes so a result
+  // that was outside the loaded window scrolls into view once it's
+  // pulled in via load-older.
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+
+    function scrollToHashTarget() {
+      const m = window.location.hash.match(/^#event-(\d+)$/);
+      if (!m) return;
+      // Defer one tick so a freshly-rendered element is in the DOM
+      // before we measure / scroll.
+      setTimeout(() => {
+        const el = document.getElementById(m[0].slice(1));
+        if (el) {
+          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        }
+      }, 50);
+    }
+
+    // Initial fire (page load with hash) + every hashchange.
+    scrollToHashTarget();
+    window.addEventListener('hashchange', scrollToHashTarget);
+    return () => window.removeEventListener('hashchange', scrollToHashTarget);
+  });
+
+  // Re-scroll when the events list grows / shrinks — handles the case
+  // where a search result for an older event lands after load-older
+  // pulls more rows in.
+  $effect(() => {
+    void live.events.length;
+    if (typeof window === 'undefined') return;
+    if (!window.location.hash.startsWith('#event-')) return;
+    setTimeout(() => {
+      const el = document.getElementById(window.location.hash.slice(1));
+      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 50);
+  });
+
+  // Clear the active filter when SearchPanel asks ("view in session"
+  // click). Without this, a search result for, say, a user_turn would
+  // be hidden behind a "tools-only" filter — the FeedItem wouldn't
+  // render, so the scroll-to-hash would silently no-op.
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    function clearFilter() { activeFilter = null; }
+    window.addEventListener('search:clear-filter', clearFilter);
+    return () => window.removeEventListener('search:clear-filter', clearFilter);
+  });
 </script>
 
 <section class="feed">
