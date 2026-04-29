@@ -10,10 +10,12 @@ intent editor was retired alongside the v1.1 audit pages.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Path as PathParam, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi import Path as PathParam
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -161,10 +163,23 @@ def mount_web(app: FastAPI) -> None:
     ) -> RedirectResponse:
         """Backward-compat redirect: the Svelte chassis used to live at
         ``/v2``; in v2.0.0 it became the default. 308 keeps any bookmarks
-        working without a content-type ambiguity. Path-param patterns
-        constrain inputs to the expected hex-hash + UUID-ish shapes so
-        CodeQL's URL-redirect concern is bounded at validation time."""
-        return RedirectResponse(url=f"/p/{ph}/live/{session_id}", status_code=308)
+        working without a content-type ambiguity."""
+        # Defensive re-validation. FastAPI's Path() pattern argument
+        # already rejects malformed inputs before this body runs, but
+        # CodeQL's data-flow analysis can't see that the framework's
+        # validator acts as a sanitizer for the redirect-URL sink.
+        # Repeating the regex check inline gives CodeQL a visible
+        # sanitizer between input and sink, closing the alert without
+        # weakening the actual contract (the values are already
+        # validated; this is belt-and-suspenders for the static
+        # analyzer's benefit).
+        if not re.fullmatch(r"[0-9a-f]{12}", ph) or not re.fullmatch(
+            r"[0-9a-f-]{8,}", session_id
+        ):
+            raise HTTPException(422, "invalid path parameters")
+        return RedirectResponse(
+            url=f"/p/{ph}/live/{session_id}", status_code=308
+        )
 
     @app.get("/p/{ph}/live/{session_id}/stream")
     async def live_stream(request: Request, ph: str, session_id: str):
