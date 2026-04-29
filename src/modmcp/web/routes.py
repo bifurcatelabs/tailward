@@ -13,7 +13,7 @@ from __future__ import annotations
 from collections import defaultdict
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Path as PathParam, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -155,10 +155,15 @@ def mount_web(app: FastAPI) -> None:
         )
 
     @app.get("/p/{ph}/live/{session_id}/v2")
-    async def live_session_v2_legacy(ph: str, session_id: str) -> RedirectResponse:
+    async def live_session_v2_legacy(
+        ph: str = PathParam(..., pattern=r"^[0-9a-f]{12}$"),
+        session_id: str = PathParam(..., pattern=r"^[0-9a-f-]{8,}$"),
+    ) -> RedirectResponse:
         """Backward-compat redirect: the Svelte chassis used to live at
         ``/v2``; in v2.0.0 it became the default. 308 keeps any bookmarks
-        working without a content-type ambiguity."""
+        working without a content-type ambiguity. Path-param patterns
+        constrain inputs to the expected hex-hash + UUID-ish shapes so
+        CodeQL's URL-redirect concern is bounded at validation time."""
         return RedirectResponse(url=f"/p/{ph}/live/{session_id}", status_code=308)
 
     @app.get("/p/{ph}/live/{session_id}/stream")
