@@ -53,6 +53,15 @@ class TranscriptEvent:
     # pattern was detected; future patterns add new values.
     synthesized: bool = False
     synthesis_kind: str | None = None
+    # Claude Code carries ``permissionMode`` on most events ("default",
+    # "acceptEdits", "bypassPermissions", "plan", ...) and emits dedicated
+    # ``type: "permission-mode"`` events when the user changes the mode
+    # via Shift+Tab or /permissions. The dispatcher uses this to fire a
+    # ``permission_mode_change`` live event when the value differs from
+    # the carry-forward state in FileState. ``None`` when the event
+    # didn't carry the field (older Claude Code versions, some wrapper
+    # event types).
+    permission_mode: str | None = None
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -183,6 +192,11 @@ def parse_line(line: str) -> TranscriptEvent | None:
         synthesized = True
         synthesis_kind = "compact_summary"
 
+    permission_mode_raw = obj.get("permissionMode")
+    permission_mode = (
+        str(permission_mode_raw) if isinstance(permission_mode_raw, str) else None
+    )
+
     return TranscriptEvent(
         raw=obj,
         kind=kind,
@@ -199,6 +213,7 @@ def parse_line(line: str) -> TranscriptEvent | None:
         stop_reason=stop_reason,
         synthesized=synthesized,
         synthesis_kind=synthesis_kind,
+        permission_mode=permission_mode,
     )
 
 

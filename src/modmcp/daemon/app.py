@@ -299,6 +299,32 @@ def create_app() -> FastAPI:
                     },
                 )
 
+            # Permission-mode transitions. Claude Code carries
+            # ``permissionMode`` on most events and emits dedicated
+            # ``type: "permission-mode"`` events when the user changes
+            # the mode (Shift+Tab cycles through default / acceptEdits /
+            # bypassPermissions / plan). We surface a feed event only on
+            # actual transitions — first-time-set after watcher init or
+            # daemon restart is treated as initialization, not a change.
+            if (
+                fs.session_id
+                and fs.project_hash
+                and ev.permission_mode is not None
+                and fs.last_permission_mode is not None
+                and ev.permission_mode != fs.last_permission_mode
+            ):
+                await daemon.live.publish(
+                    fs.session_id,
+                    fs.project_hash,
+                    "permission_mode_change",
+                    {
+                        "mode": ev.permission_mode,
+                        "previous_mode": fs.last_permission_mode,
+                    },
+                )
+            if ev.permission_mode is not None:
+                fs.last_permission_mode = ev.permission_mode
+
         cfg = get_config()
         daemon.watcher = TranscriptWatcher(
             daemon.state,

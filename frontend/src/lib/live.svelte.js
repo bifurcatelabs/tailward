@@ -33,6 +33,12 @@ const KNOWN_EVENT_TYPES = new Set([
   // Session feed renders a small "perf" chip for moment-of-arrival
   // visibility. Without this entry the SSE listener filters them out.
   'turn_metric',
+  // Permission-mode transitions (default / acceptEdits / bypassPermissions
+  // / plan). Claude Code emits a dedicated event when the user changes
+  // mode via Shift+Tab; we render a chip showing "previous → current"
+  // so the session timeline reads how trust posture shifted across the
+  // session. See memory: project_notes_04282026_passes.md.
+  'permission_mode_change',
 ]);
 
 const FEED_CAP = 250;

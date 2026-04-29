@@ -45,7 +45,14 @@ EventHandler = Callable[[TranscriptEvent, "FileState"], Awaitable[None]]
 
 
 class FileState:
-    __slots__ = ("path", "offset", "session_id", "project_path", "project_hash")
+    __slots__ = (
+        "path",
+        "offset",
+        "session_id",
+        "project_path",
+        "project_hash",
+        "last_permission_mode",
+    )
 
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -53,6 +60,13 @@ class FileState:
         self.session_id: str | None = None
         self.project_path: str | None = None
         self.project_hash: str | None = None
+        # Carry-forward state for detecting permission-mode transitions.
+        # ``None`` until the first event carrying ``permissionMode``; on
+        # subsequent events that carry a different value, the dispatcher
+        # emits a ``permission_mode_change`` LiveBus event. Not persisted
+        # to session_state — daemon restart loses one transition at most,
+        # which is acceptable.
+        self.last_permission_mode: str | None = None
 
 
 def _sanitize_to_path(sanitized: str) -> str:

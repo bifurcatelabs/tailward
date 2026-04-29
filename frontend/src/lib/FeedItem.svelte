@@ -34,6 +34,7 @@
     session_closed: 'session closed',
     compact_summary: 'synthesized',
     turn_metric: 'perf',
+    permission_mode_change: 'permission',
   };
 
   let p = $derived(event.payload || {});
@@ -212,6 +213,15 @@
       <div class="row">consolidation complete</div>
     {:else if kind === 'session_closed'}
       <div class="muted small">session marked closed</div>
+    {:else if kind === 'permission_mode_change'}
+      <div class="row">
+        <code class="mode-prev">{p.previous_mode}</code>
+        <span class="mode-arrow">→</span>
+        <code class="mode-next">{p.mode}</code>
+      </div>
+      <div class="muted small">
+        permission mode changed (Shift+Tab in Claude Code cycles through these)
+      </div>
     {:else if kind === 'turn_metric'}
       <div class="row">
         <span class="muted">turn {p.turn_idx}</span>
@@ -287,6 +297,27 @@
     background: rgba(150,144,248,0.06);
     color: var(--violet);
     border-color: rgba(150,144,248,0.18);
+  }
+  /* Permission-mode change reads as a state indicator (neither alarming
+     nor decisive). Slate palette mirrors the closed-session badge —
+     state-of-the-session signal, not a behavioral verdict. */
+  .chip-permission_mode_change {
+    background: rgba(102,117,140,0.10);
+    color: #8a96a8;
+    border-color: rgba(102,117,140,0.30);
+  }
+  .mode-prev, .mode-next {
+    font-family: var(--mono);
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--text-soft);
+    border: 1px solid var(--border);
+  }
+  .mode-arrow {
+    color: var(--muted);
+    font-size: 12px;
   }
   /* User-side rubric tag — distinguishes self-rubric samples from
      the assistant-side rubric they share an event type with. */

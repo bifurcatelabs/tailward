@@ -324,6 +324,68 @@ def test_known_unhandled_types_do_not_crash() -> None:
         )
 
 
+# ---------- permissionMode field extraction ----------
+
+
+def test_permission_mode_extracted_from_regular_event() -> None:
+    """Claude Code carries ``permissionMode`` on most regular events
+    (user / assistant / etc.). The parser extracts it onto
+    ``ev.permission_mode`` so the dispatcher can detect transitions
+    against carry-forward state in FileState. Pinning this so a
+    field rename upstream (e.g., to ``permission_mode`` or
+    ``permissions_mode``) trips the test rather than silently dropping
+    the signal."""
+    line = _line(
+        {
+            "type": "user",
+            "sessionId": "sess-1",
+            "cwd": "C:/warden",
+            "permissionMode": "acceptEdits",
+            "timestamp": "2026-04-29T01:00:00.000Z",
+            "message": {"role": "user", "content": "go"},
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.permission_mode == "acceptEdits"
+
+
+def test_permission_mode_extracted_from_dedicated_event() -> None:
+    """Dedicated ``type: "permission-mode"`` events carry only the
+    sessionId + permissionMode (no cwd, no message). Falls to
+    ``kind="unknown"`` per KNOWN_UNHANDLED_TYPES, but the
+    ``permissionMode`` field MUST still be extracted so the dispatcher
+    sees the transition."""
+    line = _line(
+        {
+            "type": "permission-mode",
+            "permissionMode": "default",
+            "sessionId": "sess-1",
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.kind == "unknown"  # type itself is unhandled by classifier
+    assert ev.permission_mode == "default"
+
+
+def test_permission_mode_absent_when_field_missing() -> None:
+    """Older Claude Code versions or wrapper events may not carry
+    ``permissionMode``. The field must default to None (not crash, not
+    swallow as empty string)."""
+    line = _line(
+        {
+            "type": "user",
+            "sessionId": "sess-1",
+            "cwd": "C:/warden",
+            "message": {"role": "user", "content": "hello"},
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.permission_mode is None
+
+
 # ---------- top-level field inventory ----------
 
 
