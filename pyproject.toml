@@ -9,7 +9,7 @@ description = "Tailward — a local-first audit underlay for Claude Code. Surfac
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
-authors = [{ name = "Glenn Walker", email = "glenn@glennw.net" }]
+authors = [{ name = "Glenn Walker", email = "glenn@bifurcate.io" }]
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
