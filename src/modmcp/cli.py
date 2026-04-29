@@ -33,7 +33,7 @@ from .schema.intent import empty_intent, load_intent, save_intent
 
 app = typer.Typer(
     add_completion=False,
-    help="warden — local-first trust layer for AI coding workflows.",
+    help="warden — local-first audit underlay for Claude Code.",
     no_args_is_help=True,
 )
 

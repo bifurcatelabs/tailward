@@ -1,6 +1,6 @@
 # warden
 
-A local-first **trust layer for AI coding workflows**. A long-running local daemon tails Claude Code transcripts, scores them against trust-breaking failure modes using deterministic rule checks plus a **local LLM rubric**, derives in-band inference-path metrics, probes the local LLM endpoint, and surfaces everything in a multi-view localhost web UI (Session / Reflection / Platform). No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
+A local-first **audit underlay for Claude Code**. Your session sits in the foreground; warden quietly captures it from below — tailing the JSONL transcripts Claude Code writes, scoring them against documented failure modes via deterministic rule checks plus a **local LLM rubric**, deriving in-band inference-path metrics, probing the local LLM endpoint, and surfacing everything in a multi-view localhost web UI (Session / Reflection / Platform). No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
 
 See [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the audit layer and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which failure modes Warden currently detects and how. [`V1 Proposal.md`](V1%20Proposal.md) is the original design and is preserved as a historical artifact — the project pivoted away from active prompt injection in v1.1 and reframed as a trust layer in v2.0.0.
 

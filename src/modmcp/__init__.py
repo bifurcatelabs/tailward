@@ -1,10 +1,10 @@
-"""warden — a local-first trust layer for AI coding workflows.
+"""warden — a local-first audit underlay for Claude Code.
 
-Internal Python package name remains ``modmcp`` as a deliberate
-historical artifact; the user-facing CLI binary, product surface, and
-brand are ``warden`` as of v2.0.0. See ``CHANGELOG.md`` and the cutover
-notes for the rationale (light-path rebrand: rename surfaces, keep
-internals stable).
+Three-name layout: PyPI distribution is ``tailward`` (the public name);
+CLI binary is ``warden`` (what users invoke); internal Python package
+remains ``modmcp`` as a deliberate historical artifact. See
+``CHANGELOG.md`` for the cutover history (light-path rebrand: rename
+surfaces, keep internals stable).
 """
 
-__version__ = "2.0.0"
+__version__ = "2.2.0"

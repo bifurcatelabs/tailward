@@ -26,9 +26,9 @@
       />
     </svg>
     <span class="name">warden</span>
-    <span class="version">2.0</span>
+    <span class="version">2.2</span>
   </a>
-  <span class="tagline">trust layer for AI coding workflows</span>
+  <span class="tagline">audit underlay for Claude Code</span>
 </header>
 
 <style>
