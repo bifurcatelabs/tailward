@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from modmcp.daemon.audit import _verify_claim, extract_claims
+from modmcp.daemon.audit import (
+    _is_test_file,
+    _match_in_string_literal,
+    _verify_claim,
+    extract_claims,
+)
 
 
 def test_extract_claims_finds_strong_claims() -> None:
@@ -126,6 +131,95 @@ def test_extract_skips_quoted_meta_text() -> None:
     assert any("OldHandler" in c.text for c in claims), claims
     # The quoted FooBar must NOT have produced a claim.
     assert not any("FooBar" in c.text for c in claims), claims
+
+
+# ---------- test-file string-literal filter (verifier scope fix) ----------
+
+
+def test_is_test_file_detects_tests_directory() -> None:
+    assert _is_test_file("C:/warden/tests/test_audit.py")
+    assert _is_test_file("/home/u/proj/tests/foo.py")
+
+
+def test_is_test_file_detects_test_filename() -> None:
+    assert _is_test_file("src/test_helpers.py")
+    assert _is_test_file("src/helpers_test.py")
+    assert _is_test_file("src/test_helpers.js")
+
+
+def test_is_test_file_rejects_non_test_paths() -> None:
+    assert not _is_test_file("src/modmcp/daemon/audit.py")
+    assert not _is_test_file("README.md")
+    # ``test`` substring inside a non-test filename shouldn't count.
+    assert not _is_test_file("src/contest_results.py")
+
+
+def test_match_in_string_literal_double_quotes() -> None:
+    assert _match_in_string_literal('text = "I removed FooBar"', "FooBar")
+
+
+def test_match_in_string_literal_single_quotes() -> None:
+    assert _match_in_string_literal("text = 'OldHandler is gone'", "OldHandler")
+
+
+def test_match_in_string_literal_outside_quotes() -> None:
+    assert not _match_in_string_literal("from mymod import OldHandler", "OldHandler")
+    assert not _match_in_string_literal("class FooBar: pass", "FooBar")
+    assert not _match_in_string_literal("# OldHandler removed", "OldHandler")
+
+
+def test_match_in_string_literal_handles_escapes() -> None:
+    # An escaped quote inside the string mustn't flip the state and let
+    # a later identifier slip through as "outside the string."
+    assert _match_in_string_literal(r'msg = "say \"FooBar\" out loud"', "FooBar")
+
+
+def test_verify_skips_test_string_literal_match(tmp_path: Path) -> None:
+    """Removal claim shouldn't be contradicted when the only repo
+    occurrence is inside a string literal in a test file.
+
+    This was the dogfooding failure mode: warden's own test_audit.py
+    pins the extractor on names like FooBar / OldHandler by passing
+    them as literal strings, then the verifier later greps the repo
+    for those same names and counts the test fixtures as evidence
+    the symbol still exists.
+    """
+    from modmcp.daemon.audit import Claim
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_audit.py").write_text(
+        'def test_extract():\n'
+        '    text = "I removed all FooBar references"\n'
+        '    assert extract_claims(text)\n',
+        encoding="utf-8",
+    )
+    claim = Claim(
+        text="I removed all FooBar references", candidates=["FooBar"]
+    )
+    status, evidence = _verify_claim(claim, tmp_path, budget=100)
+    assert status == "verified", (status, evidence)
+    assert "absence confirmed" in (evidence or "").lower()
+
+
+def test_verify_test_file_real_import_still_contradicts(tmp_path: Path) -> None:
+    """A real import / class-def in a test file (not in a string literal)
+    is genuine evidence the symbol exists — the filter must not over-skip
+    these or claims would silently verify against actual contradiction."""
+    from modmcp.daemon.audit import Claim
+
+    tests_dir = tmp_path / "tests"
+    tests_dir.mkdir()
+    (tests_dir / "test_things.py").write_text(
+        "from mymod import FooBar\n"
+        "def test_foobar(): assert FooBar()\n",
+        encoding="utf-8",
+    )
+    claim = Claim(
+        text="I removed all FooBar references", candidates=["FooBar"]
+    )
+    status, evidence = _verify_claim(claim, tmp_path, budget=100)
+    assert status == "contradicted", (status, evidence)
 
 
 def test_extract_filters_plain_english_identifiers() -> None:

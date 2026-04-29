@@ -291,6 +291,52 @@ def _first_hits(hits: dict[str, list[tuple[str, int]]]) -> dict[str, tuple[str, 
 
 _SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".modmcp", "dist", "build"}
 
+# Test-file detection: ``tests/`` or ``test/`` directory anywhere on the
+# path, or a filename matching ``test_*.<ext>`` / ``*_test.<ext>``.
+# Used to scope the string-literal filter below.
+_TEST_FILE_RE = re.compile(
+    r"(?:^|[/\\])tests?[/\\]|(?:^|[/\\])test_[^/\\]*\.[A-Za-z]+$|_test\.[A-Za-z]+$"
+)
+
+
+def _is_test_file(path: str) -> bool:
+    return bool(_TEST_FILE_RE.search(path))
+
+
+def _match_in_string_literal(line: str, ident: str) -> bool:
+    """Heuristic: does the first occurrence of ``ident`` on this line
+    fall inside a single-line string literal?
+
+    Walks the line up to ``ident``'s position, toggling string state on
+    each unescaped ``"`` or ``'``. Doesn't handle triple-quoted strings
+    that span multiple lines — those are rarer in practice and would
+    require multi-line state tracking. Single-line is enough to cover
+    the dogfooding failure mode where a test fixture embeds a code
+    name inside a literal (``text = "I removed FooBar"``) and the
+    grep treats it as evidence the symbol still exists.
+    """
+    pos = line.find(ident)
+    if pos < 0:
+        return False
+    in_string = False
+    quote = ""
+    i = 0
+    while i < pos:
+        c = line[i]
+        if c == "\\" and i + 1 < pos:
+            # Skip the escaped character — it can't toggle state.
+            i += 2
+            continue
+        if c in ('"', "'"):
+            if in_string and c == quote:
+                in_string = False
+                quote = ""
+            elif not in_string:
+                in_string = True
+                quote = c
+        i += 1
+    return in_string
+
 
 def _grep_identifiers(
     root: Path, idents: list[str], budget: int
@@ -310,11 +356,21 @@ def _grep_identifiers(
         try:
             if path.stat().st_size > 1_000_000:
                 continue
+            path_str = str(path)
+            is_test = _is_test_file(path_str)
             with open(path, encoding="utf-8", errors="ignore") as f:
                 for lineno, line in enumerate(f, start=1):
                     for ident, pat in patterns.items():
                         if pat.search(line):
-                            results[ident].append((str(path), lineno))
+                            # Test-file matches inside string literals
+                            # are almost always test fixtures using the
+                            # name as input data, not real references —
+                            # skip so a removal claim isn't contradicted
+                            # by the test that pins the extractor's
+                            # behavior on that very name.
+                            if is_test and _match_in_string_literal(line, ident):
+                                continue
+                            results[ident].append((path_str, lineno))
         except OSError:
             continue
         scanned += 1
