@@ -1034,6 +1034,73 @@ class Ledger:
             out[str(r["status"])] = int(r["n"])
         return out
 
+    async def search_events(
+        self, project_hash: str, query: str, limit: int = 50
+    ) -> list[dict]:
+        """Project-scoped substring search across content-bearing events.
+
+        Maps to the search field in the live header — surfaces a turn
+        the user remembers but can't pinpoint. Searches the JSON
+        payload of event types that carry user-visible content (user
+        turns, assistant turns, tool calls, synthesized turns, claims,
+        away-summary recaps), case-insensitively.
+
+        Returns a list of {event_id, session_id, event_type, payload,
+        created_at, snippet} dicts ordered most-recent first. Snippet
+        is a ~120-char window around the first match in the payload
+        for context preview. The frontend uses event_id + session_id
+        for click-through; payload is included for callers that want
+        the full event data.
+
+        Substring search via LIKE — adequate for tailward's data
+        volumes (live_events grows linearly with session activity,
+        single-project scans stay small). FTS5 is the upgrade path
+        if this becomes slow.
+        """
+        if not query.strip():
+            return []
+        like_pattern = "%" + query.replace("%", r"\%").replace("_", r"\_") + "%"
+        async with self.conn.execute(
+            """SELECT id, session_id, event_type, payload, created_at
+               FROM live_events
+               WHERE project_hash = ?
+                 AND event_type IN (
+                     'user_turn', 'turn', 'tool_call',
+                     'compact_summary', 'claim', 'away_summary'
+                 )
+                 AND LOWER(payload) LIKE LOWER(?) ESCAPE '\\'
+               ORDER BY id DESC
+               LIMIT ?""",
+            (project_hash, like_pattern, limit),
+        ) as cur:
+            rows = await cur.fetchall()
+
+        results: list[dict] = []
+        q_lower = query.lower()
+        for r in rows:
+            payload = r["payload"] or ""
+            # Snippet: 80-char window centered on the first match.
+            idx = payload.lower().find(q_lower)
+            if idx < 0:
+                snippet = payload[:120]
+            else:
+                start = max(0, idx - 40)
+                end = min(len(payload), idx + len(query) + 80)
+                snippet = payload[start:end]
+                if start > 0:
+                    snippet = "…" + snippet
+                if end < len(payload):
+                    snippet = snippet + "…"
+            results.append({
+                "event_id": int(r["id"]),
+                "session_id": r["session_id"],
+                "event_type": r["event_type"],
+                "payload": r["payload"],
+                "created_at": r["created_at"],
+                "snippet": snippet,
+            })
+        return results
+
     async def tool_calls_by_mode(self, project_hash: str) -> dict:
         """Aggregate ``tool_call`` and ``tool_interrupted`` events
         grouped by tool name and active permission_mode at the time

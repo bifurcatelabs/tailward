@@ -389,6 +389,35 @@ def mount_web(app: FastAPI) -> None:
             "sample_size": len(rows),
         })
 
+    @app.get("/p/{ph}/search")
+    async def project_search(
+        request: Request,
+        ph: str,
+    ) -> JSONResponse:
+        """Project-scoped substring search across content-bearing
+        live_events (user turns, assistant turns, tool calls,
+        synthesized turns, claims, away-summary recaps). Returns a
+        list of result rows for the search panel to render.
+
+        Query parameter ``q`` is the substring to match (case-insensitive).
+        ``limit`` defaults to 50; capped at 200.
+        """
+        daemon = request.app.state.daemon
+        q = (request.query_params.get("q") or "").strip()
+        try:
+            limit = min(int(request.query_params.get("limit", "50") or 50), 200)
+        except ValueError:
+            limit = 50
+        if not q:
+            return JSONResponse({"query": "", "results": [], "limit": limit})
+        results = await daemon.ledger.search_events(ph, q, limit)
+        return JSONResponse({
+            "query": q,
+            "results": results,
+            "limit": limit,
+            "count": len(results),
+        })
+
     @app.get("/v2/projects")
     async def v2_projects(request: Request) -> JSONResponse:
         """Cross-project landing-page data: one row per project warden

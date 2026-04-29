@@ -1,6 +1,7 @@
 <script>
   import { live } from './live.svelte.js';
   import SessionPicker from './SessionPicker.svelte';
+  import SearchPanel from './SearchPanel.svelte';
   let { ph, sessionId } = $props();
 
   // Tick once per second so the "last contact" relative time updates
@@ -87,6 +88,8 @@
   </div>
 
   <SessionPicker {ph} {sessionId} />
+
+  <SearchPanel {ph} currentSessionId={sessionId} />
 
   <div
     class="contact stale-{staleness}"
