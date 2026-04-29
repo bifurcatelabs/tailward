@@ -325,6 +325,29 @@ def create_app() -> FastAPI:
             if ev.permission_mode is not None:
                 fs.last_permission_mode = ev.permission_mode
 
+            # Away-summary captures. Claude Code emits these as
+            # ``type: "system"`` with ``subtype: "away_summary"`` when
+            # it observes the user has stepped away — the ``content``
+            # carries a structured recap (goal / current task / next
+            # action) for when the user returns. We surface them in
+            # the live feed so the session timeline reflects when the
+            # user was actively driving vs idle. No carry-forward
+            # state — every away_summary is independent.
+            if (
+                fs.session_id
+                and fs.project_hash
+                and ev.kind == "system"
+                and ev.raw.get("subtype") == "away_summary"
+            ):
+                content = (ev.text or str(ev.raw.get("content", ""))).strip()
+                if content:
+                    await daemon.live.publish(
+                        fs.session_id,
+                        fs.project_hash,
+                        "away_summary",
+                        {"content": content},
+                    )
+
         cfg = get_config()
         daemon.watcher = TranscriptWatcher(
             daemon.state,

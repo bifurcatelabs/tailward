@@ -35,6 +35,7 @@
     compact_summary: 'synthesized',
     turn_metric: 'perf',
     permission_mode_change: 'permission',
+    away_summary: 'away',
   };
 
   let p = $derived(event.payload || {});
@@ -222,6 +223,22 @@
       <div class="muted small">
         permission mode changed (Shift+Tab in Claude Code cycles through these)
       </div>
+    {:else if kind === 'away_summary'}
+      <div class="row">
+        <span class="muted small">
+          Claude Code captured a recap during a quiet period — goal,
+          current task, next action. The agent emits these so context
+          survives if you step away.
+        </span>
+      </div>
+      {#if p.content}
+        <button
+          type="button"
+          class="evidence"
+          class:expanded
+          onclick={toggleExpanded}
+        >{p.content}</button>
+      {/if}
     {:else if kind === 'turn_metric'}
       <div class="row">
         <span class="muted">turn {p.turn_idx}</span>
@@ -305,6 +322,16 @@
     background: rgba(102,117,140,0.10);
     color: #8a96a8;
     border-color: rgba(102,117,140,0.30);
+  }
+  /* Away-summary is a system-generated state recap. Same slate family
+     as permission_mode_change (both are "state indicators") but with
+     a softer dotted border so it reads as "system observation" rather
+     than "user action / mode shift." */
+  .chip-away_summary {
+    background: rgba(102,117,140,0.06);
+    color: #8a96a8;
+    border-color: rgba(102,117,140,0.25);
+    border-style: dotted;
   }
   .mode-prev, .mode-next {
     font-family: var(--mono);

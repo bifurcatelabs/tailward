@@ -39,6 +39,13 @@ const KNOWN_EVENT_TYPES = new Set([
   // so the session timeline reads how trust posture shifted across the
   // session. See memory: project_notes_04282026_passes.md.
   'permission_mode_change',
+  // Away-summary captures. Claude Code emits a `type: "system"` event
+  // with `subtype: "away_summary"` carrying a structured recap (goal /
+  // current task / next action) when it observes the user has stepped
+  // away. Surfacing as a feed chip so the session timeline shows when
+  // the user was driving vs idle. The full text is available on
+  // expand. See memory: project_notes_04282026_passes.md.
+  'away_summary',
 ]);
 
 const FEED_CAP = 250;

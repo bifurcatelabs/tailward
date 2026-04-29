@@ -299,6 +299,38 @@ def test_system_event_parses() -> None:
     assert ev.kind == "system"
 
 
+def test_system_away_summary_extracts_content() -> None:
+    """``type: "system"``, ``subtype: "away_summary"`` events carry a
+    ``content`` string at the top level (not inside a wrapped
+    ``message``). The dispatcher reads it via ``ev.text`` to publish
+    the away_summary LiveBus event. Pin the extraction so a future
+    nesting change (e.g., wrapping into ``message.content``) doesn't
+    silently drop the signal.
+
+    The subtype is preserved on ``ev.raw`` for the dispatcher's
+    branch check."""
+    content = (
+        "Goal is dogfooding warden. Current task is item 8. "
+        "Next action: implement aggregation panel."
+    )
+    line = _line(
+        {
+            "type": "system",
+            "subtype": "away_summary",
+            "sessionId": "sess-1",
+            "content": content,
+            "timestamp": "2026-04-29T01:00:00.000Z",
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.kind == "system"
+    assert ev.text == content
+    # The dispatcher discriminates on subtype directly on ev.raw —
+    # pin the field name so a rename trips this test.
+    assert ev.raw.get("subtype") == "away_summary"
+
+
 # ---------- unknown event types: graceful degradation ----------
 
 
