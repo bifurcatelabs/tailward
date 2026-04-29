@@ -37,8 +37,8 @@
     },
     {
       key: 'audit', label: 'audit',
-      types: ['constraint_violation', 'scope_snapshot', 'scope_creep', 'drift', 'claim'],
-      description: 'failure-mode signals — rule violations, scope snapshots and creep, drift detection, claim verification verdicts',
+      types: ['constraint_violation', 'scope_snapshot', 'scope_creep', 'drift', 'claim', 'exfiltration_alert'],
+      description: 'failure-mode signals — rule violations, scope snapshots and creep, drift detection, claim verification verdicts, secret-leak alerts',
     },
     {
       key: 'perf', label: 'perf',

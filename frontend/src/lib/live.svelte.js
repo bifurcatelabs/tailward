@@ -52,6 +52,12 @@ const KNOWN_EVENT_TYPES = new Set([
   // Rare in practice but real audit signal when it fires. Tool name
   // resolved via the dispatcher's tool_use_id → name cache.
   'tool_interrupted',
+  // Exfiltration alert — a known secret pattern (API key, PAT,
+  // private key block, etc.) was detected in a tool_call payload
+  // before it landed in live_events. The original event's payload is
+  // sanitized; this alert surfaces the redacted match so the user
+  // can see + verify + rotate. See `modmcp.schema.exfiltration`.
+  'exfiltration_alert',
 ]);
 
 const FEED_CAP = 250;

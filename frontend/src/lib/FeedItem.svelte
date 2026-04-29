@@ -41,6 +41,7 @@
     permission_mode_change: 'permission',
     away_summary: 'away',
     tool_interrupted: 'declined',
+    exfiltration_alert: 'leak',
   };
 
   let p = $derived(event.payload || {});
@@ -333,6 +334,21 @@
           tool call interrupted{p.permission_mode ? ` (${p.permission_mode} mode)` : ''}
         </span>
       </div>
+    {:else if kind === 'exfiltration_alert'}
+      <div class="row">
+        <strong>{p.pattern}</strong>
+        {#if p.tool}
+          <span class="muted small">in {p.tool}</span>
+        {/if}
+      </div>
+      {#if p.redacted}
+        <div class="evidence-static mono">{p.redacted}</div>
+      {/if}
+      <div class="muted small">
+        a known secret pattern was detected in tool input — the source
+        event's payload was sanitized before storage. verify the
+        secret didn't leak elsewhere and rotate if needed.
+      </div>
     {:else if kind === 'turn_metric'}
       <div class="row">
         <span class="muted">turn {p.turn_idx}</span>
@@ -476,6 +492,14 @@
     background: rgba(230,192,84,0.08);
     color: var(--warn);
     border-color: rgba(230,192,84,0.25);
+  }
+  /* exfiltration_alert is genuinely alarming — a real secret was
+     about to land in the audit log. Red/error palette to signal
+     "you should look at this and probably rotate." */
+  .chip-exfiltration_alert {
+    background: rgba(232,122,122,0.12);
+    color: var(--err);
+    border-color: rgba(232,122,122,0.30);
   }
   .mode-prev, .mode-next {
     font-family: var(--mono);

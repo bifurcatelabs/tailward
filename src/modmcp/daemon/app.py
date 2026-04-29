@@ -22,6 +22,7 @@ from ..paths import (
 from ..paths import (
     project_hash as hash_path,
 )
+from ..schema import exfiltration
 from ..schema.intent import Intent, load_intent, save_intent
 from ..storage.ledger import Ledger
 from .livebus import LiveBus
@@ -95,6 +96,34 @@ def create_app() -> FastAPI:
         daemon.live.set_persister(_persist_live)
 
         async def on_event(ev, fs):
+            # Exfiltration helper: scans any text that's about to land
+            # in live_events.payload, emits an exfiltration_alert per
+            # match, and returns the redacted form. Wrapping every
+            # publish site means secrets in *any* observed channel
+            # (typed prompts, assistant responses, tool inputs,
+            # away-summary recaps, /compact synthesis) get caught and
+            # sanitized before storage. ``extra`` flows into the alert
+            # payload (e.g., the source tool name on tool_call leaks).
+            async def _check_leaks(text, source_event_type, **extra):
+                if not text or not fs.session_id or not fs.project_hash:
+                    return text
+                matches = exfiltration.scan(text)
+                if not matches:
+                    return text
+                for m in matches:
+                    await daemon.live.publish(
+                        fs.session_id,
+                        fs.project_hash,
+                        "exfiltration_alert",
+                        {
+                            "pattern": m.pattern_name,
+                            "redacted": m.redacted_preview,
+                            "source_event_type": source_event_type,
+                            **extra,
+                        },
+                    )
+                return exfiltration.redact(text, matches)
+
             # In-flight turn tracking for per-turn inference-path metrics.
             # We close the in-flight turn at two transition points: (a)
             # a new logical assistant turn starts (different message_id),
@@ -205,6 +234,7 @@ def create_app() -> FastAPI:
                 # multi-screen response doesn't blow out the feed
                 # column \u2014 the data is still all there.
                 preview = visible.replace("\r", "").rstrip()
+                preview = await _check_leaks(preview, "turn")
                 payload: dict[str, Any] = {
                     "turn_idx": st.turns_seen if st else 0,
                     "text_preview": preview,
@@ -263,6 +293,7 @@ def create_app() -> FastAPI:
                 preview = (ev.text or "").replace("\r", "").rstrip()
                 if preview.strip():
                     if ev.synthesized and ev.synthesis_kind == "compact_summary":
+                        preview = await _check_leaks(preview, "compact_summary")
                         await daemon.live.publish(
                             fs.session_id,
                             fs.project_hash,
@@ -274,6 +305,7 @@ def create_app() -> FastAPI:
                             },
                         )
                     else:
+                        preview = await _check_leaks(preview, "user_turn")
                         await daemon.live.publish(
                             fs.session_id,
                             fs.project_hash,
@@ -297,15 +329,27 @@ def create_app() -> FastAPI:
             # call under the "untagged" column. The tool_use_id → name
             # mapping is cached so a later interrupted tool_result can
             # resolve the original tool name.
+            #
+            # Exfiltration scan: before publishing, scan the input
+            # preview for known secret patterns. Any match redacts the
+            # secret in the published payload (so live_events.payload
+            # never stores the cleartext) and emits a separate
+            # exfiltration_alert event surfacing the leak in the live
+            # feed. See ``modmcp.schema.exfiltration``.
             if fs.session_id and fs.project_hash and ev.tool_name:
                 mode_at_call = ev.permission_mode or fs.last_permission_mode
+                input_preview = await _check_leaks(
+                    _shorten_tool_input(ev.tool_input),
+                    "tool_call",
+                    tool=ev.tool_name,
+                )
                 await daemon.live.publish(
                     fs.session_id,
                     fs.project_hash,
                     "tool_call",
                     {
                         "tool": ev.tool_name,
-                        "input_preview": _shorten_tool_input(ev.tool_input),
+                        "input_preview": input_preview,
                         "permission_mode": mode_at_call,
                     },
                 )
@@ -393,6 +437,7 @@ def create_app() -> FastAPI:
             ):
                 content = (ev.text or str(ev.raw.get("content", ""))).strip()
                 if content:
+                    content = await _check_leaks(content, "away_summary")
                     await daemon.live.publish(
                         fs.session_id,
                         fs.project_hash,
