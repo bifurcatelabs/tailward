@@ -44,7 +44,14 @@
   let stopReasonsTotal = $derived(metrics.length);
 
   function pct(v) {
-    return v != null ? (v * 100).toFixed(0) + '%' : '—';
+    if (v == null) return '—';
+    // 1-decimal precision matters for cache_hit_ratio: long sessions
+    // routinely sit at 0.99-0.998 due to heavy prompt caching, and
+    // .toFixed(0) collapses that whole band to "100%" — both in the
+    // big number and in the uplot hover tooltip — making variance
+    // invisible and the hover read as inaccurate vs the chart line
+    // position. One decimal preserves the meaningful spread.
+    return (v * 100).toFixed(1) + '%';
   }
 </script>
 
