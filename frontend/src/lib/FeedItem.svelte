@@ -9,6 +9,34 @@
   // copy UX is consistent wherever a turn can be grabbed from.
   let copied = $state(false);
 
+  // Local action state for constraint_violation rows. Without this
+  // the buttons have no post-click feedback — the API call lands
+  // but the row looks identical to before. Lifecycle:
+  //   null → 'pending' → 'acknowledged' / 'dismissed'   (success)
+  //   null → 'pending' → null                           (failure)
+  let actionState = $state(null);
+
+  async function handleAck() {
+    actionState = 'pending';
+    try {
+      await live.ackViolation(p.id);
+      actionState = 'acknowledged';
+    } catch (e) {
+      actionState = null;
+      console.warn('[feed-item] ack failed', e);
+    }
+  }
+  async function handleDismiss() {
+    actionState = 'pending';
+    try {
+      await live.dismissViolation(p.id);
+      actionState = 'dismissed';
+    } catch (e) {
+      actionState = null;
+      console.warn('[feed-item] dismiss failed', e);
+    }
+  }
+
   // Click handler that doesn't fire when the user is mid-selection.
   // Without this, click-and-drag to select evidence text *also*
   // toggles the expand state, which fights careful copy/paste.
@@ -218,10 +246,24 @@
       {#if p.evidence}
         <div class="evidence-static">{p.evidence}</div>
       {/if}
-      <div class="actions">
-        <button class="btn" onclick={() => live.ackViolation(p.id)}>acknowledge</button>
-        <button class="btn" onclick={() => live.dismissViolation(p.id)}>dismiss</button>
-      </div>
+      {#if actionState === 'acknowledged'}
+        <div class="action-result">✓ acknowledged</div>
+      {:else if actionState === 'dismissed'}
+        <div class="action-result">✓ dismissed</div>
+      {:else}
+        <div class="actions">
+          <button
+            class="btn"
+            onclick={handleAck}
+            disabled={actionState === 'pending'}
+          >{actionState === 'pending' ? '…' : 'acknowledge'}</button>
+          <button
+            class="btn"
+            onclick={handleDismiss}
+            disabled={actionState === 'pending'}
+          >dismiss</button>
+        </div>
+      {/if}
     {:else if kind === 'scope_snapshot'}
       <div class="row">
         <span class="muted">turn {p.turn_idx}</span>
@@ -651,7 +693,22 @@
     border-radius: 4px;
     cursor: pointer;
     font-family: inherit;
-    transition: color 120ms, border-color 120ms;
+    transition: color 120ms, border-color 120ms, background 80ms, transform 80ms;
   }
-  .btn:hover { color: var(--text); border-color: var(--text-soft); }
+  .btn:hover:not(:disabled) { color: var(--text); border-color: var(--text-soft); }
+  .btn:active:not(:disabled) {
+    background: var(--surface-2);
+    transform: translateY(1px);
+  }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+  /* Post-click confirmation that replaces the action row once an
+     ack/dismiss POST succeeds. Inline so the row keeps its place
+     in the feed instead of jumping. Muted ok-tone — the action
+     landed, no more decisions to make here. */
+  .action-result {
+    margin-top: 8px;
+    color: var(--ok);
+    font-size: 11px;
+    font-family: var(--mono);
+  }
 </style>
