@@ -55,8 +55,8 @@
         stroke-linejoin="round"
       />
     </svg>
-    <a href="/" class="name" style="text-decoration:none;color:inherit">warden</a>
-    <span class="version">2.0</span>
+    <a href="/" class="name" style="text-decoration:none;color:inherit">tailward</a>
+    <span class="version">2.2.0</span>
   </div>
 
   <div class="session">

@@ -16,9 +16,8 @@
       <ProjectQuickPicker {ph} />
     </div>
     <p>
-      in-band metrics from real sessions plus probes of the local
-      model server. <strong>evidence: variance and trend</strong> —
-      read it how you want.
+      in-band metrics from real sessions and probes of the local LLM.
+      <strong>variance and trend</strong> — read it how you want.
     </p>
   </header>
 

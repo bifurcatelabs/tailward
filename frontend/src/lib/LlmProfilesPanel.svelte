@@ -43,11 +43,11 @@
 <section class="panel">
   <header>
     <div>
-      <h3>warden's llm profiles</h3>
+      <h3>llm profiles</h3>
       <p class="muted">
-        verbatim — model, sampler params, and prompts warden sends to the local
-        endpoint per call kind. transparent by design: nothing here is hidden
-        from the user whose data is being processed.
+        the model, sampler params, and prompts sent to the local endpoint
+        per call kind. read directly from the live config — what's shown
+        is what's running.
       </p>
     </div>
   </header>

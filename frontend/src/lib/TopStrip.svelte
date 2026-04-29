@@ -25,8 +25,8 @@
         stroke-linejoin="round"
       />
     </svg>
-    <span class="name">warden</span>
-    <span class="version">2.2</span>
+    <span class="name">tailward</span>
+    <span class="version">2.2.0</span>
   </a>
   <span class="tagline">audit underlay for Claude Code</span>
 </header>
