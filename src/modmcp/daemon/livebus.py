@@ -53,6 +53,24 @@ EVENT_TYPES: frozenset[str] = frozenset(
         # cross-session aggregations can exclude it from user-behavior
         # stats. See memory: project_synthesized_turns.md.
         "compact_summary",
+        # Permission-mode transition. Claude Code emits dedicated
+        # ``type: "permission-mode"`` events when the user changes
+        # mode via Shift+Tab; the dispatcher fires this when the
+        # observed value differs from the carry-forward FileState.
+        "permission_mode_change",
+        # System-emitted state recap with goal / current task / next
+        # action, captured when the user has been idle. Surfaces in
+        # the feed so the timeline reflects when the user was driving
+        # vs idle.
+        "away_summary",
+        # User declined / interrupted a tool call. Detected via
+        # ``toolUseResult.interrupted: true`` on the JSONL line.
+        "tool_interrupted",
+        # Known secret pattern detected in a tool_call payload before
+        # it landed in live_events. The original event's payload is
+        # sanitized; this alert surfaces the redacted match so the
+        # user can verify + rotate. See modmcp.schema.exfiltration.
+        "exfiltration_alert",
     }
 )
 
