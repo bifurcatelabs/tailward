@@ -42,6 +42,7 @@
     away_summary: 'away',
     tool_interrupted: 'declined',
     exfiltration_alert: 'leak',
+    memory_edit: 'memory',
   };
 
   let p = $derived(event.payload || {});
@@ -96,6 +97,8 @@
         return `${p.previous_mode ?? '?'} → ${p.mode ?? '?'}`;
       case 'tool_interrupted':
         return `${p.tool ?? '?'} interrupted${p.permission_mode ? ` (${p.permission_mode} mode)` : ''}`;
+      case 'memory_edit':
+        return `${p.tool ?? '?'} ${p.path ?? ''}`;
       case 'rubric_sample':
         return `${p.dim ?? '?'}: ${p.score ?? '?'}/5${p.evidence ? ' — ' + p.evidence : ''}`;
       case 'constraint_violation':
@@ -349,6 +352,19 @@
         event's payload was sanitized before storage. verify the
         secret didn't leak elsewhere and rotate if needed.
       </div>
+    {:else if kind === 'memory_edit'}
+      <div class="row">
+        {#if p.tool}
+          <strong>{p.tool}</strong>
+        {/if}
+        {#if p.path}
+          <span class="muted mono">{p.path}</span>
+        {/if}
+      </div>
+      <div class="muted small">
+        edit landed in a Claude Code memory file. Surfaced for transparency —
+        not counted as a constraint violation.
+      </div>
     {:else if kind === 'turn_metric'}
       <div class="row">
         <span class="muted">turn {p.turn_idx}</span>
@@ -500,6 +516,17 @@
     background: rgba(232,122,122,0.12);
     color: var(--err);
     border-color: rgba(232,122,122,0.30);
+  }
+  /* memory_edit is a calibration moment, not a violation. Teal-ish
+     palette aligned with user_turn / scope_snapshot (positive-but-
+     muted) so it reads as "noted, not flagged." Distinct from the
+     slate state-indicator family (permission_mode_change /
+     away_summary) since this is *the user acting on the agent*, not
+     a state observation. */
+  .chip-memory_edit {
+    background: rgba(95,195,167,0.06);
+    color: var(--ok);
+    border-color: rgba(95,195,167,0.22);
   }
   .mode-prev, .mode-next {
     font-family: var(--mono);

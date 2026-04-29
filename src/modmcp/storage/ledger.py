@@ -1167,3 +1167,19 @@ class Ledger:
                 "interruptions": total_interruptions,
             },
         }
+
+    async def memory_edit_count(self, project_hash: str) -> int:
+        """Number of memory_edit events for the project.
+
+        Surfaces in the Reflection view next to the violation cadence
+        so the user sees calibration activity (memory file edits)
+        alongside policy events without conflating the two.
+        """
+        async with self.conn.execute(
+            """SELECT COUNT(*) AS n
+               FROM live_events
+               WHERE project_hash=? AND event_type='memory_edit'""",
+            (project_hash,),
+        ) as cur:
+            row = await cur.fetchone()
+        return int(row["n"]) if row else 0

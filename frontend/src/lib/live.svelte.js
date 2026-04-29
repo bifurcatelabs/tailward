@@ -58,6 +58,12 @@ const KNOWN_EVENT_TYPES = new Set([
   // sanitized; this alert surfaces the redacted match so the user
   // can see + verify + rotate. See `modmcp.schema.exfiltration`.
   'exfiltration_alert',
+  // Edit landed in a Claude Code memory file (~/.claude/projects/
+  // <ph>/memory/**). Path-policy would otherwise count this as a
+  // constraint violation since the path falls outside the watched
+  // project root. The constraints worker emits this event instead so
+  // the signal stays visible without polluting the violation count.
+  'memory_edit',
 ]);
 
 const FEED_CAP = 250;

@@ -24,6 +24,7 @@ from ..paths import intent_path
 from ..schema.constraints import (
     CompiledPolicy,
     default_policy,
+    is_memory_edit_path,
     merge,
     parse_active_rules,
 )
@@ -106,6 +107,7 @@ class ConstraintsWorker:
             return
 
         violations: list[tuple[str, str, str, str]] = []
+        memory_edits: list[str] = []
 
         for path in target_paths(ev):
             pat = policy.immutable.violation_for(path)
@@ -118,6 +120,15 @@ class ConstraintsWorker:
                 ))
             pat = policy.path.violation_for(path)
             if pat:
+                # Memory-file edits land outside the watched project
+                # root by design (they live under ~/.claude/projects/
+                # <ph>/memory/**). Surface as a memory_edit signal
+                # instead of a constraint_violation so the dashboard
+                # reflects the activity without conflating it with
+                # policy events.
+                if is_memory_edit_path(path):
+                    memory_edits.append(path)
+                    continue
                 violations.append((
                     "path-policy",
                     pat,
@@ -135,6 +146,21 @@ class ConstraintsWorker:
                     f"Bash command matched forbidden pattern: {cmd[:200]}",
                     self._lookup_rule(policy, "bash", pat),
                 ))
+
+        if memory_edits and getattr(self._daemon, "live", None) is not None:
+            for path in memory_edits:
+                try:
+                    await self._daemon.live.publish(
+                        fs.session_id,
+                        fs.project_hash,
+                        "memory_edit",
+                        {
+                            "tool": ev.tool_name,
+                            "path": path,
+                        },
+                    )
+                except Exception:
+                    log.exception("live publish failed (memory_edit)")
 
         if not violations:
             return

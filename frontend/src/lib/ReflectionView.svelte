@@ -294,6 +294,16 @@
               <span class="bar-n">{r.n}</span>
             </div>
           {/each}
+          {#if data.memory_edits != null}
+            <div
+              class="bar-row bar-row-meta"
+              title="edits to ~/.claude/projects/<ph>/memory/**"
+            >
+              <span class="bar-lbl">memory edits</span>
+              <span class="meta-text">surfaced separately, not counted as violations</span>
+              <span class="bar-n">{data.memory_edits}</span>
+            </div>
+          {/if}
         </div>
         <div class="footnote">
           How you responded when Warden surfaced a constraint violation. Many "new" → events going unread; many "dismissed" → noise mismatch worth investigating.
@@ -574,6 +584,25 @@
     color: var(--muted-deep);
     font-size: 11px;
     line-height: 1.55;
+  }
+
+  /* Memory-edits row shares the bar-row column rhythm so it slots
+     into the .bars list without reading as a separate block. The
+     middle column is descriptive text instead of a fill bar (memory
+     edits don't have a status partition to chart), and a soft
+     dashed divider above signals "still part of this card, but a
+     different kind of count." */
+  .bar-row-meta {
+    margin-top: 6px;
+    padding-top: 8px;
+    border-top: 1px dashed var(--border);
+  }
+  .bar-row-meta .bar-lbl { color: var(--muted); }
+  .bar-row-meta .bar-n { color: var(--ok); font-weight: 600; }
+  .meta-text {
+    color: var(--muted-deep);
+    font-size: 11px;
+    font-style: italic;
   }
 
   .empty {

@@ -10,7 +10,11 @@ from fastapi.testclient import TestClient
 
 from modmcp.daemon.app import create_app
 from modmcp.paths import intent_path, project_hash
-from modmcp.schema.constraints import default_policy, parse_active_rules
+from modmcp.schema.constraints import (
+    default_policy,
+    is_memory_edit_path,
+    parse_active_rules,
+)
 from modmcp.schema.events import TranscriptEvent
 from modmcp.schema.intent import empty_intent, save_intent
 
@@ -36,6 +40,38 @@ def test_parse_active_rules_forbidden_bash() -> None:
 def test_default_policy_blocks_force_push() -> None:
     policy = default_policy()
     assert policy.bash.violation_for("git push --force origin main") is not None
+
+
+# ---------- memory-edit path detection ----------
+
+
+def test_memory_edit_path_matches_windows() -> None:
+    p = r"C:\Users\user\.claude\projects\C--warden\memory\foo.md"
+    assert is_memory_edit_path(p)
+
+
+def test_memory_edit_path_matches_unix() -> None:
+    p = "/home/glenn/.claude/projects/-home-glenn-warden/memory/notes.md"
+    assert is_memory_edit_path(p)
+
+
+def test_memory_edit_path_matches_nested() -> None:
+    p = "/home/u/.claude/projects/proj/memory/sub/dir/file.md"
+    assert is_memory_edit_path(p)
+
+
+def test_memory_edit_path_rejects_non_memory() -> None:
+    assert not is_memory_edit_path(
+        r"C:\Users\user\.claude\projects\C--warden\todos\foo.json"
+    )
+
+
+def test_memory_edit_path_rejects_project_root_edit() -> None:
+    assert not is_memory_edit_path(r"C:\warden\src\modmcp\app.py")
+
+
+def test_memory_edit_path_rejects_empty() -> None:
+    assert not is_memory_edit_path("")
 
 
 def test_default_policy_blocks_rm_rf_root() -> None:

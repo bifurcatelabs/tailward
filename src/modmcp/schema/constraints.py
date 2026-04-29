@@ -106,6 +106,24 @@ def _match_glob(pattern: str, path: str) -> bool:
     return fnmatch.fnmatch(path, pattern)
 
 
+def is_memory_edit_path(path: str) -> bool:
+    """Detect edits to Claude Code's per-project memory directory.
+
+    Memory files live at ``~/.claude/projects/<sanitized>/memory/**``.
+    They sit outside the watched project root by design, so a path-only
+    check would otherwise treat them as constraint violations.
+
+    The constraints worker uses this to branch the path-policy check —
+    matching paths emit a ``memory_edit`` live event instead of a
+    ``constraint_violation``, so the dashboard surfaces the signal
+    without polluting the violation count.
+    """
+    if not path:
+        return False
+    norm = path.replace("\\", "/")
+    return _match_glob("**/.claude/projects/*/memory/**", norm)
+
+
 # ---------------------------------------------------------------------------
 # Heuristic parser (used when no LLM is available / as a fallback).
 # ---------------------------------------------------------------------------

@@ -71,6 +71,13 @@ EVENT_TYPES: frozenset[str] = frozenset(
         # sanitized; this alert surfaces the redacted match so the
         # user can verify + rotate. See modmcp.schema.exfiltration.
         "exfiltration_alert",
+        # Edit landed in a Claude Code memory file
+        # (``~/.claude/projects/<ph>/memory/**``). Path-policy would
+        # otherwise treat this as a constraint_violation since the
+        # path falls outside the watched project root. The constraints
+        # worker emits this event instead so the signal stays visible
+        # without polluting the violation count.
+        "memory_edit",
     }
 )
 
