@@ -36,6 +36,16 @@
 
   $effect(() => { load(); });
 
+  // Re-fetch when LiveStore signals a violation-status change
+  // (ack / dismiss in the Session feed). Without this the response
+  // cadence card drifts behind the ledger until the user reloads.
+  $effect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => { load(); };
+    window.addEventListener('reflection:refresh', handler);
+    return () => window.removeEventListener('reflection:refresh', handler);
+  });
+
   // ---------- helpers ----------
   function quantiles(arr, qs) {
     if (!arr || arr.length === 0) return qs.map(() => null);

@@ -316,10 +316,22 @@ class LiveStore {
 
   async ackViolation(id) {
     await fetch(`/p/${this.#ph}/violations/${id}/ack`, { method: 'POST' });
+    this.#dispatchReflectionRefresh();
   }
 
   async dismissViolation(id) {
     await fetch(`/p/${this.#ph}/violations/${id}/dismiss`, { method: 'POST' });
+    this.#dispatchReflectionRefresh();
+  }
+
+  // Notify ReflectionView (or any listener) that violation-status
+  // counts have changed and any cached reflection data should be
+  // re-fetched. Fired after ack/dismiss completes — the response
+  // cadence card otherwise drifts behind the ledger until the user
+  // manually reloads.
+  #dispatchReflectionRefresh() {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('reflection:refresh'));
   }
 
   async rubricFeedback(scoreId, verdict) {
