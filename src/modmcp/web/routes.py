@@ -10,13 +10,11 @@ intent editor was retired alongside the v1.1 audit pages.
 
 from __future__ import annotations
 
-import re
 from collections import defaultdict
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi import Path as PathParam
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -154,34 +152,6 @@ def mount_web(app: FastAPI) -> None:
                 "v2_bundle_js": bundle_js,
                 "v2_bundle_css": bundle_css,
             },
-        )
-
-    @app.get("/p/{ph}/live/{session_id}/v2")
-    async def live_session_v2_legacy(
-        ph: str = PathParam(..., pattern=r"^[0-9a-f]{12}$"),
-        session_id: str = PathParam(..., pattern=r"^[0-9a-f-]{8,}$"),
-    ) -> RedirectResponse:
-        """Backward-compat redirect: the Svelte chassis used to live at
-        ``/v2``; in v2.0.0 it became the default. 308 keeps any bookmarks
-        working without a content-type ambiguity."""
-        # Defensive re-validation, with the matched substring rebound
-        # to fresh variables. FastAPI's Path() pattern argument
-        # already rejects malformed inputs before this body runs, but
-        # CodeQL's data-flow analysis only treats a value as
-        # sanitized if it flows through a *transformation* — a bare
-        # `if not re.fullmatch(...): raise` doesn't change the
-        # variable, so the original tainted ph / session_id still
-        # reaches the f-string sink. Pulling the match's .group()
-        # into new variables (clean_ph, clean_sid) gives CodeQL a
-        # visible sanitizer step.
-        m_ph = re.fullmatch(r"[0-9a-f]{12}", ph)
-        m_sid = re.fullmatch(r"[0-9a-f-]{8,}", session_id)
-        if m_ph is None or m_sid is None:
-            raise HTTPException(422, "invalid path parameters")
-        clean_ph = m_ph.group()
-        clean_sid = m_sid.group()
-        return RedirectResponse(
-            url=f"/p/{clean_ph}/live/{clean_sid}", status_code=308
         )
 
     @app.get("/p/{ph}/live/{session_id}/stream")
