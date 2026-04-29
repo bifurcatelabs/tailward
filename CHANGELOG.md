@@ -5,6 +5,78 @@ All notable changes to warden are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.3.0] — 2026-04-29
+
+Pass 3 / item 8 features — permission-mode transitions, away-summary
+captures, tool interruptions, and a Reflection-view tool-calls-by-mode
+aggregate. Plus security follow-ups (CodeQL alerts triaged + fixed),
+display-precision bug fixes, and copy/brand polish.
+
+### Added
+
+- **Permission-mode timeline in the live feed.** Claude Code emits
+  dedicated `permission-mode` events when the user changes mode via
+  Shift+Tab (default / acceptEdits / bypassPermissions / plan).
+  Tailward now surfaces a `permission_mode_change` chip showing
+  `previous → current` so the session timeline reflects how trust
+  posture shifted across the session.
+- **Away-summary chips in the live feed.** Claude Code emits
+  `type: "system"`, `subtype: "away_summary"` events with structured
+  recap text (goal / current task / next action) when it observes
+  user idle. Surfaced as a feed chip with expandable body.
+- **Tool-interrupted events.** `toolUseResult.interrupted: true` on
+  a tool_result fires a `tool_interrupted` chip with the resolved
+  tool name (via a cached tool_use_id → name map in FileState).
+- **Reflection-view "tool calls by permission mode" panel.** Pivots
+  tool_call events into a tool × mode matrix with a "declined"
+  column from tool_interrupted events. New `tool_calls_by_mode(ph)`
+  ledger query; extended `/v2/reflection/{ph}` response.
+
+### Changed
+
+- **`tool_call` LiveBus events carry `permission_mode`** in payload,
+  falling back to FileState carry-forward state when the event
+  itself lacks the field. Required because assistant events (where
+  tool_use blocks live) do not carry `permissionMode` in Claude
+  Code 2.1.x — only dedicated `permission-mode` events and a
+  fraction of user events do.
+- **Cache hit ratio display precision** bumped from 0 to 1 decimal
+  place. Heavy prompt caching produces 0.99-0.998 ratios that
+  `.toFixed(0)` was collapsing to "100%" in both the cell value
+  and uplot hover. Visible variance restored.
+- **README framing.** Dropped narrator-y "we" / "whole point of
+  this tool" in favor of direct design statements. "Qwen"
+  generalized to "local LLM" with Qwen 2.5/3 as one example
+  (Gemma, Llama 3.x, Mistral, Phi all work). Config keys retain
+  the `qwen_` prefix as a historical artifact (renaming would
+  break existing user configs).
+- **Header brand.** TopStrip + HeaderBar show `tailward 2.3.0`.
+- **LLM Profiles + Platform view header copy** tightened.
+
+### Fixed
+
+- **Closed-session badge respects resume past close.** The close
+  worker stamps `session_close.consolidation_status` when a session
+  goes idle past `session_idle_seconds`; previously that status
+  stuck if the user resumed the session, leaving the badge visible
+  on a clearly-active session. `live_state` now compares
+  `last_seen_at` vs. `closed_at` and reports null close_status
+  when activity follows the close.
+- **GitHub Actions workflow least-privilege.** Added explicit
+  `permissions: contents: read` at the top level. Previous default
+  broad GITHUB_TOKEN write permissions were unnecessary for a
+  test-only workflow.
+- **`/p/{ph}/live/{session_id}/v2` redirect path-param validation.**
+  FastAPI `Path()` pattern argument validates `ph` (12-char hex
+  hash) and `session_id` (UUID-ish); defensive inline `re.fullmatch`
+  re-check inside the function so CodeQL's data-flow analysis
+  recognizes the sanitizer between user input and the redirect URL.
+- **`tool_call` permission_mode tagging.** Initial implementation
+  read `permission_mode` only off the immediate event; assistant
+  events don't carry the field, so every tool_call published as
+  null and the new Reflection-view matrix dumped everything into
+  an "untagged" column. Carry-forward fallback fixes the chain.
+
 ## [v2.2.0] — 2026-04-28
 
 Pre-publish polish + schema-fragility audit. UX refinements across all
