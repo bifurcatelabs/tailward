@@ -21,8 +21,8 @@ Solo-dev work; expect rough edges. Issues and discussion welcome — see [CONTRI
 - **LiveBus + SSE web UI.** Every assistant turn, tool call, violation, scope snapshot, and rubric score streams in real time to a localhost browser view. Polling fallback when SSE is unavailable.
 - **Constraints worker.** Parses "Active Rules" from `intent.md` into path-glob / immutable-file / forbidden-bash policies and flags violations against every `tool_use` event. Ack / dismiss from the UI. Ships a baseline policy out of the box covering destructive commands (force-push, `rm -rf /`), mute-the-alarm moves (`--no-verify`, test/lint tools silenced with `|| true`, `pytest --deselect`), target-gaming moves (`pytest --override-ini`, `--cov-fail-under=0`, `coverage --omit`), and immutable measurement artifacts (`.github/workflows/**`, `.coveragerc`, `codecov.yml`, `tox.ini`, `.pre-commit-config.yaml`, `jest.config.*`). See [`AUDIT_MAP.md`](AUDIT_MAP.md) for the full mapping.
 - **Scope worker.** Per-session counters (files touched, diff bytes, tool-kind breakdown) compared to a rolling baseline from the last N completed sessions. Emits `scope_creep` events when you blow past it. Mode-aware — exploration / yolo modes don't fire creep events that don't apply to them.
-- **Rubric worker.** Sampled Qwen JSON scoring across four dimensions (invariants awareness, uncertainty honesty, maintainability, provenance) — triggered on cadence, scope creep, and first-person completion claims. "Disagree" button writes feedback back to the ledger.
-- **Session-close consolidator.** After configurable idle time, one Qwen call aggregates all collected signal into an 8-mode report card.
+- **Rubric worker.** Sampled local-LLM JSON scoring across four dimensions (invariants awareness, uncertainty honesty, maintainability, provenance) — triggered on cadence, scope creep, and first-person completion claims. "Disagree" button writes feedback back to the ledger.
+- **Session-close consolidator.** After configurable idle time, one local-LLM call aggregates all collected signal into an 8-mode report card.
 - **Synthesized-turn detection.** Claude Code's `/compact` persists its summary as a `type: "user"` JSONL row with `isCompactSummary: true`. The live feed surfaces these as a distinct `compact_summary` event so they don't blend in with typed user turns.
 
 **Reflection — am I behaving?**
@@ -35,7 +35,7 @@ Solo-dev work; expect rough edges. Issues and discussion welcome — see [CONTRI
 
 - **In-band turn metrics.** TTFT, output TPS, cache hit ratio derived from JSONL timestamps + the `usage` block. No synthetic traffic — every metric is from a real prompt the user actually sent.
 - **Local LLM probe worker.** Periodic probes of the OpenAI-compatible endpoint tailward talks to. Deliberately *not* probing `api.anthropic.com` — that mostly measures the user's ISP and CDN edge, not Anthropic's service.
-- **LLM call budget panel.** Per-call-kind aggregates of tailward's own Qwen calls (max_tokens vs avg completion, finish_reason distribution) so you can spot truncation before it costs you.
+- **LLM call budget panel.** Per-call-kind aggregates of tailward's own local-LLM calls (max_tokens vs avg completion, finish_reason distribution) so you can spot truncation before it costs you.
 - **Transparency panel.** Per-call-kind config (model, sampler params, max_tokens) plus the verbatim system + user prompt templates tailward sends. Read directly from the worker constants — drift between display and runtime is impossible.
 
 **Handoff (opt-in active mode — _unmaintained_)**
@@ -52,11 +52,11 @@ tailward has one top-level knob: `warden_mode` in `~/.modmcp/config.toml`.
 | **`passive`** (default) | no | no | **yes** | yes | **supported** |
 | `active` | yes | yes | yes | yes | **opt-in, unmaintained** — see below |
 
-> **`active` is an opt-in, user-owned surface.** The injection + drift-corrective path is the original v1 design. It functions, but after the passive-first pivot we stopped shaping it into a paved path: the corrective-queue UI is minimal, regression coverage is thin, the preamble contents are not tuned against anyone's specific handoffs, and we don't ship fixes here unless they're blocking the passive layer. What's worth pushing into the preamble — and whether the drift loop fits how you work at all — is a call we leave to you. Treat `active` as scaffolding you own, not a daily driver. The passive audit layer is the supported surface.
+> **`active` is an opt-in, user-owned surface.** The injection + drift-corrective path is the original v1 design. It functions, but after the passive-first pivot the active surface stopped being maintained as a paved path: the corrective-queue UI is minimal, regression coverage is thin, the preamble contents aren't tuned against any specific handoff. Fixes here only land when they're blocking the passive layer. What's worth pushing into the preamble — and whether the drift loop fits how you work at all — is a call for you to make. Treat `active` as scaffolding you own, not a daily driver. The passive audit layer is the supported surface.
 
 ### Why passive is the default
 
-The whole point of this tool is to tell you whether your coding agent is behaving. That measurement is only trustworthy if the act of measuring doesn't shape the thing being measured. The original v1 design injected preambles and corrective turns into the prompt stream, which had three problems we only saw clearly once we started dogfooding:
+Passive observation is the design constraint. If the act of measuring shapes the thing being measured, the measurement isn't reliable. The original v1 design injected preambles and corrective turns into the prompt stream, which had three problems that only surfaced after sustained dogfooding:
 
 1. **Observer effect.** Any content tailward injects becomes part of the agent's context and changes the next turn. A "drift score" measured on a session tailward is actively steering is really measuring tailward's own intervention quality, not the agent's baseline behavior. You can't A/B your own tooling if the A and B arms can't be isolated.
 2. **Model trust.** When the audit layer is invisible to the session, the agent has no incentive to perform for the audit. You get honest trajectories. The second a model can see it's being scored, the scoring task competes with the actual task.
@@ -76,7 +76,7 @@ So tailward is local-first, top to bottom:
 - **The scoring LLM is yours too.** tailward talks to an OpenAI-compatible endpoint at `http://127.0.0.1:<port>/v1` — llama.cpp, Ollama, LM Studio, vLLM, whatever you prefer. There is deliberately no fallback to a hosted API: if the endpoint is unreachable, tailward skips the LLM-judged checks and keeps the deterministic ones running.
 - **Deterministic first, LLM for depth.** The constraints worker (path / immutable-file / forbidden-bash), scope worker, and claim-grep path all run with zero LLM present — those are the load-bearing "is this session in bounds?" signals and they're regex-fast on CPU. The local model adds the softer trust dimensions (invariants awareness, uncertainty honesty, maintainability, provenance) and the end-of-session 8-mode consolidation. You can run tailward fully airgapped and still see live violations, scope creep, and claim verdicts; the rubric bar and report card just stay blank until a model comes online.
 
-The cost of this posture is one extra piece of infra (a local model server, eventually). The payoff is that the audit lives inside the same trust boundary as the thing being audited — and nothing you care about ends up in someone else's log pipeline.
+The cost: running one extra local service (an OpenAI-compatible LLM endpoint) when you want the LLM-judged dimensions — without one, the deterministic checks still run. The payoff: the audit lives inside the same trust boundary as the thing being audited, and nothing you care about ends up in someone else's log pipeline.
 
 ## Getting started
 
@@ -84,7 +84,7 @@ The cost of this posture is one extra piece of infra (a local model server, even
 
 - Python 3.12+ (Windows, macOS, Linux).
 - A running Claude Code install that writes transcripts to `~/.claude/projects/` (the default).
-- Optional but recommended: a local OpenAI-compatible LLM endpoint (llama.cpp, Ollama, LM Studio, vLLM) listening at `http://127.0.0.1:8080/v1`. See [Qwen / local LLM endpoint](#qwen--local-llm-endpoint) below for what degrades gracefully without one.
+- Optional but recommended: a local OpenAI-compatible LLM endpoint (llama.cpp, Ollama, LM Studio, vLLM, etc.) listening at `http://127.0.0.1:8080/v1`. See [Local LLM endpoint](#local-llm-endpoint) below for what degrades gracefully without one.
 
 ### Install
 
@@ -182,7 +182,7 @@ warden daemon status                # is it running?
 warden daemon logs -n 200           # tail the daemon log
 warden daemon run                   # foreground mode for debugging
 warden handoff                      # re-capture intent (opens $EDITOR)
-warden handoff --auto               # same, but Qwen-synthesized (needs LLM up)
+warden handoff --auto               # same, but LLM-synthesized (needs the local LLM up)
 warden handoff --no-edit            # skip $EDITOR
 warden link                         # symlink ~/.modmcp/.../intent.md into <repo>/.modmcp/
 warden version
@@ -210,7 +210,7 @@ All routes live under `http://127.0.0.1:7878/`. Every project gets a 12-char has
 | `/v2/reflection/sessions` | Cross-project past-sessions list |
 | `/v2/reflection/sessions/<sid>` | Per-session deep view (8-mode card + rubric trajectory) |
 | `/llm-profiles` | Per-call-kind config + verbatim prompts (Platform transparency panel) |
-| `/llm-metrics/summary` | Per-call-kind aggregate of every Qwen call |
+| `/llm-metrics/summary` | Per-call-kind aggregate of every local-LLM call |
 | `/probes/recent` | Recent local-LLM probe results |
 
 ## CLI
@@ -335,16 +335,16 @@ Environment overrides:
 - `MODMCP_HOME` — relocate the state directory (default `~/.modmcp`). The internal package and state directory keep the historical `modmcp` name; the public name is `tailward` (PyPI / GitHub) and the CLI binary is `warden`. Eventual goal is to align all three names — see CONTRIBUTING.md.
 - `CLAUDE_PROJECTS_ROOT` — relocate the Claude Code transcript root (default `~/.claude/projects`).
 
-## Qwen / local LLM endpoint
+## Local LLM endpoint
 
-tailward expects an OpenAI-compatible HTTP endpoint on `localhost` (see [Why local-first](#why-local-first) for the reasoning). Any of these work:
+tailward expects an OpenAI-compatible HTTP endpoint on `localhost` (see [Why local-first](#why-local-first) for the reasoning). Any local LLM that exposes that interface works — Qwen 2.5 / 3, Gemma, Llama 3.x, Mistral, Phi, and others. The config keys below carry a `qwen_` prefix as a historical artifact (Qwen was the first model used for development); the values aren't model-specific. Some servers that expose the interface:
 
 - [llama.cpp server](https://github.com/ggml-org/llama.cpp) with an OpenAI-compat flag
-- [Ollama](https://ollama.com/) — set `qwen_endpoint = "http://127.0.0.1:11434/v1"`, `qwen_model = "qwen2.5:7b"`
+- [Ollama](https://ollama.com/) — e.g. `qwen_endpoint = "http://127.0.0.1:11434/v1"`, `qwen_model = "qwen2.5:7b"` or `qwen_model = "gemma3:7b"`
 - LM Studio's local server
 - `vllm` with `--served-model-name`
 
-Pointing `qwen_endpoint` at a remote host isn't explicitly blocked, but it defeats the audit-integrity argument; tailward will happily send your transcripts wherever you tell it to.
+Pointing `qwen_endpoint` at a remote host isn't explicitly blocked — but doing so weakens the audit-integrity argument: data flows wherever the URL points, and the local-only guarantee no longer holds. Local endpoints are the supported configuration.
 
 All LLM calls serialize through a single queue so tailward doesn't contend with other GPU workloads. Distinct call kinds are routed with their own token budgets and thinking-mode settings:
 
