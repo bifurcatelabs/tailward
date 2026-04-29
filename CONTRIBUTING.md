@@ -19,8 +19,8 @@ Warden is a local-first audit overlay for AI coding sessions. It's solo-develope
 ## Development setup
 
 ```bash
-git clone <repo-url>
-cd warden
+git clone https://github.com/bifurcatelabs/tailward.git
+cd tailward
 python -m venv .venv
 # Linux/macOS: source .venv/bin/activate
 # Windows:     .venv\Scripts\activate

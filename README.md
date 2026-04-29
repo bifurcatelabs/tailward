@@ -87,12 +87,13 @@ The cost of this posture is one extra piece of infra (a local model server, even
 ### Install
 
 ```bash
-pip install -e .
-# or
-pipx install -e .
+pipx install tailward
+# or, install from the latest commit on GitHub:
+pipx install git+https://github.com/bifurcatelabs/tailward.git
+# or, for development from a local clone — see CONTRIBUTING.md
 ```
 
-First run creates `~/.modmcp/` for state (config, logs, ledger, per-project intent). Override with `MODMCP_HOME=/path/to/state`.
+First run creates `~/.modmcp/` for state (config, logs, ledger, per-project intent). Override with `MODMCP_HOME=/path/to/state`. The state-dir name is internal plumbing held over from the project's earlier name; user-facing surfaces use `tailward` (PyPI) and `warden` (CLI).
 
 ### Minimal passive setup (observe-only, no Claude Code changes)
 
