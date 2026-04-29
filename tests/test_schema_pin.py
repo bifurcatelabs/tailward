@@ -401,6 +401,72 @@ def test_permission_mode_extracted_from_dedicated_event() -> None:
     assert ev.permission_mode == "default"
 
 
+def test_interrupted_extracted_from_tool_use_result() -> None:
+    """``toolUseResult.interrupted: true`` is the closest signal Claude
+    Code exposes to "user denied a tool call." Pinning the field name
+    + nesting so a future move (e.g., flattening to top-level
+    ``interrupted``) trips this test rather than silently dropping
+    the audit signal."""
+    line = _line(
+        {
+            "type": "user",
+            "sessionId": "sess-1",
+            "cwd": "C:/warden",
+            "message": {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu_42",
+                        "content": "user interrupted",
+                    }
+                ],
+            },
+            "toolUseResult": {
+                "interrupted": True,
+                "stdout": "",
+                "stderr": "",
+                "isImage": False,
+            },
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.interrupted is True
+    assert ev.tool_use_id == "tu_42"
+
+
+def test_tool_use_id_extracted_from_assistant_emit() -> None:
+    """The tool emit (assistant message with tool_use block) carries
+    the tool_use_id as ``id`` on the block. The dispatcher caches
+    this id → tool_name mapping so a later interrupted result can
+    resolve which tool was declined."""
+    line = _line(
+        {
+            "type": "assistant",
+            "sessionId": "sess-1",
+            "cwd": "C:/warden",
+            "message": {
+                "role": "assistant",
+                "id": "msg_01",
+                "model": "claude-opus-4-7",
+                "content": [
+                    {
+                        "type": "tool_use",
+                        "id": "tu_99",
+                        "name": "Bash",
+                        "input": {"command": "ls"},
+                    }
+                ],
+            },
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.tool_name == "Bash"
+    assert ev.tool_use_id == "tu_99"
+
+
 def test_permission_mode_absent_when_field_missing() -> None:
     """Older Claude Code versions or wrapper events may not carry
     ``permissionMode``. The field must default to None (not crash, not

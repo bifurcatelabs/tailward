@@ -62,6 +62,20 @@ class TranscriptEvent:
     # didn't carry the field (older Claude Code versions, some wrapper
     # event types).
     permission_mode: str | None = None
+    # ``True`` when the user interrupted/declined a tool call. Lives on
+    # the JSONL line's top-level ``toolUseResult.interrupted`` field on
+    # tool_result events. The dispatcher fires a ``tool_interrupted``
+    # live event for these — the closest signal Claude Code exposes to
+    # an explicit "user denied" decision (see audit findings in
+    # memory/project_notes_04282026_passes.md).
+    interrupted: bool = False
+    # Tool-use ID extracted from the content block on either side of a
+    # tool call. On the assistant emit, it's the ``id`` of the tool_use
+    # block; on the user-side result, it's the ``tool_use_id`` linking
+    # back. The dispatcher uses it to resolve a tool name on
+    # interrupted results (where the result block carries only the
+    # id, not the name).
+    tool_use_id: str | None = None
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -159,13 +173,29 @@ def parse_line(line: str) -> TranscriptEvent | None:
         tool_input = obj.get("input") or (message or {}).get("input")
     elif kind == "tool_result":
         tool_output = text or str(obj.get("content", ""))
+    tool_use_id: str | None = None
+    if kind == "tool_use":
+        bid = obj.get("id") or (message or {}).get("id")
+        if isinstance(bid, str):
+            tool_use_id = bid
     elif kind in ("user_message", "assistant_message") and isinstance(message, dict):
         content = message.get("content")
         if isinstance(content, list):
             for block in content:
-                if isinstance(block, dict) and block.get("type") == "tool_use":
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type")
+                if btype == "tool_use":
                     tool_name = block.get("name")
                     tool_input = block.get("input")
+                    bid = block.get("id")
+                    if isinstance(bid, str):
+                        tool_use_id = bid
+                    break
+                if btype == "tool_result":
+                    tuid = block.get("tool_use_id")
+                    if isinstance(tuid, str):
+                        tool_use_id = tuid
                     break
 
     message_id = None
@@ -197,6 +227,9 @@ def parse_line(line: str) -> TranscriptEvent | None:
         str(permission_mode_raw) if isinstance(permission_mode_raw, str) else None
     )
 
+    tur = obj.get("toolUseResult")
+    interrupted = bool(tur.get("interrupted")) if isinstance(tur, dict) else False
+
     return TranscriptEvent(
         raw=obj,
         kind=kind,
@@ -214,6 +247,8 @@ def parse_line(line: str) -> TranscriptEvent | None:
         synthesized=synthesized,
         synthesis_kind=synthesis_kind,
         permission_mode=permission_mode,
+        interrupted=interrupted,
+        tool_use_id=tool_use_id,
     )
 
 

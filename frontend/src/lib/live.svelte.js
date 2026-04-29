@@ -46,6 +46,12 @@ const KNOWN_EVENT_TYPES = new Set([
   // the user was driving vs idle. The full text is available on
   // expand. See memory: project_notes_04282026_passes.md.
   'away_summary',
+  // User declined / interrupted a tool call. Detected via
+  // `toolUseResult.interrupted: true` on the JSONL line — the closest
+  // signal Claude Code exposes to an explicit "user denied" decision.
+  // Rare in practice but real audit signal when it fires. Tool name
+  // resolved via the dispatcher's tool_use_id → name cache.
+  'tool_interrupted',
 ]);
 
 const FEED_CAP = 250;

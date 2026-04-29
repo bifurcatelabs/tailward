@@ -52,6 +52,7 @@ class FileState:
         "project_path",
         "project_hash",
         "last_permission_mode",
+        "tool_use_names",
     )
 
     def __init__(self, path: Path) -> None:
@@ -67,6 +68,13 @@ class FileState:
         # to session_state — daemon restart loses one transition at most,
         # which is acceptable.
         self.last_permission_mode: str | None = None
+        # In-memory map of tool_use_id -> tool_name for resolving the
+        # tool name on a later tool_result (specifically for interrupted
+        # results — the result's content block has only the tool_use_id,
+        # not the name). Bounded to ~200 entries so a long session
+        # doesn't grow unbounded; FIFO eviction is fine because tool
+        # results almost always arrive within a few events of the emit.
+        self.tool_use_names: dict[str, str] = {}
 
 
 def _sanitize_to_path(sanitized: str) -> str:

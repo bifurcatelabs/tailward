@@ -36,6 +36,7 @@
     turn_metric: 'perf',
     permission_mode_change: 'permission',
     away_summary: 'away',
+    tool_interrupted: 'declined',
   };
 
   let p = $derived(event.payload || {});
@@ -239,6 +240,15 @@
           onclick={toggleExpanded}
         >{p.content}</button>
       {/if}
+    {:else if kind === 'tool_interrupted'}
+      <div class="row">
+        {#if p.tool}
+          <strong>{p.tool}</strong>
+        {/if}
+        <span class="muted small">
+          tool call interrupted{p.permission_mode ? ` (${p.permission_mode} mode)` : ''}
+        </span>
+      </div>
     {:else if kind === 'turn_metric'}
       <div class="row">
         <span class="muted">turn {p.turn_idx}</span>
@@ -332,6 +342,16 @@
     color: #8a96a8;
     border-color: rgba(102,117,140,0.25);
     border-style: dotted;
+  }
+  /* tool_interrupted is the rare explicit "user denied" decision —
+     warm warn palette (matches scope_creep) so it reads as a notable
+     audit event without being alarming. Distinct from constraint_violation
+     (red/error) since interruptions aren't violations, they're
+     decisions. */
+  .chip-tool_interrupted {
+    background: rgba(230,192,84,0.08);
+    color: var(--warn);
+    border-color: rgba(230,192,84,0.25);
   }
   .mode-prev, .mode-next {
     font-family: var(--mono);

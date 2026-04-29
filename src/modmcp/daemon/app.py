@@ -287,7 +287,12 @@ def create_app() -> FastAPI:
             # Tool-call markers fire whenever a tool_use is present, whether
             # the event is a bare ``tool_use`` or an assistant message that
             # wraps the block in its content list. Real Claude Code only
-            # emits the latter.
+            # emits the latter. ``permission_mode`` is captured from the
+            # event itself (not the carry-forward FileState value) so the
+            # aggregate breakdown reflects what mode was actually active
+            # at the moment of the tool emit. The tool_use_id → name
+            # mapping is cached so a later interrupted tool_result can
+            # resolve the original tool name.
             if fs.session_id and fs.project_hash and ev.tool_name:
                 await daemon.live.publish(
                     fs.session_id,
@@ -296,6 +301,44 @@ def create_app() -> FastAPI:
                     {
                         "tool": ev.tool_name,
                         "input_preview": _shorten_tool_input(ev.tool_input),
+                        "permission_mode": ev.permission_mode,
+                    },
+                )
+                if ev.tool_use_id:
+                    fs.tool_use_names[ev.tool_use_id] = ev.tool_name
+                    # Bound the cache so a long session doesn't grow
+                    # unbounded. Tool results almost always arrive
+                    # within a few events of the emit, so 256 entries
+                    # is comfortably more than needed.
+                    if len(fs.tool_use_names) > 256:
+                        # FIFO eviction: drop the oldest 32 entries
+                        # in one pass to amortize the cost.
+                        oldest = list(fs.tool_use_names.keys())[:32]
+                        for k in oldest:
+                            fs.tool_use_names.pop(k, None)
+
+            # Tool interrupted: the user declined or interrupted a tool
+            # call. Claude Code flags this on the tool_result event via
+            # ``toolUseResult.interrupted: true`` at the JSONL top level.
+            # The closest signal Claude Code exposes to an explicit
+            # "user denied" decision; rare in practice but a real audit
+            # signal when it happens. Tool name resolved via the cached
+            # map populated on the original emit.
+            if (
+                fs.session_id
+                and fs.project_hash
+                and ev.interrupted
+                and ev.tool_use_id
+            ):
+                tool_name = fs.tool_use_names.pop(ev.tool_use_id, None)
+                await daemon.live.publish(
+                    fs.session_id,
+                    fs.project_hash,
+                    "tool_interrupted",
+                    {
+                        "tool": tool_name,
+                        "tool_use_id": ev.tool_use_id,
+                        "permission_mode": ev.permission_mode,
                     },
                 )
 
