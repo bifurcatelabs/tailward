@@ -4,6 +4,8 @@
   import TurnMetricsPanel from './TurnMetricsPanel.svelte';
   import LlmBudgetPanel from './LlmBudgetPanel.svelte';
   import LlmProfilesPanel from './LlmProfilesPanel.svelte';
+  import StopReasonsPanel from './StopReasonsPanel.svelte';
+  import ClaimVerificationPanel from './ClaimVerificationPanel.svelte';
   import ProjectQuickPicker from './ProjectQuickPicker.svelte';
 
   let { ph } = $props();
@@ -16,13 +18,17 @@
       <ProjectQuickPicker {ph} />
     </div>
     <p>
-      in-band metrics from real sessions and probes of the local LLM.
-      <strong>variance and trend</strong> — read it how you want.
+      third-party-provider-facing signals — Anthropic-emitted metrics
+      from real sessions, plus probes of the local LLM stack that
+      audits them. <strong>variance and trend</strong> — read it how
+      you want.
     </p>
   </header>
 
   <PathDiagram />
   <TurnMetricsPanel {ph} />
+  <StopReasonsPanel {ph} />
+  <ClaimVerificationPanel {ph} />
   <LlmProfilesPanel />
   <LlmBudgetPanel />
   <ProbePanel {ph} />

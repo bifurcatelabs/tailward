@@ -150,17 +150,6 @@
     ];
   });
 
-  let verificationRows = $derived.by(() => {
-    const v = data?.verification;
-    if (!v) return [];
-    const total = (v.verified || 0) + (v.contradicted || 0) + (v.unverifiable || 0);
-    return [
-      { label: 'verified',     n: v.verified || 0,     total, kind: 'ok' },
-      { label: 'contradicted', n: v.contradicted || 0, total, kind: 'err' },
-      { label: 'unverifiable', n: v.unverifiable || 0, total, kind: 'muted' },
-    ];
-  });
-
   // Tool-calls-by-permission-mode matrix. Rows = tool kinds, columns
   // = modes (default / acceptEdits / bypassPermissions / plan) +
   // an "interrupted" column. Computed by pivoting the flat
@@ -218,12 +207,13 @@
       totals: t.totals || { tool_calls: 0, interruptions: 0 },
     };
   });
+
 </script>
 
 <section class="view">
   <header class="hd">
     <h2>reflection</h2>
-    <p>your patterns across typed prompts — pacing, intent, verification habits.</p>
+    <p>your patterns — pacing, prompt shape, response cadence, mode posture, and self-rubric.</p>
     <button class="reload" onclick={load} disabled={loading} title="refresh">↻</button>
   </header>
 
@@ -322,7 +312,7 @@
 
       <!-- TOOL CALLS BY PERMISSION MODE -->
       <div class="card card-wide">
-        <h3>tool calls by permission mode</h3>
+        <h3>tool calls by user-selected permission mode</h3>
         {#if toolModeMatrix}
           <table class="tool-mode">
             <thead>
@@ -350,33 +340,13 @@
           </table>
           <div class="footnote">
             {toolModeMatrix.totals.tool_calls} tool calls, {toolModeMatrix.totals.interruptions} interrupted across this project.
-            <code>untagged</code> column is events from before the permission_mode field was added to tool_call payloads — they'll fade as new sessions accumulate.
-            Neutral counts: how often each tool ran under which permission posture.
+            <code>untagged</code> = events without a recorded permission_mode value.
           </div>
         {:else}
           <div class="empty inline">no tool calls captured yet for this project</div>
         {/if}
       </div>
 
-      <!-- VERIFICATION -->
-      <div class="card">
-        <h3>claim verification verdicts</h3>
-        <div class="bars">
-          {#each verificationRows as r (r.label)}
-            <div class="bar-row">
-              <span class="bar-lbl">{r.label}</span>
-              <span class="bar-track">
-                <span class="bar-fill kind-{r.kind}"
-                  style="width: {r.total > 0 ? (r.n / r.total) * 100 : 0}%"></span>
-              </span>
-              <span class="bar-n">{r.n}</span>
-            </div>
-          {/each}
-        </div>
-        <div class="footnote">
-          Of the assistant's first-person completion claims, how many held up under grep-based verification. Contradictions are the high-signal rows.
-        </div>
-      </div>
     </div>
 
     <SelfRubricPanel {ph} />
