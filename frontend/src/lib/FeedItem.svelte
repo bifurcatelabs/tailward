@@ -69,7 +69,7 @@
     permission_mode_change: 'permission',
     away_summary: 'away',
     tool_interrupted: 'declined',
-    exfiltration_alert: 'leak',
+    exfiltration_alert: 'secret',
     memory_edit: 'memory',
   };
 
@@ -168,6 +168,18 @@
     {/if}
     {#if kind === 'claim' && p.status}
       <span class="severity sev-claim-{p.status}">{p.status}</span>
+    {/if}
+    {#if p.secrets_redacted && p.secrets_redacted.length > 0}
+      <!-- Source-event marker: this turn / tool call had a secret
+           pattern caught and redacted by the exfiltration scanner.
+           The standalone exfiltration_alert event has the louder red
+           chip; this sub-badge ties the alert back to the source
+           event the user can scroll to. Title shows the matched
+           pattern names so the user can verify what was caught. -->
+      <span
+        class="sub-badge sub-secret"
+        title={`secret pattern${p.secrets_redacted.length === 1 ? '' : 's'} redacted: ${p.secrets_redacted.join(', ')}`}
+      >secret</span>
     {/if}
     <span class="grow"></span>
     <code class="eid" title="event id">#{event.id}</code>
@@ -619,6 +631,26 @@
     padding: 1px 5px;
     border-radius: 3px;
     background: var(--surface-2);
+  }
+  /* Sub-badge: smaller than the main chip, sits next to it in the
+     header. Used for cross-cutting payload markers that any event
+     type can carry — currently just the secret-redaction marker.
+     Distinct visual weight from the chip so scanning the feed lets
+     a viewer pick "which turn was the source" without confusing it
+     for the primary event type. */
+  .sub-badge {
+    font-size: 9px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-weight: 600;
+    cursor: help;
+  }
+  .sub-secret {
+    color: var(--err);
+    background: rgba(232,122,122,0.06);
+    border: 1px solid rgba(232,122,122,0.22);
   }
   .sev-high { color: var(--err); background: rgba(232,122,122,0.10); }
   .sev-med  { color: var(--warn); background: rgba(230,165,84,0.10); }

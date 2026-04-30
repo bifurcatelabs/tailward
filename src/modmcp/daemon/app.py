@@ -104,12 +104,24 @@ def create_app() -> FastAPI:
             # away-summary recaps, /compact synthesis) get caught and
             # sanitized before storage. ``extra`` flows into the alert
             # payload (e.g., the source tool name on tool_call leaks).
-            async def _check_leaks(text, source_event_type, **extra):
+            async def _check_leaks(
+                text, source_event_type, **extra
+            ) -> tuple[str, list[str]]:
+                """Scan ``text`` for known secret patterns.
+
+                Returns ``(redacted_text, leaks)`` where ``leaks`` is the
+                list of matched pattern names (empty if none). Callers
+                attach the list to the source event's payload as
+                ``secrets_redacted`` so the FeedItem can render a
+                sub-badge marking *which* turn the secret originated in,
+                not just the standalone alert event the dashboard also
+                receives.
+                """
                 if not text or not fs.session_id or not fs.project_hash:
-                    return text
+                    return text, []
                 matches = exfiltration.scan(text)
                 if not matches:
-                    return text
+                    return text, []
                 for m in matches:
                     await daemon.live.publish(
                         fs.session_id,
@@ -122,7 +134,10 @@ def create_app() -> FastAPI:
                             **extra,
                         },
                     )
-                return exfiltration.redact(text, matches)
+                return (
+                    exfiltration.redact(text, matches),
+                    [m.pattern_name for m in matches],
+                )
 
             # In-flight turn tracking for per-turn inference-path metrics.
             # We close the in-flight turn at two transition points: (a)
@@ -234,13 +249,15 @@ def create_app() -> FastAPI:
                 # multi-screen response doesn't blow out the feed
                 # column \u2014 the data is still all there.
                 preview = visible.replace("\r", "").rstrip()
-                preview = await _check_leaks(preview, "turn")
+                preview, leaks = await _check_leaks(preview, "turn")
                 payload: dict[str, Any] = {
                     "turn_idx": st.turns_seen if st else 0,
                     "text_preview": preview,
                     "chars": len(visible),
                     "message_id": ev.message_id,
                 }
+                if leaks:
+                    payload["secrets_redacted"] = leaks
                 # Skip Claude Code's synthetic-model marker (compaction,
                 # system summarization) so the model badge tracks real
                 # assistant turns only.
@@ -293,27 +310,33 @@ def create_app() -> FastAPI:
                 preview = (ev.text or "").replace("\r", "").rstrip()
                 if preview.strip():
                     if ev.synthesized and ev.synthesis_kind == "compact_summary":
-                        preview = await _check_leaks(preview, "compact_summary")
+                        preview, leaks = await _check_leaks(preview, "compact_summary")
+                        cs_payload: dict[str, Any] = {
+                            "text_preview": preview,
+                            "chars": len(ev.text or ""),
+                            "source": "claude_code_compact",
+                        }
+                        if leaks:
+                            cs_payload["secrets_redacted"] = leaks
                         await daemon.live.publish(
                             fs.session_id,
                             fs.project_hash,
                             "compact_summary",
-                            {
-                                "text_preview": preview,
-                                "chars": len(ev.text or ""),
-                                "source": "claude_code_compact",
-                            },
+                            cs_payload,
                         )
                     else:
-                        preview = await _check_leaks(preview, "user_turn")
+                        preview, leaks = await _check_leaks(preview, "user_turn")
+                        ut_payload: dict[str, Any] = {
+                            "text_preview": preview,
+                            "chars": len(ev.text or ""),
+                        }
+                        if leaks:
+                            ut_payload["secrets_redacted"] = leaks
                         await daemon.live.publish(
                             fs.session_id,
                             fs.project_hash,
                             "user_turn",
-                            {
-                                "text_preview": preview,
-                                "chars": len(ev.text or ""),
-                            },
+                            ut_payload,
                         )
 
             # Tool-call markers fire whenever a tool_use is present, whether
@@ -338,20 +361,23 @@ def create_app() -> FastAPI:
             # feed. See ``modmcp.schema.exfiltration``.
             if fs.session_id and fs.project_hash and ev.tool_name:
                 mode_at_call = ev.permission_mode or fs.last_permission_mode
-                input_preview = await _check_leaks(
+                input_preview, leaks = await _check_leaks(
                     _shorten_tool_input(ev.tool_input),
                     "tool_call",
                     tool=ev.tool_name,
                 )
+                tc_payload: dict[str, Any] = {
+                    "tool": ev.tool_name,
+                    "input_preview": input_preview,
+                    "permission_mode": mode_at_call,
+                }
+                if leaks:
+                    tc_payload["secrets_redacted"] = leaks
                 await daemon.live.publish(
                     fs.session_id,
                     fs.project_hash,
                     "tool_call",
-                    {
-                        "tool": ev.tool_name,
-                        "input_preview": input_preview,
-                        "permission_mode": mode_at_call,
-                    },
+                    tc_payload,
                 )
                 if ev.tool_use_id:
                     fs.tool_use_names[ev.tool_use_id] = ev.tool_name
@@ -437,12 +463,15 @@ def create_app() -> FastAPI:
             ):
                 content = (ev.text or str(ev.raw.get("content", ""))).strip()
                 if content:
-                    content = await _check_leaks(content, "away_summary")
+                    content, leaks = await _check_leaks(content, "away_summary")
+                    as_payload: dict[str, Any] = {"content": content}
+                    if leaks:
+                        as_payload["secrets_redacted"] = leaks
                     await daemon.live.publish(
                         fs.session_id,
                         fs.project_hash,
                         "away_summary",
-                        {"content": content},
+                        as_payload,
                     )
 
         cfg = get_config()

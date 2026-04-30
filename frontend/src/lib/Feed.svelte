@@ -50,6 +50,18 @@
       types: ['report_progress', 'report_ready', 'session_closed'],
       description: 'session-close consolidator output — runs after 10 min idle, produces the 8-mode report card',
     },
+    // Predicate-driven group: matches both the standalone
+    // exfiltration_alert events AND any source event whose payload
+    // carries the ``secrets_redacted`` marker. Lets the user pinpoint
+    // *which turn* a secret originated in, not just the alert chip.
+    {
+      key: 'secrets', label: 'secrets',
+      predicate: (ev) =>
+        ev.eventType === 'exfiltration_alert'
+        || (Array.isArray(ev.payload?.secrets_redacted)
+            && ev.payload.secrets_redacted.length > 0),
+      description: 'secret-pattern detections — alert chips and the source turns where the redacted secret originated',
+    },
   ];
 
   let activeFilter = $state(null); // null = show all
@@ -58,16 +70,25 @@
     activeFilter = activeFilter === key ? null : key;
   }
 
-  let visibleTypes = $derived.by(() => {
+  // Active filter group resolution — supports both the type-list shape
+  // (most groups) and the predicate shape (cross-cutting markers like
+  // ``secrets`` that match on payload fields, not event type alone).
+  let activeGroup = $derived.by(() => {
     if (activeFilter == null) return null;
-    const group = FILTER_GROUPS.find((g) => g.key === activeFilter);
-    return group ? new Set(group.types) : null;
+    return FILTER_GROUPS.find((g) => g.key === activeFilter) ?? null;
   });
 
   let reversed = $derived.by(() => {
     const arr = [...live.events].reverse();
-    if (visibleTypes == null) return arr;
-    return arr.filter((ev) => visibleTypes.has(ev.eventType));
+    if (activeGroup == null) return arr;
+    if (activeGroup.predicate) {
+      return arr.filter(activeGroup.predicate);
+    }
+    if (activeGroup.types) {
+      const types = new Set(activeGroup.types);
+      return arr.filter((ev) => types.has(ev.eventType));
+    }
+    return arr;
   });
 
   let totalCount = $derived(live.events.length);
