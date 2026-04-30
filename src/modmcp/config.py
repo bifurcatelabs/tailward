@@ -153,6 +153,14 @@ class Config:
     session_idle_seconds: float = 600.0
     session_close_poll_seconds: float = 60.0
 
+    # Synthesis stream (v2.6): periodic incremental snapshots fire when
+    # the assistant turn's reported input_tokens grows by this much
+    # since the last snapshot. Token-based (not turn-based) so dense
+    # file-reading turns don't go uncaptured. Default sized so a typical
+    # local 32k-context model gets ~3 snapshots before saturation;
+    # users with bigger context windows can raise it.
+    synthesis_periodic_tokens: int = 10000
+
     # Live UI transport: SSE endpoint caps + replay window. The replay
     # window applies to the page-load tail and the SSE backfill on
     # reconnect; live.js caps the rendered DOM at 200 nodes regardless,

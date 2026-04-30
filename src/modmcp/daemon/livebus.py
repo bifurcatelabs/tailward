@@ -78,6 +78,13 @@ EVENT_TYPES: frozenset[str] = frozenset(
         # worker emits this event instead so the signal stays visible
         # without polluting the violation count.
         "memory_edit",
+        # Session-synthesis snapshot landed on disk. Fired by the
+        # synthesis_worker when periodic / on-demand / threshold
+        # triggers produce a markdown snapshot under
+        # ``~/.modmcp/projects/<ph>/snapshots/``. Payload carries the
+        # trigger kind, on-disk path, model used, and timestamp; the
+        # UI surfaces a snapshot-timeline panel that lists captures.
+        "synthesis_captured",
     }
 )
 

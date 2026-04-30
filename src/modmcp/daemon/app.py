@@ -62,6 +62,8 @@ class Daemon:
         self.session_close = None
         # v0.2 platform probe worker.
         self.probe = None
+        # v2.6 session-synthesis stream worker.
+        self.synthesis = None
         # Live event bus; persister is attached after ledger connects.
         cfg = get_config()
         self.live = LiveBus(
@@ -218,6 +220,11 @@ def create_app() -> FastAPI:
                     and _looks_like_human_prompt(ev)
                 ):
                     await daemon.user_rubric.enqueue(ev, fs)
+                if (
+                    getattr(daemon, "synthesis", None) is not None
+                    and ev.kind == "assistant_message"
+                ):
+                    await daemon.synthesis.enqueue(ev, fs)
 
             # Publish turn-level markers to the live bus so the web feed
             # sees activity even without worker findings. Fires at most
@@ -560,6 +567,13 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning("probe worker unavailable: %s", e)
 
+        try:
+            from .synthesis_worker import SynthesisWorker
+            daemon.synthesis = SynthesisWorker(daemon)
+            await daemon.synthesis.start()
+        except Exception as e:
+            log.warning("synthesis worker unavailable: %s", e)
+
         log.info("modmcp daemon started (mode=%s)", get_config().warden_mode)
         try:
             yield
@@ -582,6 +596,8 @@ def create_app() -> FastAPI:
                 await daemon.session_close.stop()
             if daemon.probe:
                 await daemon.probe.stop()
+            if getattr(daemon, "synthesis", None):
+                await daemon.synthesis.stop()
             await daemon.ledger.close()
             log.info("modmcp daemon stopped")
 

@@ -64,6 +64,11 @@ const KNOWN_EVENT_TYPES = new Set([
   // project root. The constraints worker emits this event instead so
   // the signal stays visible without polluting the violation count.
   'memory_edit',
+  // Session-synthesis snapshot captured to disk by the synthesis_worker
+  // (~/.modmcp/projects/<ph>/snapshots/). Payload: trigger kind, path,
+  // model, timestamp. UI consumer is the snapshot-timeline panel on
+  // the Session view (lands in a follow-up commit).
+  'synthesis_captured',
 ]);
 
 const FEED_CAP = 250;

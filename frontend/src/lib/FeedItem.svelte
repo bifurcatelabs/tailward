@@ -71,6 +71,7 @@
     tool_interrupted: 'declined',
     exfiltration_alert: 'secret',
     memory_edit: 'memory',
+    synthesis_captured: 'synthesis',
   };
 
   let p = $derived(event.payload || {});
