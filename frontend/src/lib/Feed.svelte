@@ -1,5 +1,6 @@
 <script>
   import { live } from './live.svelte.js';
+  import { feedFilter, FILTER_GROUPS } from './feedFilter.svelte.js';
   import FeedItem from './FeedItem.svelte';
 
   let { sessionId = null } = $props();
@@ -8,87 +9,16 @@
   // with the reactive ``live.events`` array; only newly appended
   // entries trigger inserts at the top, and ``loadOlder`` prepends
   // (in store order) so they land at the bottom of the rendered list.
-
-  // Filter pills: groups related event types under a single toggle so
-  // the bar stays compact instead of one button per type. ``null``
-  // active group = show everything. ``description`` powers the hover
-  // tooltip — explicit about what's included so the user doesn't have
-  // to guess what each label covers.
-  const FILTER_GROUPS = [
-    {
-      key: 'user', label: 'user',
-      types: ['user_turn', 'compact_summary'],
-      description: 'typed prompts you sent + synthesized /compact summaries (Claude Code injects these as user-shaped events; we flag them separately)',
-    },
-    {
-      key: 'assistant', label: 'assistant',
-      types: ['turn'],
-      description: 'model turns — one entry per logical turn, coalesced from the per-block JSONL stream (thinking + text + tool_use blocks all collapse to one)',
-    },
-    {
-      key: 'tool', label: 'tools',
-      types: ['tool_call'],
-      description: 'tool_use calls (Read, Edit, Bash, Glob, etc.) and their inputs',
-    },
-    {
-      key: 'rubric', label: 'rubric',
-      types: ['rubric_in_flight', 'rubric_sample', 'rubric_done'],
-      description: 'Qwen-judged scoring runs — in-flight indicator, per-dimension score samples, and the done marker. Includes both assistant-side and self (user-side) rubric',
-    },
-    {
-      key: 'audit', label: 'audit',
-      types: ['constraint_violation', 'scope_snapshot', 'scope_creep', 'drift', 'claim', 'exfiltration_alert', 'memory_edit'],
-      description: 'audit signals — rule violations, scope snapshots and creep, drift detection, claim verification verdicts, secret-leak alerts, and memory-file edits (surfaced for transparency, not violations)',
-    },
-    {
-      key: 'perf', label: 'perf',
-      types: ['turn_metric'],
-      description: 'per-turn inference-path metrics — TTFT, output TPS, cache hit ratio. Derived from JSONL timestamps + the usage block; no synthetic probes',
-    },
-    {
-      key: 'session', label: 'session',
-      types: ['report_progress', 'report_ready', 'session_closed'],
-      description: 'session-close consolidator output — runs after 10 min idle, produces the 8-mode report card',
-    },
-    // Predicate-driven group: matches both the standalone
-    // exfiltration_alert events AND any source event whose payload
-    // carries the ``secrets_redacted`` marker. Lets the user pinpoint
-    // *which turn* a secret originated in, not just the alert chip.
-    {
-      key: 'secrets', label: 'secrets',
-      predicate: (ev) =>
-        ev.eventType === 'exfiltration_alert'
-        || (Array.isArray(ev.payload?.secrets_redacted)
-            && ev.payload.secrets_redacted.length > 0),
-      description: 'secret-pattern detections — alert chips and the source turns where the redacted secret originated',
-    },
-  ];
-
-  let activeFilter = $state(null); // null = show all
-
-  function setFilter(key) {
-    activeFilter = activeFilter === key ? null : key;
-  }
-
-  // Active filter group resolution — supports both the type-list shape
-  // (most groups) and the predicate shape (cross-cutting markers like
-  // ``secrets`` that match on payload fields, not event type alone).
-  let activeGroup = $derived.by(() => {
-    if (activeFilter == null) return null;
-    return FILTER_GROUPS.find((g) => g.key === activeFilter) ?? null;
-  });
-
+  //
+  // Filter pills are multi-toggle and shared with SessionTimeline
+  // via ``feedFilter`` — selecting "user" + "assistant" pills here
+  // also narrows the strip above. Empty active set = show
+  // everything; the "all" pill is the inverse signal — it lights up
+  // when no group is active and clears the set when clicked.
   let reversed = $derived.by(() => {
     const arr = [...live.events].reverse();
-    if (activeGroup == null) return arr;
-    if (activeGroup.predicate) {
-      return arr.filter(activeGroup.predicate);
-    }
-    if (activeGroup.types) {
-      const types = new Set(activeGroup.types);
-      return arr.filter((ev) => types.has(ev.eventType));
-    }
-    return arr;
+    if (feedFilter.empty()) return arr;
+    return arr.filter((ev) => feedFilter.matches(ev));
   });
 
   let totalCount = $derived(live.events.length);
@@ -141,7 +71,7 @@
   // render, so the scroll-to-hash would silently no-op.
   $effect(() => {
     if (typeof window === 'undefined') return;
-    function clearFilter() { activeFilter = null; }
+    function clearFilter() { feedFilter.clear(); }
     window.addEventListener('search:clear-filter', clearFilter);
     return () => window.removeEventListener('search:clear-filter', clearFilter);
   });
@@ -152,21 +82,21 @@
     <button
       type="button"
       class="pill"
-      class:active={activeFilter == null}
-      onclick={() => (activeFilter = null)}
-      title="show every event type (no filter)"
+      class:active={feedFilter.empty()}
+      onclick={() => feedFilter.clear()}
+      title="show every event type (clear all filter pills)"
     >all</button>
     {#each FILTER_GROUPS as g (g.key)}
       <button
         type="button"
         class="pill pill-{g.key}"
-        class:active={activeFilter === g.key}
-        onclick={() => setFilter(g.key)}
+        class:active={feedFilter.isActive(g.key)}
+        onclick={() => feedFilter.toggle(g.key)}
         title={g.description}
       >{g.label}</button>
     {/each}
     <span class="filter-count">
-      {#if activeFilter == null}
+      {#if feedFilter.empty()}
         {totalCount} event{totalCount === 1 ? '' : 's'}
       {:else}
         {visibleCount} / {totalCount}
@@ -176,12 +106,12 @@
 
   {#if reversed.length === 0}
     <div class="empty">
-      {#if activeFilter == null}
+      {#if feedFilter.empty()}
         <div class="hint">waiting for events…</div>
         <div class="muted">the watcher will surface turns, tool calls, and findings as the session writes to its transcript.</div>
       {:else}
-        <div class="hint">no {activeFilter} events</div>
-        <div class="muted">try a different filter or click "all" to clear.</div>
+        <div class="hint">no events match the active filter{feedFilter.active.size === 1 ? '' : 's'}</div>
+        <div class="muted">try toggling other pills or click "all" to clear.</div>
       {/if}
     </div>
   {:else}
