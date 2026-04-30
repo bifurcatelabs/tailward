@@ -86,6 +86,72 @@ def test_svelte_feed_renders_every_event_type() -> None:
         )
 
 
+def test_publish_call_sites_use_registered_event_types() -> None:
+    """Inverse of ``test_svelte_feed_renders_every_event_type``.
+
+    That test guards FeedItem/live.svelte.js sync to ``EVENT_TYPES``.
+    This test catches the *other* direction: a worker that publishes
+    a type missing from ``EVENT_TYPES``. ``permission_mode_change``,
+    ``away_summary``, and ``tool_interrupted`` shipped that way —
+    ``publish()`` raised ``ValueError``, the call sites' ``try / except``
+    swallowed it, and no chip ever rendered. The earlier test was happy
+    because the unregistered types weren't in the iteration set.
+
+    Approach: AST-walk every ``src/modmcp/daemon/**/*.py`` file, find
+    Call nodes whose attribute is ``publish`` and whose third positional
+    arg (or ``event_type=`` kwarg) is a string literal. Assert each is
+    in ``EVENT_TYPES``. Variable-driven publish calls are out of scope
+    — workers in this codebase always pass literals.
+    """
+    import ast
+
+    daemon_dir = Path("src/modmcp/daemon")
+    assert daemon_dir.is_dir(), "daemon source dir not found from test cwd"
+
+    found_types: set[str] = set()
+    for py_file in daemon_dir.rglob("*.py"):
+        tree = ast.parse(py_file.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            if not (isinstance(func, ast.Attribute) and func.attr == "publish"):
+                continue
+            # publish(session_id, project_hash, event_type, payload)
+            if (
+                len(node.args) >= 3
+                and isinstance(node.args[2], ast.Constant)
+                and isinstance(node.args[2].value, str)
+            ):
+                found_types.add(node.args[2].value)
+            for kw in node.keywords:
+                if (
+                    kw.arg == "event_type"
+                    and isinstance(kw.value, ast.Constant)
+                    and isinstance(kw.value.value, str)
+                ):
+                    found_types.add(kw.value.value)
+
+    unregistered = found_types - EVENT_TYPES
+    assert not unregistered, (
+        f"daemon code publishes event type(s) missing from "
+        f"livebus.EVENT_TYPES: {sorted(unregistered)}. Register them + "
+        f"wire chip/body in FeedItem.svelte + add to KNOWN_EVENT_TYPES "
+        f"in live.svelte.js. See livebus.py docstring for the contract."
+    )
+
+    # Sanity: a non-trivial number of literal types should always be
+    # found. If this floor trips, the AST scan likely broke (e.g.,
+    # someone restructured publish call sites to use a variable for
+    # event_type, defeating the static check). Investigate the scan
+    # logic; don't just lower the threshold to make this pass.
+    assert len(found_types) >= 5, (
+        f"only found {len(found_types)} literal event_types across "
+        f"daemon publish() call sites — the AST walk may have stopped "
+        f"working. Found: {sorted(found_types)}"
+    )
+
+
 def test_live_event_to_json_is_parseable() -> None:
     from modmcp.daemon.livebus import LiveEvent
     ev = LiveEvent(session_id="s", project_hash="ph", type="turn",
