@@ -1168,6 +1168,71 @@ class Ledger:
             },
         }
 
+    async def stop_reason_counts(self, project_hash: str) -> dict:
+        """Distribution of ``stop_reason`` across the project's
+        assistant turn events.
+
+        Mirrors the tool-calls-by-mode shape: pivot the JSON payload
+        in Python (sqlite has no first-class JSON path indexing in
+        the WAL build we ship). Skips empty placeholder rows that
+        carry no ``message_id`` — those are historical artifacts
+        from older warden code that published empty turn shells; the
+        current dispatcher doesn't produce them. Filtering at query
+        time keeps the panel honest: every counted row represents an
+        actual assistant message.
+
+        Returns ``{"counts": [{"stop_reason": "...", "count": N}, ...],
+        "total": N}`` with counts sorted descending.
+        """
+        import json as _json
+        from collections import Counter
+
+        async with self.conn.execute(
+            """SELECT payload FROM live_events
+               WHERE project_hash=? AND event_type='turn'""",
+            (project_hash,),
+        ) as cur:
+            rows = await cur.fetchall()
+
+        # Dedupe by message_id and pick the final stop_reason per
+        # message — warden's dispatcher publishes some messages as
+        # multiple turn events (a partial emit for the visible text,
+        # then a final emit once the full block stream lands). The
+        # panel asks "how did messages END?", so we count once per
+        # message using the final state. A message that only ever
+        # emitted a partial (rare; usually means watcher tail caught
+        # the JSONL mid-stream, or a user interrupt before the
+        # message closed) lands as ``untagged`` — same convention
+        # the tool-calls-by-mode panel uses for events missing
+        # their permission_mode field.
+        per_message: dict[str, str | None] = {}
+        for r in rows:
+            try:
+                payload = _json.loads(r["payload"]) if r["payload"] else {}
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            mid = payload.get("message_id")
+            if not mid:
+                continue
+            sr = payload.get("stop_reason")
+            # Only overwrite if we don't yet have a stop_reason for
+            # this message, or the new row carries one — never let a
+            # later partial emit clobber a recorded final state.
+            if mid not in per_message or per_message[mid] is None:
+                per_message[mid] = sr or None
+
+        counts: Counter[str] = Counter()
+        for sr in per_message.values():
+            counts[sr if sr else "untagged"] += 1
+
+        ordered = [
+            {"stop_reason": k, "count": int(n)}
+            for k, n in counts.most_common()
+        ]
+        return {"counts": ordered, "total": int(sum(counts.values()))}
+
     async def memory_edit_count(self, project_hash: str) -> int:
         """Number of memory_edit events for the project.
 
