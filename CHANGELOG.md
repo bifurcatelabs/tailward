@@ -5,6 +5,150 @@ All notable changes to warden are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.4.0] — 2026-04-30
+
+A two-day push covering: secret-pattern detection across content
+events, memory-edit signal differentiation, view-identity reorg
+between Reflection and Platform, full-session arc with a meaningful
+UX upgrade, and shared multi-toggle filter pills across both
+event-bearing surfaces. Plus a verifier-scope fix and a livebus
+regression test that closes the silent-publish gap behind several
+prior bugs.
+
+### Added
+
+- **Project-scoped keyword search across content events.** New
+  `/p/{ph}/search` endpoint + `SearchPanel.svelte`. Inline-expand
+  result preview, deep-link via `#event-<id>` hash, copy-with-header,
+  and per-event referenceable IDs across both feed and search results.
+- **Exfiltration regex detection across content channels.** Pattern
+  library in `modmcp.schema.exfiltration` (OpenAI / Anthropic /
+  GitHub PAT / AWS access key / Stripe live+test / Slack token /
+  private key block). Scanned across `user_turn`, `turn`,
+  `compact_summary`, `tool_call`, and `away_summary` payloads —
+  secrets in chat dialogue are caught and redacted, not just tool
+  inputs. Fires `exfiltration_alert` with a redacted preview; the
+  sanitized payload is what lands in `live_events`.
+- **Source-event marking for redacted secrets.** Source events
+  (`user_turn` / `turn` / `tool_call` / etc.) carry
+  `secrets_redacted: ["pattern_name", ...]` when their text was
+  scanned-and-redacted. FeedItem renders a small `SECRET` sub-badge
+  next to the main chip with the matched pattern names on hover, so
+  the alert chip and its source turn are visually linked.
+- **Multi-toggle filter pills shared between Feed and SessionTimeline.**
+  Extracted `feedFilter.svelte.js` as a singleton store. Multiple
+  groups can be active at once (the common case: `user + assistant +
+  secrets`); empty active set = "all" view. Toggling pills on either
+  surface narrows both. New `secrets` filter pill spans the alert
+  chips and source events with `secrets_redacted`.
+- **Memory-edit signal type.** Edits to
+  `~/.claude/projects/<ph>/memory/**` are by-design calibration
+  artifacts, not policy events. `is_memory_edit_path` in
+  `modmcp.schema.constraints` branches the path-policy check so these
+  edits emit a neutral `memory_edit` event instead of a
+  `constraint_violation`. Reflection panel surfaces a sub-row counting
+  them alongside the violation cadence — signal stays visible without
+  polluting violation counts.
+- **Assistant `stop_reason` distribution panel** on Platform. Pivots
+  turn events by `stop_reason`, deduped per `message_id` so the panel
+  reflects how messages *ended* rather than how often the dispatcher
+  emitted them. New `stop_reason_counts` ledger query; rendered as
+  `StopReasonsPanel.svelte`.
+- **Full-session arc endpoint.** New
+  `/p/{ph}/live/{session_id}/arc` returns lightweight
+  `(id, event_type, created_at)` triples for every event in the
+  session — separate from the tail-windowed feed replay so the
+  SessionTimeline strip can reflect the whole arc without bloating
+  the feed bootstrap.
+- **SessionTimeline UX overhaul.**
+  - **Hover tooltips** with friendly type labels (matching the chip
+    vocabulary), local-time timestamps, and time-deltas from the
+    previous event.
+  - **Tick clustering** — events within ~0.4% pct merge into one
+    cluster with width that scales with count and a small top mark.
+    Cluster hover shows the count + member list.
+  - **Time-range lens** (30m / 1h / 8h / 24h / all) so the strip can
+    show detail for active windows instead of compressing days of
+    activity into one viewport. Window-bounds drive layout, so
+    "8h" actually renders 8h even when activity is sparse.
+  - **Idle banding** at leading + trailing edges of the window plus
+    inter-event gaps, labeled "no activity, Xm Ys" — observational,
+    not stateful.
+- **Reflection panel auto-refresh on violation ack/dismiss.**
+  LiveStore dispatches a `reflection:refresh` window event after
+  each ack/dismiss POST resolves; ReflectionView listens and
+  re-fires its loader. The destructive-action cadence card no longer
+  drifts behind the ledger until manual reload.
+- **Press state + inline confirmation on FeedItem violation buttons.**
+  Buttons now have a 1px-translate `:active` style, go disabled with
+  a `…` label during the in-flight POST, and get replaced in-place
+  with a green `✓ acknowledged` / `✓ dismissed` confirmation once
+  the action resolves. The click feels real instead of silently
+  landing in the ledger.
+- **Regression test pinning publish call sites to registered event
+  types.** AST-walks `src/modmcp/daemon/**/*.py` looking for
+  `*.publish(sid, ph, "type", payload)` calls and asserts every
+  literal `event_type` is in `livebus.EVENT_TYPES`. Closes the gap
+  behind `permission_mode_change` / `away_summary` /
+  `tool_interrupted` / `exfiltration_alert` shipping silently broken
+  in v2.3.0.
+
+### Changed
+
+- **View source-of-data split.** Reflection and Platform reorganized
+  by where the data comes from:
+  - **Reflection** = user-side signals (typed prompts, mode posture,
+    response cadence, self-rubric).
+  - **Platform** = third-party-provider-facing signals (turn metrics,
+    assistant stop_reasons, claim verification, plus probes of the
+    local LLM stack that audits them).
+  Claim verification verdicts and stop_reasons cards moved out of
+  Reflection into Platform as new autonomous panels
+  (`ClaimVerificationPanel`, `StopReasonsPanel`). Subtitles
+  re-aligned to match each surface's identity.
+- **Filter pill behavior** — single-active → multi-toggle. The "all"
+  pill is the inverse signal (active when no group is) and clears
+  the set on click. Empty-state hint and click-handler updated
+  accordingly.
+- **Path-policy check** — branches on `is_memory_edit_path` before
+  reporting a violation. Memory-file edits flow through the new
+  `memory_edit` channel instead of being mis-classified.
+- **Tool-calls-by-mode panel** — title renamed to "tool calls by
+  user-selected permission mode" for accuracy; footnote tightened
+  (drops the warden-history note about untagged events).
+- **Voice tweaks across the dashboard.** "leak" → "secret" in
+  user-facing strings (industry vocabulary; internal event type
+  stays `exfiltration_alert`). "idle" → "no activity" on session-arc
+  bands. Several footnotes shortened to drop "high-signal rows" /
+  narrating-the-data framings — stays observational, not coaching.
+
+### Fixed
+
+- **livebus EVENT_TYPES gap.** `permission_mode_change`,
+  `away_summary`, `tool_interrupted`, and `exfiltration_alert`
+  weren't in the `EVENT_TYPES` frozenset; publish call sites caught
+  the resulting `ValueError` silently and no chip ever rendered. All
+  registered + a regression test (above) prevents recurrence.
+- **Claim-verifier scope.** Test-file string literals (e.g.
+  `text = "I removed FooBar"` inside `tests/test_audit.py`) were
+  counting as evidence the symbol still existed — the verifier
+  greppped the literal and flagged the removal claim as
+  contradicted. New `_match_in_string_literal` heuristic skips
+  matches inside single-line string literals when the file is
+  detected as a test file (`tests/` directory or `test_*.py` /
+  `*_test.py`). Real test-file imports / class defs / unquoted
+  references still count as evidence.
+
+### Removed
+
+- **`/p/{ph}/live/{session_id}/v2` backward-compat redirect.** Held
+  over from v2.0.0's URL-collapse cutover for bookmarks predating
+  the `/v2` prefix elimination. Realistic bookmark exposure is zero,
+  and CodeQL kept flagging the regex-rebind sanitizer pattern as an
+  open-redirect sink despite multiple rounds of hardening. Deletion
+  is cleaner than another suppression attempt; drops `re`,
+  `PathParam`, `RedirectResponse` imports as a side effect.
+
 ## [v2.3.0] — 2026-04-29
 
 Pass 3 / item 8 features — permission-mode transitions, away-summary
