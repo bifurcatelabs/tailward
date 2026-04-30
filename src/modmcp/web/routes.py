@@ -666,3 +666,26 @@ def mount_web(app: FastAPI) -> None:
             ],
             "next_since": rows[-1]["id"] if rows else since_id,
         })
+
+    @app.get("/p/{ph}/live/{session_id}/arc")
+    async def live_arc(request: Request, ph: str, session_id: str) -> JSONResponse:
+        """Lightweight per-event triples spanning the full session.
+
+        SessionTimeline fetches this on mount so the arc reflects every
+        event recorded for the session, not just the bootstrap window
+        the feed replay returns. Payloads are intentionally omitted —
+        the strip only needs ``(id, event_type, created_at)`` to render
+        ticks, clusters, and idle bands.
+        """
+        daemon = request.app.state.daemon
+        rows = await daemon.ledger.session_arc_triples(session_id)
+        return JSONResponse({
+            "events": [
+                {
+                    "id": r["id"],
+                    "event_type": r["event_type"],
+                    "created_at": r["created_at"],
+                }
+                for r in rows
+            ],
+        })

@@ -571,6 +571,31 @@ class Ledger:
             rows = await cur.fetchall()
         return [dict(r) for r in rows]
 
+    async def session_arc_triples(self, session_id: str) -> list[dict]:
+        """Lightweight per-event triples for the SessionTimeline arc.
+
+        Returns ``[{id, event_type, created_at}, ...]`` for every event
+        in the session, ordered chronologically. The frontend renders
+        each as a single tick/cluster on the arc strip — payloads are
+        not needed, so the query strips them. Cheap enough to fetch
+        the full session's worth of triples on bootstrap (~50 bytes
+        per row × thousands of rows = a few hundred KB max).
+
+        The richer feed-replay endpoint is paginated and tail-windowed
+        by design (visible-prose payloads are large); this endpoint
+        intentionally side-steps that limit so the arc reflects the
+        whole session, not just the loaded feed window.
+        """
+        async with self.conn.execute(
+            """SELECT id, event_type, created_at
+               FROM live_events
+               WHERE session_id=?
+               ORDER BY id""",
+            (session_id,),
+        ) as cur:
+            rows = await cur.fetchall()
+        return [dict(r) for r in rows]
+
     async def live_events_recent(
         self, session_id: str, *, limit: int = 100
     ) -> list[dict]:

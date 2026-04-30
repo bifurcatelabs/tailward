@@ -132,6 +132,12 @@ class LiveStore {
 
   // Internals --------------------------------------------------------
   #renderedIds = new Set();
+  // Separate dedupe set for the arc — populated by both the full-arc
+  // bootstrap (which runs before the feed replay) and ongoing SSE
+  // pushes. Keeping it separate from #renderedIds lets the arc and
+  // the feed dedupe independently — the arc may know about events
+  // the feed hasn't pulled into its current window yet.
+  #arcRenderedIds = new Set();
   #lastEventId = 0;
   #lastEventAt = null;
   #rubricBuffers = {};
@@ -177,10 +183,16 @@ class LiveStore {
       this.oldestEventId = id;
     }
 
-    // Mirror into the arc strip. Capped so a long session doesn't
-    // explode memory; render trims further if needed.
-    this.arc.push({ id, type: eventType, t: tsSeconds });
-    if (this.arc.length > 1000) this.arc.splice(0, this.arc.length - 1000);
+    // Mirror into the arc strip. Each entry is small (id, type,
+    // epoch-seconds) so a generous cap keeps the whole session
+    // visible without the feed's 250-event window getting in the
+    // way. The cap exists only to bound runaway memory if a wedge
+    // emits millions of events; real sessions finish well below it.
+    if (!this.#arcRenderedIds.has(id)) {
+      this.#arcRenderedIds.add(id);
+      this.arc.push({ id, type: eventType, t: tsSeconds });
+      if (this.arc.length > 50000) this.arc.splice(0, this.arc.length - 50000);
+    }
 
     this.#applySideEffect(eventType, payload || {});
   }
@@ -345,8 +357,34 @@ class LiveStore {
   async connect(ph, sessionId) {
     this.#ph = ph;
     this.#sessionId = sessionId;
+    // Arc-only bootstrap fires first so the SessionTimeline reflects
+    // the full session immediately, while the feed replay (which
+    // carries heavy payloads) runs at its tail-windowed default.
+    await this.#bootstrapFullArc();
     await this.#bootstrap();
     this.#attachSSE();
+  }
+
+  async #bootstrapFullArc() {
+    try {
+      const r = await fetch(`/p/${this.#ph}/live/${this.#sessionId}/arc`);
+      if (!r.ok) return;
+      const data = await r.json();
+      const events = data.events || [];
+      // Replace existing arc wholesale — this is the authoritative
+      // pre-SSE snapshot. Subsequent SSE pushes will append, deduped
+      // by ``#arcRenderedIds``.
+      this.arc = [];
+      this.#arcRenderedIds.clear();
+      for (const ev of events) {
+        if (this.#arcRenderedIds.has(ev.id)) continue;
+        this.#arcRenderedIds.add(ev.id);
+        const t = toEpochSeconds(ev.created_at);
+        this.arc.push({ id: ev.id, type: ev.event_type, t });
+      }
+    } catch (e) {
+      console.warn('arc bootstrap failed', e);
+    }
   }
 
   disconnect() {
