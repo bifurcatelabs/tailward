@@ -2,14 +2,14 @@
   /**
    * Reflection view — am I behaving?
    *
-   * v1 surfaces signals derivable from existing data with no LLM
-   * calls: typed-turn pacing, prompt-length distribution, the user's
-   * response cadence on constraint-violation surfacings, and how
-   * often assistant claims held up under verification.
+   * User-side signals: typed-turn pacing, prompt-length distribution,
+   * tool calls grouped by user-selected permission mode, the user's
+   * response cadence on constraint-violation surfacings, memory edits.
+   * Plus the LLM-scored self-rubric panel.
    *
-   * The self-rubric (LLM-scored user-side dimensions) lands in v2 as
-   * a separate panel; this view leaves room for it without faking
-   * placeholder content here.
+   * Anything Anthropic emitted (stop_reasons, claim verification)
+   * lives on Platform — see ``project_reflection_introspection_role``
+   * memo for the source-of-data split.
    */
   import SessionsPanel from './SessionsPanel.svelte';
   import SelfRubricPanel from './SelfRubricPanel.svelte';

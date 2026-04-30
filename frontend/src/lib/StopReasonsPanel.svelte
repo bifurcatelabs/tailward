@@ -3,12 +3,6 @@
   // messages. Anthropic-emitted signal — answers "how did the
   // third-party model end its turns?" Belongs on Platform (the
   // third-party-provider-facing surface), not Reflection (user-side).
-  //
-  // Reads the /v2/reflection/{ph} endpoint's stop_reasons field.
-  // The endpoint URL is mis-named for this panel — it pre-dates the
-  // source-of-data split — but the data is what we need. Endpoint
-  // rename is a separate cleanup (see project_notes_04282026_passes
-  // memo for follow-ups).
 
   let { ph } = $props();
 
@@ -21,7 +15,7 @@
     loading = true;
     error = null;
     try {
-      const r = await fetch(`/v2/reflection/${ph}?limit=1000`);
+      const r = await fetch(`/v2/platform/${ph}/agent-behavior`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       data = await r.json();
     } catch (e) {

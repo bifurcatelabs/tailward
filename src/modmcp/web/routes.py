@@ -288,22 +288,23 @@ def mount_web(app: FastAPI) -> None:
 
     @app.get("/v2/reflection/{ph}")
     async def v2_reflection_signals(request: Request, ph: str) -> JSONResponse:
-        """Derived signals for the Reflection view — no LLM calls.
+        """User-side derived signals for the Reflection view — no LLM calls.
 
-        Four panels' worth of data, computed from existing live_events,
-        constraint_violations, and verification_ledger rows:
+        Reflection is the user-side surface ("am I behaving?"). Anything
+        the third-party model emitted (``verification``, ``stop_reasons``)
+        moved to ``/v2/platform/{ph}/agent-behavior`` so endpoint shape
+        matches view identity.
 
-        * ``intervals`` — seconds between consecutive *typed* user turns.
-          Synthesized turns (Claude Code /compact) are excluded so the
-          distribution reflects actual user pacing.
-        * ``prompt_lengths`` — char counts of typed user prompts.
-        * ``approvals`` — counts of constraint_violations by status
-          (new / acknowledged / dismissed). Speaks to the user's
-          response cadence on Warden's destructive-action surfacings.
-        * ``verification`` — counts of verification_ledger rows by
-          status (verified / contradicted / unverifiable). Speaks to
-          how often the assistant's first-person completion claims
-          held up under grep-based verification.
+        * ``intervals_seconds`` — seconds between consecutive *typed* user
+          turns. Synthesized turns (Claude Code /compact) are excluded so
+          the distribution reflects actual user pacing.
+        * ``prompt_lengths_chars`` — char counts of typed user prompts.
+        * ``synthesized_user_turns`` — count of /compact-style turns.
+        * ``approvals`` — constraint_violations by status (user response
+          cadence on destructive-action surfacings).
+        * ``tool_calls_by_mode`` — tool counts grouped by user-selected
+          permission mode.
+        * ``memory_edits`` — count of memory-file edits made by the user.
         """
         import json as _json
 
@@ -349,21 +350,41 @@ def mount_web(app: FastAPI) -> None:
             prev_session = r["session_id"]
 
         approvals = await daemon.ledger.violation_status_counts(ph)
-        verification = await daemon.ledger.claim_status_counts(ph)
         tool_modes = await daemon.ledger.tool_calls_by_mode(ph)
         memory_edits = await daemon.ledger.memory_edit_count(ph)
-        stop_reasons = await daemon.ledger.stop_reason_counts(ph)
 
         return JSONResponse({
             "intervals_seconds": intervals,
             "prompt_lengths_chars": prompt_lengths,
             "synthesized_user_turns": synthesized_count,
             "approvals": approvals,
-            "verification": verification,
             "tool_calls_by_mode": tool_modes,
             "memory_edits": memory_edits,
-            "stop_reasons": stop_reasons,
             "sample_size": len(rows),
+        })
+
+    @app.get("/v2/platform/{ph}/agent-behavior")
+    async def v2_platform_agent_behavior(request: Request, ph: str) -> JSONResponse:
+        """Third-party-provider-facing signals for the Platform view.
+
+        Anthropic-emitted or Anthropic-text-derived metrics across the
+        project's assistant messages — what the served model did, not
+        what the user did:
+
+        * ``stop_reasons`` — distribution of ``stop_reason`` values
+          across assistant messages, deduped per ``message_id``.
+        * ``verification`` — counts of ``verification_ledger`` rows by
+          status (verified / contradicted / unverifiable). Hybrid
+          signal — the claim text comes from the model; the grep is
+          local — but the *audit question* is third-party-facing
+          ("is the served model accurate?").
+        """
+        daemon = request.app.state.daemon
+        verification = await daemon.ledger.claim_status_counts(ph)
+        stop_reasons = await daemon.ledger.stop_reason_counts(ph)
+        return JSONResponse({
+            "verification": verification,
+            "stop_reasons": stop_reasons,
         })
 
     @app.get("/p/{ph}/search")

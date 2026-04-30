@@ -6,9 +6,6 @@
   // Hybrid signal: claim text comes from Anthropic, the grep is local.
   // The audit *question* this answers is squarely third-party-facing
   // ("is the served model accurate?") so the panel lives on Platform.
-  //
-  // Reads /v2/reflection/{ph}'s `verification` field. URL is mis-named
-  // for this surface — predates the source-of-data split.
 
   let { ph } = $props();
 
@@ -21,7 +18,7 @@
     loading = true;
     error = null;
     try {
-      const r = await fetch(`/v2/reflection/${ph}?limit=1000`);
+      const r = await fetch(`/v2/platform/${ph}/agent-behavior`);
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       data = await r.json();
     } catch (e) {
