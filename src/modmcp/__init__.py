@@ -7,4 +7,4 @@ remains ``modmcp`` as a deliberate historical artifact. See
 surfaces, keep internals stable).
 """
 
-__version__ = "2.4.0"
+__version__ = "2.5.0"

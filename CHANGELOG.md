@@ -5,6 +5,34 @@ All notable changes to warden are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.5.0] — 2026-04-30
+
+View-identity discipline carried into the API + a fourth view for
+local-stack transparency. The view split that landed in v2.4.0
+established the principle (each view = one source of data); this
+release pushes that discipline through the endpoint shape and the
+overall view layout.
+
+### Changed
+- **API split along source-of-data axis.** ``/v2/reflection/{ph}`` was
+  returning agent-side fields (claim verification, stop_reasons) after
+  the v2.4.0 view reorg moved those panels to Platform — endpoint name
+  no longer described the payload. Split into ``/v2/reflection/{ph}``
+  (user-only: pacing, prompt lengths, permission-mode tool counts,
+  approvals, memory edits) + new ``/v2/platform/{ph}/agent-behavior``
+  (third-party-provider signals: claim verification + stop_reasons).
+  Each panel fetches its narrow endpoint.
+
+### Added
+- **Settings view — fourth tab for local-stack transparency.**
+  ``LlmProfilesPanel`` and ``LlmBudgetPanel`` describe what's running
+  locally, not what the third-party model emitted. Carving them into
+  a dedicated Settings view keeps Platform focused on third-party
+  signals; users on cloud APIs can ignore the tab entirely; users
+  running local inference get a single place to verify what's wired up.
+  Tab nav updated to four entries: session / reflection / platform /
+  settings.
+
 ## [v2.4.0] — 2026-04-30
 
 A two-day push covering: secret-pattern detection across content
