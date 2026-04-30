@@ -2,8 +2,6 @@
   import PathDiagram from './PathDiagram.svelte';
   import ProbePanel from './ProbePanel.svelte';
   import TurnMetricsPanel from './TurnMetricsPanel.svelte';
-  import LlmBudgetPanel from './LlmBudgetPanel.svelte';
-  import LlmProfilesPanel from './LlmProfilesPanel.svelte';
   import StopReasonsPanel from './StopReasonsPanel.svelte';
   import ClaimVerificationPanel from './ClaimVerificationPanel.svelte';
   import ProjectQuickPicker from './ProjectQuickPicker.svelte';
@@ -19,7 +17,7 @@
     </div>
     <p>
       third-party-provider-facing signals — Anthropic-emitted metrics
-      from real sessions, plus probes of the local LLM stack that
+      from real sessions, plus a probe of the local LLM stack that
       audits them. <strong>variance and trend</strong> — read it how
       you want.
     </p>
@@ -29,8 +27,6 @@
   <TurnMetricsPanel {ph} />
   <StopReasonsPanel {ph} />
   <ClaimVerificationPanel {ph} />
-  <LlmProfilesPanel />
-  <LlmBudgetPanel />
   <ProbePanel {ph} />
 </section>
 

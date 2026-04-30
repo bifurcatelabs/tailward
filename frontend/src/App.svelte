@@ -6,13 +6,14 @@
   import SessionView from './lib/SessionView.svelte';
   import ReflectionView from './lib/ReflectionView.svelte';
   import PlatformView from './lib/PlatformView.svelte';
+  import SettingsView from './lib/SettingsView.svelte';
   import LandingView from './lib/LandingView.svelte';
   import ProjectView from './lib/ProjectView.svelte';
 
   let { page = 'landing', ph = '', sessionId = '' } = $props();
 
-  // Within the session page, three tabs (hash-routed).
-  const TABS = ['session', 'reflection', 'platform'];
+  // Within the session page, four tabs (hash-routed).
+  const TABS = ['session', 'reflection', 'platform', 'settings'];
 
   function readHash() {
     const h = (typeof window !== 'undefined' ? window.location.hash : '')
@@ -56,6 +57,8 @@
       <ReflectionView {ph} />
     {:else if view === 'platform'}
       <PlatformView {ph} />
+    {:else if view === 'settings'}
+      <SettingsView />
     {/if}
   {:else if page === 'project'}
     <TopStrip />

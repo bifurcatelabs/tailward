@@ -9,6 +9,7 @@
     { id: 'session',    label: 'session',    sub: 'live activity' },
     { id: 'reflection', label: 'reflection', sub: 'your patterns' },
     { id: 'platform',   label: 'platform',   sub: 'inference path' },
+    { id: 'settings',   label: 'settings',   sub: 'local stack' },
   ];
 </script>
 
