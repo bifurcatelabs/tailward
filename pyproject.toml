@@ -40,15 +40,17 @@ Changelog = "https://github.com/bifurcatelabs/tailward/blob/main/CHANGELOG.md"
 Mirror = "https://git.bifurcate.io/active/warden"
 
 [project.scripts]
-# ``warden`` is the canonical CLI binary as of v2.0.0. ``modmcp`` is
-# kept as a backward-compat alias for users who already have it in
-# their muscle memory or wired into Claude Code MCP / hook configs.
-# Both invoke the same entry point. Slated for removal in v3.0.0.
-warden = "modmcp.cli:main"
-modmcp = "modmcp.cli:main"
+# ``tailward`` is the canonical CLI binary as of v2.7.0 (full rename
+# alignment — public name, internal package, and CLI all match).
+# ``warden`` is preserved as a deprecation alias for users who already
+# have v2.x muscle memory or scripts; it will be removed in v4.0.0.
+# ``modmcp`` is removed (it was the original alias kept through v2.x;
+# now retired).
+tailward = "tailward.cli:main"
+warden = "tailward.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/modmcp"]
+packages = ["src/tailward"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -63,4 +65,4 @@ select = ["E", "F", "W", "I", "B", "UP"]
 ignore = ["E501"]
 
 [tool.ruff.lint.per-file-ignores]
-"src/modmcp/cli.py" = ["B008"]   # typer.Option() in defaults is idiomatic
+"src/tailward/cli.py" = ["B008"]   # typer.Option() in defaults is idiomatic

@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from modmcp.daemon.state import StateStore
-from modmcp.daemon.watcher import TranscriptWatcher
-from modmcp.storage.ledger import Ledger
+from tailward.daemon.state import StateStore
+from tailward.daemon.watcher import TranscriptWatcher
+from tailward.storage.ledger import Ledger
 
 
 @pytest.mark.asyncio
@@ -148,7 +148,7 @@ async def test_filestate_rehydrates_project_from_session_state(
     """
     import json
 
-    from modmcp.paths import project_hash
+    from tailward.paths import project_hash
 
     claude_root = tmp_path / "claude"
     proj_dir = claude_root / "C--warden"

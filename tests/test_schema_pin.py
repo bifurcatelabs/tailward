@@ -33,8 +33,8 @@ from __future__ import annotations
 
 import json
 
-from modmcp.schema.audit import VALIDATED_VERSIONS
-from modmcp.schema.events import parse_line
+from tailward.schema.audit import VALIDATED_VERSIONS
+from tailward.schema.events import parse_line
 
 # Most-recent version we've audited against. Used as the value for
 # the synthetic ``version`` field in fixtures; the structural
@@ -680,7 +680,7 @@ def test_audit_inventory_canary(tmp_path) -> None:
     the test fails with a diff — forcing a deliberate decision (handle
     the new shape, or add it to the known-but-unhandled set).
     """
-    from modmcp.schema.audit import audit_jsonl
+    from tailward.schema.audit import audit_jsonl
 
     fixture = tmp_path / "fixture.jsonl"
     fixture.write_text(_fixture_corpus(), encoding="utf-8")

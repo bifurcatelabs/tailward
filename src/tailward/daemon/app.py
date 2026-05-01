@@ -29,7 +29,7 @@ from .livebus import LiveBus
 from .state import StateStore
 from .watcher import TranscriptWatcher
 
-log = logging.getLogger("modmcp.daemon")
+log = logging.getLogger("tailward.daemon")
 
 
 def _setup_logging() -> None:
@@ -579,7 +579,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning("synthesis worker unavailable: %s", e)
 
-        log.info("modmcp daemon started (mode=%s)", get_config().warden_mode)
+        log.info("tailward daemon started (mode=%s)", get_config().warden_mode)
         try:
             yield
         finally:
@@ -604,9 +604,9 @@ def create_app() -> FastAPI:
             if getattr(daemon, "synthesis", None):
                 await daemon.synthesis.stop()
             await daemon.ledger.close()
-            log.info("modmcp daemon stopped")
+            log.info("tailward daemon stopped")
 
-    app = FastAPI(title="modmcp", lifespan=lifespan)
+    app = FastAPI(title="tailward", lifespan=lifespan)
     app.state.daemon = daemon
 
     @app.get("/health")

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modmcp.schema.intent import SECTIONS, dump_markdown, empty_intent, parse_markdown
+from tailward.schema.intent import SECTIONS, dump_markdown, empty_intent, parse_markdown
 
 
 def test_empty_intent_has_all_sections() -> None:

@@ -21,7 +21,7 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     claude.mkdir()
     monkeypatch.setenv("MODMCP_HOME", str(home))
     monkeypatch.setenv("CLAUDE_PROJECTS_ROOT", str(claude))
-    from modmcp import config as cfg_mod
+    from tailward import config as cfg_mod
 
     cfg_mod._cached = None
     (home / "config.toml").write_text(
@@ -43,7 +43,7 @@ def active_mode(_isolated_home: Path) -> Path:
     (home / "config.toml").write_text(
         'warden_mode = "active"\n', encoding="utf-8"
     )
-    from modmcp import config as cfg_mod
+    from tailward import config as cfg_mod
 
     cfg_mod._cached = None
     return _isolated_home

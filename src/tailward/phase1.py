@@ -41,7 +41,7 @@ def _max_chars() -> int:
 
     Leaves room for system prompt + synthesis output budget.
     """
-    from modmcp.config import get_config
+    from tailward.config import get_config
 
     cfg = get_config()
     reserved = cfg.qwen_max_tokens_synth + 1500  # output + system prompt

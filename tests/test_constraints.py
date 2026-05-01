@@ -8,15 +8,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from modmcp.daemon.app import create_app
-from modmcp.paths import intent_path, project_hash
-from modmcp.schema.constraints import (
+from tailward.daemon.app import create_app
+from tailward.paths import intent_path, project_hash
+from tailward.schema.constraints import (
     default_policy,
     is_memory_edit_path,
     parse_active_rules,
 )
-from modmcp.schema.events import TranscriptEvent
-from modmcp.schema.intent import empty_intent, save_intent
+from tailward.schema.events import TranscriptEvent
+from tailward.schema.intent import empty_intent, save_intent
 
 
 def test_parse_active_rules_immutable_paths() -> None:
@@ -180,14 +180,14 @@ def test_default_policy_rule_texts_are_human_readable() -> None:
 
 
 def test_path_policy_allow_only_denies_outside() -> None:
-    from modmcp.schema.constraints import PathPolicy
+    from tailward.schema.constraints import PathPolicy
     p = PathPolicy(allow=["src/**"])
     assert p.violation_for("tests/foo.py") is not None
     assert p.violation_for("src/a/b.py") is None
 
 
 def test_immutable_glob_match() -> None:
-    from modmcp.schema.constraints import ImmutableFiles
+    from tailward.schema.constraints import ImmutableFiles
     i = ImmutableFiles(paths=["pyproject.toml", ".github/workflows/**"])
     assert i.violation_for("pyproject.toml") == "pyproject.toml"
     assert i.violation_for(".github/workflows/ci.yml") is not None

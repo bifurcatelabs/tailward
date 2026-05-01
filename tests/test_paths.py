@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from modmcp.paths import (
+from tailward.paths import (
     atomic_write_text,
     canonicalize_project_path,
     ensure_layout,

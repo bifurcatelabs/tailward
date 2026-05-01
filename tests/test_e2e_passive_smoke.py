@@ -29,9 +29,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from modmcp.daemon.app import create_app
-from modmcp.paths import intent_path, project_hash
-from modmcp.schema.intent import empty_intent, save_intent
+from tailward.daemon.app import create_app
+from tailward.paths import intent_path, project_hash
+from tailward.schema.intent import empty_intent, save_intent
 
 SESSION_ID = "session-passive-001"
 
@@ -578,7 +578,7 @@ def test_probe_worker_records_unreachable_endpoint_as_error(
         ),
         encoding="utf-8",
     )
-    from modmcp import config as cfg_mod
+    from tailward import config as cfg_mod
     cfg_mod._cached = None
 
     with TestClient(create_app()) as client:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from modmcp.schema.events import parse_line
+from tailward.schema.events import parse_line
 
 
 def test_parse_user_message_with_string_content() -> None:

@@ -12,8 +12,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from modmcp.daemon.qwen import QwenClient, _populate_usage
-from modmcp.storage.ledger import Ledger
+from tailward.daemon.qwen import QwenClient, _populate_usage
+from tailward.storage.ledger import Ledger
 
 
 def _fake_response(

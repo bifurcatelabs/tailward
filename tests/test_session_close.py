@@ -8,9 +8,9 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from modmcp.daemon.app import create_app
-from modmcp.daemon.session_close import FAILURE_MODES, SessionCloseDetector
-from modmcp.paths import project_hash
+from tailward.daemon.app import create_app
+from tailward.daemon.session_close import FAILURE_MODES, SessionCloseDetector
+from tailward.paths import project_hash
 
 
 class _FakeQwen:

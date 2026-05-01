@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from modmcp.phase1 import _denoise, _payload_to_intent, _validate, synthesize
-from modmcp.schema.intent import empty_intent, load_intent, save_intent
+from tailward.phase1 import _denoise, _payload_to_intent, _validate, synthesize
+from tailward.schema.intent import empty_intent, load_intent, save_intent
 
 
 def test_denoise_preserves_semantic_content() -> None:

@@ -9,10 +9,10 @@ from types import SimpleNamespace
 import pytest
 from fastapi.testclient import TestClient
 
-from modmcp.daemon.app import create_app
-from modmcp.daemon.rubric_worker import DIMENSIONS
-from modmcp.paths import project_hash
-from modmcp.schema.events import TranscriptEvent
+from tailward.daemon.app import create_app
+from tailward.daemon.rubric_worker import DIMENSIONS
+from tailward.paths import project_hash
+from tailward.schema.events import TranscriptEvent
 
 
 class _FakeQwen:
@@ -45,8 +45,8 @@ async def test_rubric_fires_on_cadence_and_records_all_dimensions(tmp_path: Path
     # Seed an intent with session_mode="build" so the rubric runs all
     # four dimensions. Unlabeled / yolo sessions fall through to the
     # permissive default profile which only scores uncertainty_honesty.
-    from modmcp.paths import intent_path
-    from modmcp.schema.intent import empty_intent, save_intent
+    from tailward.paths import intent_path
+    from tailward.schema.intent import empty_intent, save_intent
     intent = empty_intent(str(proj), proj.name)
     intent.front.session_mode = "build"
     save_intent(intent, intent_path(str(proj)))

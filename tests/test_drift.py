@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from modmcp.daemon.drift import _mode_mismatch, _tokens
+from tailward.daemon.drift import _mode_mismatch, _tokens
 
 
 def test_tokens_extracts_identifier_like_words() -> None:

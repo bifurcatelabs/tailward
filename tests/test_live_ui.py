@@ -7,9 +7,9 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from modmcp.daemon.app import create_app
-from modmcp.paths import intent_path, project_hash
-from modmcp.schema.intent import empty_intent, save_intent
+from tailward.daemon.app import create_app
+from tailward.paths import intent_path, project_hash
+from tailward.schema.intent import empty_intent, save_intent
 
 
 def _seed(project_path: Path, goal: str = "ship") -> str:

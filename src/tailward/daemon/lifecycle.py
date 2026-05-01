@@ -78,7 +78,7 @@ def start() -> int:
     cmd = [
         sys.executable,
         "-m",
-        "modmcp.daemon",
+        "tailward.daemon",
         "--host",
         cfg.http_host,
         "--port",

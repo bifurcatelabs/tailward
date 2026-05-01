@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from modmcp.schema.events import TranscriptEvent, bash_command, target_paths
+from tailward.schema.events import TranscriptEvent, bash_command, target_paths
 
 
 def _ev(tool_name: str | None, tool_input: dict | None) -> TranscriptEvent:

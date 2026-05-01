@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from modmcp.storage.ledger import Ledger
+from tailward.storage.ledger import Ledger
 
 
 @pytest.mark.asyncio

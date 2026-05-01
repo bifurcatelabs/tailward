@@ -11,7 +11,7 @@ false-positive risk is visible at review time.
 
 from __future__ import annotations
 
-from modmcp.schema.exfiltration import PATTERNS, redact, scan
+from tailward.schema.exfiltration import PATTERNS, redact, scan
 
 # Fixtures with real-format prefixes (sk_live_, xoxb-) are assembled via
 # string concatenation so GitHub's secret-scanning push protection does

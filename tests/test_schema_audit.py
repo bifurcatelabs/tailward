@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from modmcp.schema.audit import (
+from tailward.schema.audit import (
     VALIDATED_VERSIONS,
     audit_jsonl,
     claude_code_version,

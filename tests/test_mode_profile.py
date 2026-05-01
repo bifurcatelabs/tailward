@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from modmcp.daemon.mode_profile import (
+from tailward.daemon.mode_profile import (
     ALL_RUBRIC_DIMENSIONS,
     DEFAULT_PROFILE,
     known_profile_names,

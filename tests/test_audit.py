@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from modmcp.daemon.audit import (
+from tailward.daemon.audit import (
     _is_test_file,
     _match_in_string_literal,
     _verify_claim,
@@ -48,7 +48,7 @@ def test_extract_claims_catches_existence_negation() -> None:
 
 def test_verify_removal_claim_contradicted_when_symbol_still_present(tmp_path: Path) -> None:
     (tmp_path / "src.py").write_text("class FooBar:\n    pass\n", encoding="utf-8")
-    from modmcp.daemon.audit import Claim
+    from tailward.daemon.audit import Claim
 
     claim = Claim(text="I removed all FooBar references", candidates=["FooBar"])
     status, evidence = _verify_claim(claim, tmp_path, budget=100)
@@ -58,7 +58,7 @@ def test_verify_removal_claim_contradicted_when_symbol_still_present(tmp_path: P
 
 def test_verify_addition_claim_contradicted_when_missing(tmp_path: Path) -> None:
     (tmp_path / "src.py").write_text("print('hi')\n", encoding="utf-8")
-    from modmcp.daemon.audit import Claim
+    from tailward.daemon.audit import Claim
 
     claim = Claim(text="I added the NewThing helper", candidates=["NewThing"])
     status, _ = _verify_claim(claim, tmp_path, budget=100)
@@ -66,7 +66,7 @@ def test_verify_addition_claim_contradicted_when_missing(tmp_path: Path) -> None
 
 
 def test_verify_unverifiable_without_candidates(tmp_path: Path) -> None:
-    from modmcp.daemon.audit import Claim
+    from tailward.daemon.audit import Claim
 
     claim = Claim(text="I removed all of it", candidates=[])
     status, _ = _verify_claim(claim, tmp_path, budget=100)
@@ -76,7 +76,7 @@ def test_verify_unverifiable_without_candidates(tmp_path: Path) -> None:
 def test_verify_removal_verified_when_absent(tmp_path: Path) -> None:
     """Genuine removal claim: identifier not present in repo -> verified."""
     (tmp_path / "src.py").write_text("print('nothing to see')\n", encoding="utf-8")
-    from modmcp.daemon.audit import Claim
+    from tailward.daemon.audit import Claim
 
     claim = Claim(text="I removed the OldThing helper", candidates=["OldThing"])
     status, evidence = _verify_claim(claim, tmp_path, budget=100)
@@ -89,7 +89,7 @@ def test_verify_skips_change_verbs_without_direction(tmp_path: Path) -> None:
     skipped entirely — we don't have directional semantics to check them,
     so recording them as verified was just ledger pollution."""
     (tmp_path / "src.py").write_text("class Thing: pass\n", encoding="utf-8")
-    from modmcp.daemon.audit import Claim
+    from tailward.daemon.audit import Claim
 
     claim = Claim(text="I refactored Thing for clarity", candidates=["Thing"])
     status, _ = _verify_claim(claim, tmp_path, budget=100)
@@ -148,7 +148,7 @@ def test_is_test_file_detects_test_filename() -> None:
 
 
 def test_is_test_file_rejects_non_test_paths() -> None:
-    assert not _is_test_file("src/modmcp/daemon/audit.py")
+    assert not _is_test_file("src/tailward/daemon/audit.py")
     assert not _is_test_file("README.md")
     # ``test`` substring inside a non-test filename shouldn't count.
     assert not _is_test_file("src/contest_results.py")
@@ -184,7 +184,7 @@ def test_verify_skips_test_string_literal_match(tmp_path: Path) -> None:
     for those same names and counts the test fixtures as evidence
     the symbol still exists.
     """
-    from modmcp.daemon.audit import Claim
+    from tailward.daemon.audit import Claim
 
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
@@ -206,7 +206,7 @@ def test_verify_test_file_real_import_still_contradicts(tmp_path: Path) -> None:
     """A real import / class-def in a test file (not in a string literal)
     is genuine evidence the symbol exists — the filter must not over-skip
     these or claims would silently verify against actual contradiction."""
-    from modmcp.daemon.audit import Claim
+    from tailward.daemon.audit import Claim
 
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()

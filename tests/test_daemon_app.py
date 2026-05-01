@@ -10,9 +10,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from modmcp.daemon.app import create_app
-from modmcp.paths import intent_path, project_dir, project_hash
-from modmcp.schema.intent import empty_intent, save_intent
+from tailward.daemon.app import create_app
+from tailward.paths import intent_path, project_dir, project_hash
+from tailward.schema.intent import empty_intent, save_intent
 
 
 def _seed_project(project_path: str, goal: str = "ship M0 through M10") -> str:

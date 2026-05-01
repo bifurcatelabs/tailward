@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from modmcp.daemon.livebus import EVENT_TYPES, LiveBus
+from tailward.daemon.livebus import EVENT_TYPES, LiveBus
 
 
 @pytest.mark.asyncio
@@ -97,7 +97,7 @@ def test_publish_call_sites_use_registered_event_types() -> None:
     swallowed it, and no chip ever rendered. The earlier test was happy
     because the unregistered types weren't in the iteration set.
 
-    Approach: AST-walk every ``src/modmcp/daemon/**/*.py`` file, find
+    Approach: AST-walk every ``src/tailward/daemon/**/*.py`` file, find
     Call nodes whose attribute is ``publish`` and whose third positional
     arg (or ``event_type=`` kwarg) is a string literal. Assert each is
     in ``EVENT_TYPES``. Variable-driven publish calls are out of scope
@@ -105,7 +105,7 @@ def test_publish_call_sites_use_registered_event_types() -> None:
     """
     import ast
 
-    daemon_dir = Path("src/modmcp/daemon")
+    daemon_dir = Path("src/tailward/daemon")
     assert daemon_dir.is_dir(), "daemon source dir not found from test cwd"
 
     found_types: set[str] = set()
@@ -153,7 +153,7 @@ def test_publish_call_sites_use_registered_event_types() -> None:
 
 
 def test_live_event_to_json_is_parseable() -> None:
-    from modmcp.daemon.livebus import LiveEvent
+    from tailward.daemon.livebus import LiveEvent
     ev = LiveEvent(session_id="s", project_hash="ph", type="turn",
                    payload={"turn_idx": 1, "text_preview": "hi"})
     data = json.loads(ev.to_json())

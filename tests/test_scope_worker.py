@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from modmcp.daemon.app import create_app
-from modmcp.paths import project_hash
-from modmcp.schema.events import TranscriptEvent
+from tailward.daemon.app import create_app
+from tailward.paths import project_hash
+from tailward.schema.events import TranscriptEvent
 
 
 def _edit(idx: int, path: str) -> TranscriptEvent:
@@ -76,15 +76,15 @@ async def test_scope_worker_fires_creep(tmp_path: Path, monkeypatch) -> None:
     # Default / unlabeled sessions resolve to the permissive profile,
     # which has scope_creep_floor=None — creep never fires there by
     # design.
-    from modmcp.paths import intent_path
-    from modmcp.schema.intent import empty_intent, save_intent
+    from tailward.paths import intent_path
+    from tailward.schema.intent import empty_intent, save_intent
     intent = empty_intent(str(proj), proj.name)
     intent.front.session_mode = "build"
     save_intent(intent, intent_path(str(proj)))
 
     # Tighten the build profile's creep floor for this test only;
     # a real session would touch many more files before tripping it.
-    from modmcp.daemon import mode_profile as mp
+    from tailward.daemon import mode_profile as mp
     tight_build = mp.ModeProfile(
         name="build",
         description="test override",
