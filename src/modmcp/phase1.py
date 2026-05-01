@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from .schema.events import parse_line
@@ -107,6 +108,7 @@ def _validate(payload: dict) -> list[str]:
 
 
 def _payload_to_intent(payload: dict, intent: Intent) -> Intent:
+    touched = False
     for key, section in _SECTION_MAP.items():
         val = payload.get(key)
         if val is None:
@@ -119,11 +121,19 @@ def _payload_to_intent(payload: dict, intent: Intent) -> Intent:
             intent.sections[section] = body + "\n"
         else:
             intent.sections[section] = (str(val).rstrip()) + "\n"
+        touched = True
     # Ensure every canonical section exists.
     for s in SECTIONS:
         intent.sections.setdefault(s, "\n")
     if payload.get("session_mode") in ("build", "meta", "exploration"):
         intent.front.session_mode = payload["session_mode"]
+        touched = True
+    # Bump the frontmatter ``updated`` timestamp when the synth payload
+    # actually changed something. Prior versions left this stale, so
+    # comprehensive synth would write fresh sections but the metadata
+    # still pointed at whenever the intent.md was first created.
+    if touched:
+        intent.front.updated = datetime.now(UTC)
     return intent
 
 

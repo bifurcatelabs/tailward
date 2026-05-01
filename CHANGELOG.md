@@ -5,6 +5,78 @@ All notable changes to warden are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.6.0] — 2026-05-01
+
+The original v1 compaction-handoff vision realized passively. A
+single ``synthesis_worker`` writes compaction-resistant snapshots to
+disk on three triggers — periodic (token-based threshold), on-demand
+(button click), and comprehensive (when fullness crosses a fraction
+of Claude's context window) — and the comprehensive trigger updates
+the project's ``intent.md`` so the user has a coherent handoff
+artifact ready before Claude Code's own auto-compact heuristic
+typically fires. User in the middle, no prompt injection.
+
+### Added
+- **Session synthesis stream.** Three triggers, one writer.
+  Periodic captures fire when Claude's ``input_tokens`` grows past
+  ``synthesis_periodic_tokens`` since the last snapshot. On-demand
+  captures fire when the user clicks the new "synthesize now" button
+  in the Session-view ``SnapshotsPanel``. Comprehensive synth fires
+  when fullness crosses ``synthesis_comprehensive_fullness_pct`` of
+  ``synthesis_claude_context_tokens`` (default 75% of 200k = 150k);
+  it produces a fresh ``intent.md`` for the project and archives
+  the prior version under ``~/.modmcp/projects/<hash>/archive/``.
+- **Session-view ``SnapshotsPanel``.** Lists captures with model +
+  trigger + claude-side fullness + local-side input chars, expands
+  rows to show the markdown body, fires on-demand synth from the
+  panel header, dismisses stale errors, auto-clears on next success,
+  caps vertical real estate via internal scroll.
+- **Three new LiveBus event types.** ``synthesis_captured`` (any
+  successful capture), ``synthesis_failed`` (loud failure with
+  underlying error), ``intent_updated`` (comprehensive headline).
+  All three integrate into the feed: filter pill (``synthesis``
+  group), distinctive chip styles (violet for routine snapshots,
+  red for failures, saturated copper for intent.md updates), and
+  per-event expand bodies surfacing the relevant payload.
+- **Backoff for repeated upstream failures.** After K consecutive
+  failures (default 3), the worker pauses synthesis for N seconds
+  (default 300). Periodic skips silently during suppression;
+  on-demand raises ``SynthesisSuppressed`` → 503 with retry-after.
+  Prevents the "broken upstream gets hammered every minute"
+  failure mode.
+- **Settings transparency.** ``LlmProfilesPanel`` now surfaces
+  both ``synth (comprehensive)`` (the existing end-of-session synth
+  via ``warden handoff``) and ``synth (incremental)`` (the new
+  worker-driven prompt) verbatim, so users see exactly what's sent.
+- **``docs/synthesis-recommendations.md``.** Living surface for
+  A/B testing notes — model + sampler + prompt combinations as
+  they're calibrated against real session data.
+
+### Changed
+- **Worker reads JSONL from disk on every capture.** Replaces the
+  earlier in-memory rolling event window. JSONL is the source of
+  truth; an in-memory parallel was both an unnecessary optimization
+  and a bootstrap-correctness bug (cold-start calls saw an empty
+  window). Falls back to ``claude_projects_root()`` lookup when the
+  watcher hasn't re-attached the session yet (post-daemon-restart
+  edge case).
+- **Synthesis input widened.** Dispatcher now enqueues
+  ``user_message + tool_use + tool_result`` alongside
+  ``assistant_message``; worker mirrors phase1's denoise format
+  (``USER:/ASSISTANT:/[tool_use:NAME]/[tool_result]``). Earlier the
+  synth saw only assistant prose, which under-captured context.
+- **Local-stack panels labeled "local"** for clarity now that the
+  worker also calls the local LLM on its own cadence.
+
+### Fixed
+- **``intent.md`` ``updated:`` frontmatter** now bumps when
+  comprehensive synth writes a fresh document. Earlier, fresh
+  bodies kept the stale timestamp from prior versions.
+- **Copy-header timestamp in feed** rendered as 1970-01-21 because
+  ``LiveEvent.created_at`` arrives as seconds-since-epoch but
+  ``new Date()`` expects milliseconds. The inline clock was already
+  correct; only the copy path missed the conversion.
+
 ## [v2.5.0] — 2026-04-30
 
 View-identity discipline carried into the API + a fourth view for
