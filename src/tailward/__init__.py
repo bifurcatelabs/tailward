@@ -1,10 +1,9 @@
-"""warden — a local-first audit underlay for Claude Code.
+"""tailward — a local-first audit underlay for Claude Code.
 
-Three-name layout: PyPI distribution is ``tailward`` (the public name);
-CLI binary is ``warden`` (what users invoke); internal Python package
-remains ``modmcp`` as a deliberate historical artifact. See
-``CHANGELOG.md`` for the cutover history (light-path rebrand: rename
-surfaces, keep internals stable).
+Single-name layout as of v2.7.0: ``tailward`` is the PyPI package, the
+CLI binary, and the internal Python package. ``warden`` survives as a
+CLI deprecation alias for v2.x users (slated for v4 removal). See
+``CHANGELOG.md`` for the rename history.
 """
 
-__version__ = "2.6.1"
+__version__ = "2.7.0"

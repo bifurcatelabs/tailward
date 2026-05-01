@@ -10,7 +10,7 @@ import path from 'node:path';
 export default defineConfig({
   plugins: [svelte()],
   build: {
-    outDir: path.resolve(__dirname, '../src/modmcp/web/static/dist'),
+    outDir: path.resolve(__dirname, '../src/tailward/web/static/dist'),
     emptyOutDir: true,
     manifest: true,
     rollupOptions: {

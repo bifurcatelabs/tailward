@@ -5,6 +5,60 @@ All notable changes to warden are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.7.0] — 2026-05-01
+
+The internal rename. ``tailward`` becomes the canonical name across
+every surface — PyPI package, GitHub repo, CLI binary, internal
+Python package, state directory, env var. ``warden`` survives as a
+CLI deprecation alias for v2.x muscle memory (removed in v4).
+Originally scoped as part of v3.0.0 but pulled forward so v3 can be
+purely the Tauri/distribution story without conflating it with a
+1000-line import diff.
+
+### Changed
+- **Python package directory** — ``src/modmcp/`` → ``src/tailward/``.
+  All 65 ``from modmcp.X import ...`` lines rewritten across 24
+  files. ``[tool.hatch.build.targets.wheel]`` aligned to
+  ``src/tailward``. Logger names + FastAPI app title now use
+  ``tailward.*``. The daemon-spawn module path in ``lifecycle.py``
+  aligned to ``tailward.daemon``.
+- **CLI binary** — ``tailward`` is canonical (``tailward daemon
+  start``, ``tailward handoff``, etc.). ``warden`` preserved as a
+  deprecation alias from v2.x — ``warden daemon start`` works
+  identically. Slated for removal in v4.0.0. The original ``modmcp``
+  CLI alias is retired.
+- **State directory** — ``~/.modmcp/`` → ``~/.tailward/``. Existing
+  v2.x state migrates forward automatically on first v2.7+ run via
+  the new ``migrate_v2x_state_if_needed`` helper in ``paths.py``.
+  Strategy is copy + breadcrumb: the legacy directory stays as a
+  backup with a ``MIGRATED_TO_TAILWARD.txt`` file so a user
+  navigating there sees where state went. Idempotent.
+- **Env var** — ``TAILWARD_HOME`` is canonical. ``MODMCP_HOME``
+  honored as deprecation alias for v2.x configs (removed in v4).
+- **Per-repo symlink target** — ``tailward link`` writes to
+  ``<repo>/.tailward/intent.md``; existing ``<repo>/.modmcp/`` from
+  v2.x stays as orphan until the user re-runs the command.
+- **README aligned** — install section documents the auto-
+  migration; CLI examples promote ``tailward`` as canonical with
+  ``warden`` noted as alias; storage paths show ``~/.tailward/``;
+  source paths in references point at ``src/tailward/``; ASCII
+  architecture diagram updated.
+
+### Migration notes for v2.6.x users
+
+- **Existing state preserved.** First v2.7+ daemon run sees
+  ``~/.modmcp/`` exists, ``~/.tailward/`` doesn't, and copies
+  forward. No manual migration needed. The legacy directory
+  remains as a backup.
+- **Existing scripts keep working.** ``warden daemon start`` and
+  ``MODMCP_HOME=...`` both work for the entire v3.x line — just
+  surfaces a deprecation framing in the README. Scripts and aliases
+  pinned to those names continue to function unchanged.
+- **Existing ``<repo>/.modmcp/intent.md`` symlinks become orphans.**
+  Re-run ``tailward link`` in each project to update the symlink
+  target to ``<repo>/.tailward/intent.md``. The old directory can
+  be deleted at your convenience.
+
 ## [v2.6.1] — 2026-05-01
 
 Polish + defensive infrastructure on top of v2.6.0. No runtime
