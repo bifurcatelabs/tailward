@@ -731,6 +731,7 @@ def mount_web(app: FastAPI) -> None:
         expand when the on-disk count exceeds the returned slice.
         """
         import json as _json
+
         from ..paths import project_dir
 
         try:
@@ -773,11 +774,12 @@ def mount_web(app: FastAPI) -> None:
     ) -> JSONResponse:
         """Return the markdown body + sidecar metadata for one snapshot."""
         import json as _json
-        from ..paths import project_dir
 
         # Reject anything but the canonical timestamp shape so this can't
         # be coaxed into reading arbitrary files via path traversal.
         import re
+
+        from ..paths import project_dir
         if not re.fullmatch(r"\d{8}T\d{6}Z", ts):
             raise HTTPException(400, detail="malformed snapshot timestamp")
 
@@ -833,20 +835,23 @@ def mount_web(app: FastAPI) -> None:
                 project_path=project_path,
             )
         except sw.NoLocalLLM:
+            # ``from None`` because the worker exception is internal
+            # signaling — the HTTP error stands on its own and the
+            # original chain isn't useful for the client.
             raise HTTPException(
                 503,
                 detail="no local LLM configured — synthesis needs a "
                 "qwen-compatible endpoint; configure one in settings",
-            )
+            ) from None
         except sw.SynthesisInFlight:
             raise HTTPException(
                 409,
                 detail="another synthesis is already in flight for this "
                 "session (likely a periodic capture). Wait for the "
                 "synthesis_captured event, then retry.",
-            )
+            ) from None
         except sw.SynthesisSuppressed as e:
-            raise HTTPException(503, detail=str(e))
+            raise HTTPException(503, detail=str(e)) from None
         if meta is None:
             raise HTTPException(
                 502,
