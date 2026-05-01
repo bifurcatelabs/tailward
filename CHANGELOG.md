@@ -5,6 +5,59 @@ All notable changes to warden are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v2.6.1] — 2026-05-01
+
+Polish + defensive infrastructure on top of v2.6.0. No runtime
+behavior change for the synthesis stream; CI is now a more
+load-bearing surface, and the public README aligns with the
+project's actual architectural stance.
+
+### Added
+- **Schema-pinning inventory canary.** ``test_audit_inventory_canary``
+  runs ``audit_jsonl`` against a comprehensive synthetic fixture
+  covering every known event type and shape, asserts the resulting
+  type / message-key / content-block-type inventories match pinned
+  sets. When Claude Code ships a new shape, the test fails loudly
+  with a diff — drift is no longer silent.
+- **Trusted Publishing on tag push.** ``.github/workflows/publish-
+  to-pypi.yml`` builds + publishes via PyPA's OIDC trusted-publishing
+  flow when a ``v*`` tag lands. No API token stored; required-
+  reviewer environment gate prevents auto-publish without explicit
+  approval. Generates PEP 740 attestations for free.
+- **PyPI project URLs.** Sidebar links for Homepage / Issues /
+  Changelog now populate on the project page.
+- **README "At a glance".** Feature inventory section surfacing
+  v2.x UX additions (search, filter pills, full-session arc lens,
+  snapshot panel, past-sessions table, Settings transparency,
+  auto-handoff) — natural slots for screenshots in a follow-up.
+
+### Changed
+- **Claude Code 2.1.123 added to ``VALIDATED_VERSIONS``.** Re-audit
+  of a 36MB session spanning four binary versions found schema
+  stable; two new ``null``-placeholder message keys (``container``,
+  ``context_management``) pinned in ``KNOWN_UNREAD_MESSAGE_FIELDS``
+  with re-audit guidance if they become populated.
+- **README aligned with v2.6 reality.** Status bumped through v2.6.1;
+  Settings view documented; synthesis stream described; Web UI route
+  table updated for v2.5+ endpoints (reflection/agent-behavior split,
+  snapshots, arc, synthesize, search); test count 120 → 180;
+  architecture diagram includes synthesis_worker.
+- **README posture cleanup.** Original v1 active-mode design (MCP
+  server + UserPromptSubmit hook + drift correctives) framed as
+  historical artifact only — not maintained, not tested, may no
+  longer work. Drops the install walkthrough and active-mode-only
+  config keys; removes the binary "passive vs active" framing that
+  implied parity. Aligns the public README with the no-injection
+  architectural stance memo'd internally as ``rejected on principle``.
+- **CI action versions bumped.** ``actions/checkout`` and
+  ``actions/setup-python`` v4/v5 → v6; ``actions/setup-node`` v4 →
+  v5. No behavior change.
+
+### Fixed
+- **Lint cleanup.** Three ``B904`` ``raise ... from None`` additions
+  on the new synth endpoint exception handlers + import-sort fixes
+  the ruff CI job had flagged on the v2.6.0 cut.
+
 ## [v2.6.0] — 2026-05-01
 
 The original v1 compaction-handoff vision realized passively. A
