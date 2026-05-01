@@ -123,6 +123,11 @@ class _SessionState:
     # the deadline passes.
     consecutive_failures: int = 0
     suppressed_until: float | None = None
+    # Comprehensive-synth arming. Set False after a comprehensive fire
+    # to prevent re-firing on every subsequent assistant turn while
+    # fullness stays above the threshold. Re-armed when fullness drops
+    # back below the threshold (i.e., after a compaction reset).
+    comprehensive_armed: bool = True
 
 
 class SynthesisWorker:
@@ -265,8 +270,28 @@ class SynthesisWorker:
             state.last_snapshot_input_tokens = fullness
         state.last_input_tokens = fullness
 
-        threshold = int(getattr(get_config(), "synthesis_periodic_tokens", 10000))
+        cfg = get_config()
+        threshold = int(getattr(cfg, "synthesis_periodic_tokens", 10000))
         delta = fullness - state.last_snapshot_input_tokens
+
+        # Comprehensive trigger: fires when Claude's input_tokens
+        # crosses the configured fullness fraction of its context
+        # window. Armed/disarmed flag prevents re-firing on every
+        # subsequent assistant turn while we stay over the bar.
+        comp_pct = float(getattr(cfg, "synthesis_comprehensive_fullness_pct", 0.75))
+        comp_ctx = int(getattr(cfg, "synthesis_claude_context_tokens", 1_000_000))
+        comp_threshold = int(comp_pct * comp_ctx)
+        if fullness < comp_threshold:
+            # Re-arm so a future high-fullness crossing fires again.
+            state.comprehensive_armed = True
+        if (
+            fullness >= comp_threshold
+            and state.comprehensive_armed
+            and not state.in_flight
+        ):
+            await self._fire_comprehensive(state)
+            return  # Don't also fire periodic on the same turn
+
         if delta >= threshold and not state.in_flight:
             await self._fire_incremental(state)
 
@@ -284,6 +309,126 @@ class SynthesisWorker:
         finally:
             async with self._lock:
                 state.in_flight = False
+
+    async def _fire_comprehensive(self, state: _SessionState) -> None:
+        """Trigger 3: produce a fresh ``intent.md`` for the project.
+
+        Reuses ``phase1.synthesize_async`` (the existing comprehensive
+        synth path that powers ``warden handoff``). The current
+        ``intent.md`` is archived under
+        ``~/.modmcp/projects/<hash>/archive/intent-<ts>.md`` before
+        being overwritten so prior versions stay recoverable. Disarms
+        on success so we don't re-fire on every subsequent assistant
+        turn while fullness stays high; re-arms in ``_process`` when
+        fullness drops back below the threshold (compaction reset).
+        """
+        if self._daemon.qwen is None:
+            log.debug("comprehensive synthesis skipped: no local LLM configured")
+            return
+        if not state.project_path:
+            log.debug("comprehensive synthesis skipped: no project_path")
+            return
+        async with self._lock:
+            if state.in_flight:
+                return
+            state.in_flight = True
+
+        try:
+            await self._run_comprehensive(state)
+        finally:
+            async with self._lock:
+                state.in_flight = False
+
+    async def _run_comprehensive(self, state: _SessionState) -> None:
+        from .. import phase1
+        from ..paths import archive_dir, intent_path
+        from ..schema.intent import empty_intent, load_intent, save_intent
+
+        # Resolve the live transcript path (same lookup the incremental
+        # capture uses, with the post-restart fallback).
+        st = self._daemon.state.get(state.session_id) if self._daemon.state else None
+        jsonl_path = getattr(st, "jsonl_path", None) if st else None
+        if not jsonl_path:
+            jsonl_path = self._resolve_jsonl_fallback(
+                state.project_path, state.session_id
+            )
+        if not jsonl_path or not Path(jsonl_path).exists():
+            log.warning(
+                "comprehensive synthesis skipped: no transcript file for session %s",
+                state.session_id,
+            )
+            return
+
+        # Load existing intent.md or start fresh — phase1 mutates the
+        # Intent in place + returns it.
+        ipath = intent_path(state.project_path)
+        if ipath.exists():
+            intent = load_intent(ipath)
+        else:
+            project_name = Path(state.project_path).name or state.project_path
+            intent = empty_intent(state.project_path, project_name)
+
+        try:
+            updated = await phase1.synthesize_async(
+                self._daemon.qwen, Path(jsonl_path), intent
+            )
+        except Exception as e:
+            log.warning("comprehensive synthesis failed: %s", e)
+            state.consecutive_failures += 1
+            cfg = get_config()
+            threshold = int(getattr(cfg, "synthesis_failure_threshold", 3))
+            backoff = float(getattr(cfg, "synthesis_backoff_seconds", 300.0))
+            entered = state.consecutive_failures >= threshold
+            if entered:
+                state.suppressed_until = time.time() + backoff
+            await self._publish_failure(
+                state,
+                trigger="comprehensive",
+                error=str(e),
+                consecutive_failures=state.consecutive_failures,
+                suppressed_until=state.suppressed_until if entered else None,
+            )
+            return
+
+        # Archive previous + save fresh.
+        archive_path: Path | None = None
+        if ipath.exists():
+            adir = archive_dir(state.project_path)
+            adir.mkdir(parents=True, exist_ok=True)
+            ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
+            archive_path = adir / f"intent-{ts}.md"
+            try:
+                archive_path.write_text(
+                    ipath.read_text(encoding="utf-8"), encoding="utf-8"
+                )
+            except Exception:
+                log.exception("failed to archive prior intent.md")
+                archive_path = None
+        save_intent(updated, ipath)
+
+        # Disarm so we don't re-fire on every subsequent turn.
+        state.comprehensive_armed = False
+        # Success resets backoff state, same as incremental.
+        state.consecutive_failures = 0
+        state.suppressed_until = None
+
+        live = getattr(self._daemon, "live", None)
+        if live is not None:
+            try:
+                await live.publish(
+                    state.session_id,
+                    state.project_hash,
+                    "intent_updated",
+                    {
+                        "trigger": "comprehensive",
+                        "intent_path": str(ipath),
+                        "archive_path": str(archive_path) if archive_path else None,
+                        "fullness_input_tokens": state.last_input_tokens,
+                        "incomplete": bool(getattr(updated.front, "incomplete", False)),
+                    },
+                )
+            except Exception:
+                log.exception("intent_updated publish failed")
 
     async def on_demand(
         self,

@@ -73,6 +73,10 @@ const KNOWN_EVENT_TYPES = new Set([
   // response, etc). Payload carries trigger + error message; the panel
   // surfaces this so silent misses don't accumulate.
   'synthesis_failed',
+  // Comprehensive synth wrote a fresh intent.md (Trigger 3). Fires
+  // when Claude's context fullness crosses the configured fraction.
+  // Payload: intent.md path, archive path of previous version.
+  'intent_updated',
 ]);
 
 const FEED_CAP = 250;

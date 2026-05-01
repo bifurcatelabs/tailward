@@ -127,50 +127,70 @@ def _payload_to_intent(payload: dict, intent: Intent) -> Intent:
     return intent
 
 
+async def _run_synth(qwen, denoised: str, intent: Intent) -> dict:
+    """Inner async core: call Qwen, validate, retry once if needed.
+    Mutates ``intent.front.incomplete`` on persistent validation failure
+    so save points carry the warning. Returns the best payload it got.
+    """
+    try:
+        payload = await qwen.complete_json(SYSTEM, denoised, kind="synth")
+    except Exception as e:
+        log.warning("phase 1 first-pass failed: %s", e)
+        payload = {}
+    errors = _validate(payload)
+    if not errors:
+        return payload
+
+    retry_prompt = (
+        denoised
+        + "\n\n---\nYour previous output failed validation with errors: "
+        + "; ".join(errors)
+        + ". Return corrected JSON only, strictly matching the schema. Keep values concise."
+    )
+    try:
+        payload2 = await qwen.complete_json(SYSTEM, retry_prompt, kind="synth")
+    except Exception as e:
+        log.warning("phase 1 retry failed: %s", e)
+        intent.front.incomplete = True
+        return payload  # use whatever partial we have
+    errors2 = _validate(payload2)
+    if errors2:
+        log.warning("phase 1 retry still failing: %s", errors2)
+        intent.front.incomplete = True
+        # Keep whichever payload has more filled fields.
+        if len(payload2) > len(payload):
+            return payload2
+        return payload
+    return payload2
+
+
+async def synthesize_async(qwen, transcript: Path, intent: Intent) -> Intent:
+    """Async-native variant of :func:`synthesize`. Use from inside a
+    running event loop (e.g. the synthesis worker's comprehensive
+    trigger) where ``asyncio.run`` would error."""
+    text = Path(transcript).read_text(encoding="utf-8", errors="replace")
+    denoised = _denoise(text)
+    payload = await _run_synth(qwen, denoised, intent)
+    return _payload_to_intent(payload, intent)
+
+
 def synthesize(qwen, transcript: Path, intent: Intent) -> Intent:
-    """Sync wrapper: load transcript, call Qwen, validate + retry once, fill intent."""
+    """Sync wrapper: load transcript, call Qwen, validate + retry once, fill intent.
+
+    Used by the CLI ``warden handoff`` path. Internal callers from
+    inside an event loop (the ``synthesis_worker`` comprehensive
+    trigger) should use :func:`synthesize_async` instead.
+    """
     text = Path(transcript).read_text(encoding="utf-8", errors="replace")
     denoised = _denoise(text)
 
-    async def _run() -> dict:
-        try:
-            payload = await qwen.complete_json(SYSTEM, denoised, kind="synth")
-        except Exception as e:
-            log.warning("phase 1 first-pass failed: %s", e)
-            payload = {}
-        errors = _validate(payload)
-        if not errors:
-            return payload
-
-        retry_prompt = (
-            denoised
-            + "\n\n---\nYour previous output failed validation with errors: "
-            + "; ".join(errors)
-            + ". Return corrected JSON only, strictly matching the schema. Keep values concise."
-        )
-        try:
-            payload2 = await qwen.complete_json(SYSTEM, retry_prompt, kind="synth")
-        except Exception as e:
-            log.warning("phase 1 retry failed: %s", e)
-            intent.front.incomplete = True
-            return payload  # use whatever partial we have
-        errors2 = _validate(payload2)
-        if errors2:
-            log.warning("phase 1 retry still failing: %s", errors2)
-            intent.front.incomplete = True
-            # Keep whichever payload has more filled fields.
-            if len(payload2) > len(payload):
-                return payload2
-            return payload
-        return payload2
-
     try:
-        payload = asyncio.run(_run())
+        payload = asyncio.run(_run_synth(qwen, denoised, intent))
     except RuntimeError:
         # If there's an existing event loop (unlikely from CLI), fall back.
         loop = asyncio.new_event_loop()
         try:
-            payload = loop.run_until_complete(_run())
+            payload = loop.run_until_complete(_run_synth(qwen, denoised, intent))
         finally:
             loop.close()
 

@@ -73,6 +73,7 @@
     memory_edit: 'memory',
     synthesis_captured: 'synthesis',
     synthesis_failed: 'synthesis failed',
+    intent_updated: 'intent.md updated',
   };
 
   let p = $derived(event.payload || {});

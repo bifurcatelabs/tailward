@@ -178,6 +178,22 @@ class Config:
     synthesis_failure_threshold: int = 3
     synthesis_backoff_seconds: float = 300.0
 
+    # Comprehensive synth threshold (Trigger 3). When the agent's
+    # observed input_tokens fullness crosses this fraction of Claude's
+    # context window, fire a comprehensive synth that produces a fresh
+    # ``intent.md`` for the project. The original v1 compaction-handoff
+    # vision: passive artifact at the right moment, user in the middle,
+    # no injection. Default 75% gives a margin before Claude Code's own
+    # auto-compact heuristic typically fires (~85-90%).
+    synthesis_comprehensive_fullness_pct: float = 0.75
+    # Estimated upper bound of Claude's context window for the
+    # comprehensive-synth trigger. Default 200k matches the standard
+    # Claude variant; users on the ``[1m]`` model IDs should raise to
+    # 1_000_000 so the 75% trigger doesn't fire on every active session
+    # well before any real compaction risk. Used to compute the
+    # absolute token threshold from the percentage above.
+    synthesis_claude_context_tokens: int = 200_000
+
     # Live UI transport: SSE endpoint caps + replay window. The replay
     # window applies to the page-load tail and the SSE backfill on
     # reconnect; live.js caps the rendered DOM at 200 nodes regardless,

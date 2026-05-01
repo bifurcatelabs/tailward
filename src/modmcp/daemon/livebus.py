@@ -90,6 +90,13 @@ EVENT_TYPES: frozenset[str] = frozenset(
         # etc.) so the user sees the failure rather than silently
         # missing a capture. Payload: trigger, error message.
         "synthesis_failed",
+        # Comprehensive synth wrote a fresh ``intent.md``. Trigger 3
+        # of the synthesis stream — fires when Claude's input_tokens
+        # crosses the configured fullness fraction. Payload carries
+        # the intent.md path + archive path of the prior version, so
+        # the user can pick up where the agent left off in their next
+        # session without losing decisions across compaction.
+        "intent_updated",
     }
 )
 
