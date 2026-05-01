@@ -178,14 +178,14 @@ def handoff(
 def link(
     project: Path = typer.Option(None, "--project", help="Project path (defaults to cwd)."),
 ) -> None:
-    """Symlink the project's ``intent.md`` into ``<repo>/.modmcp/intent.md``."""
+    """Symlink the project's ``intent.md`` into ``<repo>/.tailward/intent.md``."""
     project_path = (project or Path.cwd()).resolve()
     target = intent_path(str(project_path))
     if not target.exists():
-        typer.echo(f"no intent.md at {target}; run `warden handoff` first", err=True)
+        typer.echo(f"no intent.md at {target}; run `tailward handoff` first", err=True)
         raise typer.Exit(code=2)
 
-    link_dir = project_path / ".modmcp"
+    link_dir = project_path / ".tailward"
     link_dir.mkdir(exist_ok=True)
     link_file = link_dir / "intent.md"
 

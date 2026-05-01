@@ -1,7 +1,7 @@
 """Session synthesis stream — continuous capture, multiple consumers.
 
 A single worker writes compaction-resistant markdown snapshots to
-``~/.modmcp/projects/<hash>/snapshots/`` as a session runs. Multiple
+``~/.tailward/projects/<hash>/snapshots/`` as a session runs. Multiple
 triggers feed the same writer:
 
 * **Periodic (token-based).** Every time the assistant turn's reported
@@ -316,7 +316,7 @@ class SynthesisWorker:
         Reuses ``phase1.synthesize_async`` (the existing comprehensive
         synth path that powers ``warden handoff``). The current
         ``intent.md`` is archived under
-        ``~/.modmcp/projects/<hash>/archive/intent-<ts>.md`` before
+        ``~/.tailward/projects/<hash>/archive/intent-<ts>.md`` before
         being overwritten so prior versions stay recoverable. Disarms
         on success so we don't re-fire on every subsequent assistant
         turn while fullness stays high; re-arms in ``_process`` when

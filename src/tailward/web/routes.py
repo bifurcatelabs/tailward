@@ -720,7 +720,7 @@ def mount_web(app: FastAPI) -> None:
     async def live_snapshots(request: Request, ph: str, session_id: str) -> JSONResponse:
         """List session-synthesis snapshots written by the synthesis_worker.
 
-        Reads ``~/.modmcp/projects/<ph>/snapshots/*.meta.json`` and filters
+        Reads ``~/.tailward/projects/<ph>/snapshots/*.meta.json`` and filters
         to the requested session. The Session-view ``SnapshotsPanel``
         consumes this for backfill on mount; new captures arrive via the
         ``synthesis_captured`` LiveBus event.

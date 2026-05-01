@@ -1,4 +1,4 @@
-"""Configuration loading from ``~/.modmcp/config.toml`` with sensible defaults."""
+"""Configuration loading from ``~/.tailward/config.toml`` with sensible defaults."""
 
 from __future__ import annotations
 

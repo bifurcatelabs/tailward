@@ -567,7 +567,7 @@ def test_probe_worker_records_unreachable_endpoint_as_error(
     """Probe worker logs an error row when the configured endpoint
     is unreachable. Test environment points at an obviously-dead port
     so the worker hits the connection-refused branch quickly."""
-    home = tmp_path / "modmcp_home"
+    home = tmp_path / "tailward_home"
     cfg_text = home.joinpath("config.toml").read_text(encoding="utf-8")
     home.joinpath("config.toml").write_text(
         cfg_text + (
@@ -706,7 +706,7 @@ def test_session_state_survives_daemon_restart(
     """Cumulative counters reload from session_state across a daemon restart.
 
     Drives a session through one logical turn, tears down the daemon,
-    spins up a fresh daemon against the same ``MODMCP_HOME``, and asserts
+    spins up a fresh daemon against the same ``TAILWARD_HOME``, and asserts
     the watcher hydrates the in-memory ``SessionState`` from the
     persisted columns instead of starting from zero. Without this, every
     daemon restart visibly "resets" the live UI's turn count and token
@@ -769,7 +769,7 @@ def test_session_state_survives_daemon_restart(
         assert persisted_row["total_cache_read_tokens"] == usage["cache_read_input_tokens"]
         assert persisted_row["last_model"] == "claude-opus-4-7"
 
-    # Second boot against the same MODMCP_HOME: hydration must restore.
+    # Second boot against the same TAILWARD_HOME: hydration must restore.
     with TestClient(create_app()) as client2:
         daemon2 = client2.app.state.daemon
 

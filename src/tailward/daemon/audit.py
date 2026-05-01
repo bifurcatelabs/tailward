@@ -289,7 +289,7 @@ def _first_hits(hits: dict[str, list[tuple[str, int]]]) -> dict[str, tuple[str, 
     return out
 
 
-_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".modmcp", "dist", "build"}
+_SKIP_DIRS = {".git", "node_modules", ".venv", "venv", "__pycache__", ".tailward", ".modmcp", "dist", "build"}
 
 # Test-file detection: ``tests/`` or ``test/`` directory anywhere on the
 # path, or a filename matching ``test_*.<ext>`` / ``*_test.<ext>``.

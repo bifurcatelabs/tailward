@@ -7,7 +7,7 @@ import pytest
 
 @pytest.fixture(autouse=True)
 def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    """Isolate every test's ~/.modmcp/ and Claude projects root.
+    """Isolate every test's ~/.tailward/ and Claude projects root.
 
     Defaults to ``warden_mode = "passive"`` — the product's supported
     surface. Tests that exercise the opt-in active loop (preamble injection,
@@ -15,11 +15,11 @@ def _isolated_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     below so the config is rewritten before ``create_app`` boots the
     daemon.
     """
-    home = tmp_path / "modmcp_home"
+    home = tmp_path / "tailward_home"
     claude = tmp_path / "claude_projects"
     home.mkdir()
     claude.mkdir()
-    monkeypatch.setenv("MODMCP_HOME", str(home))
+    monkeypatch.setenv("TAILWARD_HOME", str(home))
     monkeypatch.setenv("CLAUDE_PROJECTS_ROOT", str(claude))
     from tailward import config as cfg_mod
 
@@ -39,7 +39,7 @@ def active_mode(_isolated_home: Path) -> Path:
     lifespan reads it. The shared ``_isolated_home`` autouse fixture always
     runs first and seeds the passive default, so this overwrite is safe.
     """
-    home = _isolated_home / "modmcp_home"
+    home = _isolated_home / "tailward_home"
     (home / "config.toml").write_text(
         'warden_mode = "active"\n', encoding="utf-8"
     )
