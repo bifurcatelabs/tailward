@@ -2,7 +2,7 @@
 
 A local-first **audit underlay for Claude Code**. Your session sits in the foreground; tailward quietly captures it from below — tailing the JSONL transcripts Claude Code writes, scoring them against documented failure modes via deterministic rule checks plus a **local LLM rubric**, deriving in-band inference-path metrics, probing the local LLM endpoint, synthesizing compaction-resistant snapshots so context survives across session boundaries, and surfacing everything in a multi-view localhost web UI (Session / Reflection / Platform / Settings). No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
 
-> **Three names, one tool.** `tailward` is the public name (PyPI, GitHub repo). `warden` is the CLI binary you'll type (`warden daemon start`). `modmcp` is the internal Python package, surfaced only as the path of the state directory (`~/.modmcp/`). Layout reasoning lives in [CONTRIBUTING.md](CONTRIBUTING.md).
+> **One name** as of v2.7.0 — `tailward` is the PyPI package, the GitHub repo, the CLI binary you'll type (`tailward daemon start`), the internal Python package, and the state directory (`~/.tailward/`). `warden` is preserved as a deprecation alias for the CLI from the v2.x line — both `warden daemon start` and `tailward daemon start` work, but `tailward` is canonical (alias removal slated for v4). State directories created under `~/.modmcp/` by older v2.x installs auto-migrate forward on first v2.7+ run.
 
 See [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the audit layer and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which failure modes tailward currently detects and how. [`V1 Proposal.md`](V1%20Proposal.md) is the original design and is preserved as a historical artifact — the project pivoted away from active prompt injection in v1.1 and reframed as a trust layer in v2.0.0.
 
@@ -36,7 +36,7 @@ Solo-dev work; expect rough edges. Issues and discussion welcome — see [CONTRI
 - **Synthesized-turn detection.** Claude Code's `/compact` persists its summary as a `type: "user"` JSONL row with `isCompactSummary: true`. The live feed surfaces these as a distinct `compact_summary` event so they don't blend in with typed user turns.
 - **Permission-mode signals.** Mode transitions (`Shift+Tab` cycling between `default` / `acceptEdits` / `bypassPermissions` / `plan`), `tool_interrupted` events when the user declines a tool call, and `away_summary` recaps Claude Code emits during idle periods all surface as distinct chips in the feed.
 - **Exfiltration detection.** A regex pattern library scans tool inputs and content events for known secret shapes (API keys, tokens, AWS access patterns) before they land in the audit log. Matches are redacted in storage and surfaced as `exfiltration_alert` events with the source event marked so you can verify and rotate.
-- **Session synthesis stream.** A dedicated worker writes compaction-resistant snapshots to `~/.modmcp/projects/<hash>/snapshots/` on three triggers: periodic (token-based threshold), on-demand (button click), and comprehensive (when context fullness crosses a fraction of Claude's window — produces a fresh `intent.md` for the project so the next session has a coherent handoff artifact). Original v1 compaction-handoff vision delivered passively; user in the middle, no injection.
+- **Session synthesis stream.** A dedicated worker writes compaction-resistant snapshots to `~/.tailward/projects/<hash>/snapshots/` on three triggers: periodic (token-based threshold), on-demand (button click), and comprehensive (when context fullness crosses a fraction of Claude's window — produces a fresh `intent.md` for the project so the next session has a coherent handoff artifact). Original v1 compaction-handoff vision delivered passively; user in the middle, no injection.
 
 **Reflection — am I behaving?**
 
@@ -76,7 +76,7 @@ An audit is only as trustworthy as its supply chain. If tailward shipped your pr
 
 So tailward is local-first, top to bottom:
 
-- **Transcripts never leave the machine.** The watcher reads JSONL from `~/.claude/projects/`, the ledger writes to `~/.modmcp/ledger.db`, the HTTP server binds to `127.0.0.1`. No cloud writes, no telemetry, no opt-out required because there's nothing to opt out of.
+- **Transcripts never leave the machine.** The watcher reads JSONL from `~/.claude/projects/`, the ledger writes to `~/.tailward/ledger.db`, the HTTP server binds to `127.0.0.1`. No cloud writes, no telemetry, no opt-out required because there's nothing to opt out of.
 - **The scoring LLM is yours too.** tailward talks to an OpenAI-compatible endpoint at `http://127.0.0.1:<port>/v1` — llama.cpp, Ollama, LM Studio, vLLM, whatever you prefer. There is deliberately no fallback to a hosted API: if the endpoint is unreachable, tailward skips the LLM-judged checks and keeps the deterministic ones running.
 - **Deterministic first, LLM for depth.** The constraints worker (path / immutable-file / forbidden-bash), scope worker, and claim-grep path all run with zero LLM present — those are the load-bearing "is this session in bounds?" signals and they're regex-fast on CPU. The local model adds the softer trust dimensions (invariants awareness, uncertainty honesty, maintainability, provenance) and the end-of-session 8-mode consolidation. You can run tailward fully airgapped and still see live violations, scope creep, and claim verdicts; the rubric bar and report card just stay blank until a model comes online.
 
@@ -99,7 +99,7 @@ pipx install git+https://github.com/bifurcatelabs/tailward.git
 # or, for development from a local clone — see CONTRIBUTING.md
 ```
 
-First run creates `~/.modmcp/` for state (config, logs, ledger, per-project intent). Override with `MODMCP_HOME=/path/to/state`. The state-dir name is internal plumbing held over from the project's earlier name; user-facing surfaces use `tailward` (PyPI) and `warden` (CLI).
+First run creates `~/.tailward/` for state (config, logs, ledger, per-project intent). Override with `TAILWARD_HOME=/path/to/state`. Upgrading from a v2.x install (state was at `~/.modmcp/`)? Existing state auto-migrates forward on the first v2.7+ run — the old directory stays as a backup with a `MIGRATED_TO_TAILWARD.txt` breadcrumb. The legacy `MODMCP_HOME` env var continues to work as a deprecation alias and will be removed in v4.
 
 ### Minimal passive setup (observe-only, no Claude Code changes)
 
@@ -107,12 +107,12 @@ This is the recommended starting point. You can run it against a live Claude Cod
 
 ```bash
 # 1. Start the daemon.
-warden daemon start
+tailward daemon start
 # -> prints pid + http://127.0.0.1:7878
 
 # 2. Seed a project so it shows up in the UI.
 cd ~/code/your-project
-warden handoff --no-edit         # creates ~/.modmcp/projects/<hash>/intent.md
+tailward handoff --no-edit       # creates ~/.tailward/projects/<hash>/intent.md
 
 # 3. Start using Claude Code in that same project as you normally would.
 #    The transcript watcher will pick up the session automatically.
@@ -125,19 +125,19 @@ start http://127.0.0.1:7878/     # Windows
 
 Click into your project → **Live** → you'll see turns and tool calls stream in real time. Violations, scope snapshots, rubric scores, and the end-of-session report card fill in as they're produced.
 
-Stop with `warden daemon stop`.
+Stop with `tailward daemon stop`. (`warden` works too — v2.x deprecation alias.)
 
 ### Daily use
 
 ```bash
-warden daemon status                # is it running?
-warden daemon logs -n 200           # tail the daemon log
-warden daemon run                   # foreground mode for debugging
-warden handoff                      # re-capture intent (opens $EDITOR)
-warden handoff --auto               # same, but LLM-synthesized (needs the local LLM up)
-warden handoff --no-edit            # skip $EDITOR
-warden link                         # symlink ~/.modmcp/.../intent.md into <repo>/.modmcp/
-warden version
+tailward daemon status              # is it running?
+tailward daemon logs -n 200         # tail the daemon log
+tailward daemon run                 # foreground mode for debugging
+tailward handoff                    # re-capture intent (opens $EDITOR)
+tailward handoff --auto             # same, but LLM-synthesized (needs the local LLM up)
+tailward handoff --no-edit          # skip $EDITOR
+tailward link                       # symlink ~/.tailward/.../intent.md into <repo>/.tailward/
+tailward version
 ```
 
 ## Web UI
@@ -176,14 +176,16 @@ All routes live under `http://127.0.0.1:7878/`. Every project gets a 12-char has
 
 | command | what |
 |---|---|
-| `warden daemon start\|stop\|status\|logs\|run` | lifecycle (`run` = foreground) |
-| `warden handoff [--session ID] [--no-edit] [--auto\|--manual] [--project PATH]` | synthesize a structured `intent.md` from the session transcript |
-| `warden link [--project PATH]` | symlink `intent.md` into `<repo>/.modmcp/intent.md` |
-| `warden version` | print version |
+| `tailward daemon start\|stop\|status\|logs\|run` | lifecycle (`run` = foreground) |
+| `tailward handoff [--session ID] [--no-edit] [--auto\|--manual] [--project PATH]` | synthesize a structured `intent.md` from the session transcript |
+| `tailward link [--project PATH]` | symlink `intent.md` into `<repo>/.tailward/intent.md` |
+| `tailward version` | print version |
+
+`warden` invokes the same entry point — preserved as a v2.x deprecation alias, slated for removal in v4.
 
 ## Configuration
 
-First run writes `~/.modmcp/config.toml` with defaults. Restart the daemon after editing. The defaults live in [`src/modmcp/config.py`](src/modmcp/config.py) and that file is the source of truth; the highlights:
+First run writes `~/.tailward/config.toml` with defaults. Restart the daemon after editing. The defaults live in [`src/tailward/config.py`](src/tailward/config.py) and that file is the source of truth; the highlights:
 
 ```toml
 # Daemon HTTP.
@@ -279,7 +281,7 @@ max_watch_projects = 32
 ```
 
 Environment overrides:
-- `MODMCP_HOME` — relocate the state directory (default `~/.modmcp`). The internal package and state directory keep the historical `modmcp` name; the public name is `tailward` (PyPI / GitHub) and the CLI binary is `warden`. Eventual goal is to align all three names — see CONTRIBUTING.md.
+- `TAILWARD_HOME` — relocate the state directory (default `~/.tailward`). `MODMCP_HOME` is honored as a deprecation alias for v2.x users; will be removed in v4.
 - `CLAUDE_PROJECTS_ROOT` — relocate the Claude Code transcript root (default `~/.claude/projects`).
 
 ## Local LLM endpoint
@@ -297,7 +299,7 @@ All LLM calls serialize through a single queue so tailward doesn't contend with 
 
 | kind | used by | typical cost |
 |---|---|---|
-| `synth` (comprehensive) | `warden handoff --auto` + comprehensive-trigger of synthesis worker (writes a fresh `intent.md` when context fullness crosses the threshold) | heavy (one-shot, up to 6k out + thinking) |
+| `synth` (comprehensive) | `tailward handoff --auto` + comprehensive-trigger of synthesis worker (writes a fresh `intent.md` when context fullness crosses the threshold) | heavy (one-shot, up to 6k out + thinking) |
 | `synth` (incremental) | periodic + on-demand triggers of the synthesis worker (writes markdown snapshots to disk for compaction-resistant capture) | medium (fires at token-threshold cadence) |
 | `drift` | drift classifier (records verdict to ledger; no prompt-stream side effect) | light (per-turn) |
 | `rubric` | rubric worker (assistant) + user-side rubric | medium (sampled, every N turns + triggers) |
@@ -309,12 +311,12 @@ If the LLM endpoint is unreachable, tailward degrades cleanly:
 
 | works without LLM | needs LLM |
 |---|---|
-| Transcript watcher + live feed | `warden handoff --auto` (falls back to manual template) |
+| Transcript watcher + live feed | `tailward handoff --auto` (falls back to manual template) |
 | LiveBus + SSE | Drift classifier (silently skips) |
 | Constraints worker + violations UI | Rubric worker (silently skips samples) |
 | Scope worker + creep detection | Self-rubric (Reflection view; silently skips) |
 | Reflection derived signals (idle gaps, prompt lengths, approvals, verification verdicts) | Session-close consolidator (skips, report stays "in progress") |
-| `warden handoff` (manual template) | Audit claim verification (LLM for claim extraction) |
+| `tailward handoff` (manual template) | Audit claim verification (LLM for claim extraction) |
 | Platform view in-band turn metrics + local LLM probes | |
 
 In other words: the entire passive observation layer works fine with no model running at all. You just won't get rubric scores, self-rubric scores, or the 8-mode report card until you bring one up.
@@ -322,7 +324,7 @@ In other words: the entire passive observation layer works fine with no model ru
 ## Storage layout
 
 ```
-~/.modmcp/
+~/.tailward/
 ├── config.toml
 ├── daemon.pid
 ├── logs/daemon.log
@@ -350,7 +352,7 @@ Claude Code session
 ~/.claude/projects/<proj>/<session>.jsonl
       │ tailed by
       ▼
-┌─────────────────── warden daemon ───────────────────┐
+┌────────────────── tailward daemon ──────────────────┐
 │                                                     │
 │  TranscriptWatcher ──▶ on_event dispatch            │
 │                        │                            │
@@ -368,7 +370,7 @@ Claude Code session
 └─────────────────────────────────────────────────────┘
 ```
 
-All workers run passively — they observe and record, never mutate the prompt stream the agent sees. Workers are wired lazily in [`src/modmcp/daemon/app.py`](src/modmcp/daemon/app.py); each is wrapped in a `try/except log.warning`, so a missing dependency or a config bug in one worker never brings down the others.
+All workers run passively — they observe and record, never mutate the prompt stream the agent sees. Workers are wired lazily in [`src/tailward/daemon/app.py`](src/tailward/daemon/app.py); each is wrapped in a `try/except log.warning`, so a missing dependency or a config bug in one worker never brings down the others.
 
 ## Development
 
@@ -378,17 +380,17 @@ pytest -q          # ~180 tests, ~25s
 cd frontend && npm install && npm run build
 ```
 
-Frontend lives in `frontend/` (Svelte 5 + Vite). The build emits to `src/modmcp/web/static/dist/` (gitignored); the daemon serves whichever bundle is on disk and falls back to a "run npm install && npm run build" hint if no manifest is present.
+Frontend lives in `frontend/` (Svelte 5 + Vite). The build emits to `src/tailward/web/static/dist/` (gitignored); the daemon serves whichever bundle is on disk and falls back to a "run npm install && npm run build" hint if no manifest is present.
 
 Troubleshooting:
 
-- `warden daemon logs -n 200` — everything interesting ends up here: hook failures, worker startup errors, LLM call failures with the call kind tagged.
-- `warden daemon run` — runs the daemon in the foreground with uvicorn logs on stdout; useful when you want live-reload visibility into what the audit layer is doing.
-- `MODMCP_HOME=/tmp/modmcp-dev warden daemon run` — isolated state dir for experimentation.
+- `tailward daemon logs -n 200` — everything interesting ends up here: hook failures, worker startup errors, LLM call failures with the call kind tagged.
+- `tailward daemon run` — runs the daemon in the foreground with uvicorn logs on stdout; useful when you want live-reload visibility into what the audit layer is doing.
+- `TAILWARD_HOME=/tmp/tailward-dev tailward daemon run` — isolated state dir for experimentation.
 
 ## Platform notes
 
-- **Windows:** daemon uses `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`; `warden link` requires Developer Mode for symlinks and falls back to file copy otherwise.
-- **macOS / Linux:** daemon uses `setsid` detachment; `warden link` uses `os.symlink`.
+- **Windows:** daemon uses `DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP`; `tailward link` requires Developer Mode for symlinks and falls back to file copy otherwise.
+- **macOS / Linux:** daemon uses `setsid` detachment; `tailward link` uses `os.symlink`.
 
-Service units (systemd user unit, launchd plist, Task Scheduler XML) are not required — the lightweight `warden daemon start` is sufficient. A future `warden daemon install-service` subcommand may ship them.
+Service units (systemd user unit, launchd plist, Task Scheduler XML) are not required — the lightweight `tailward daemon start` is sufficient. A future `tailward daemon install-service` subcommand may ship them.
