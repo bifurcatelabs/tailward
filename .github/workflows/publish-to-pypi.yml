@@ -1,0 +1,74 @@
+name: publish to pypi
+
+# Triggered by pushing a ``v*`` tag (e.g. ``git tag v2.6.1 && git push
+# origin v2.6.1``). Builds the sdist + wheel, then publishes to PyPI
+# via Trusted Publishing (OIDC) — no API token stored anywhere; PyPI
+# verifies the workflow's GitHub identity at publish time.
+#
+# PyPI side: trusted publisher registered at
+# https://pypi.org/manage/project/tailward/settings/publishing/ with
+# matching ``owner`` / ``repository`` / ``workflow_filename`` /
+# ``environment`` values. GitHub side: a ``pypi`` environment with
+# Required Reviewers enabled — every tag publish waits for explicit
+# approval, so a compromised tag can't auto-fire malware to the index.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build sdist + wheel
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The publish step runs in a separate job that downloads
+          # the artifact — no need to keep credentials around in this
+          # job. Tightens the OIDC scope.
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install build backend
+        run: python -m pip install --upgrade build
+      - name: Build distributions
+        run: python -m build
+      - name: Upload distributions as artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: python-package-distributions
+          path: dist/
+
+  publish:
+    name: publish to pypi
+    needs: build
+    runs-on: ubuntu-latest
+    # The environment name MUST match what's configured on PyPI's
+    # trusted publisher form. Required-reviewer protection rules on
+    # this environment gate the publish step until a maintainer
+    # approves on the GitHub Actions run page.
+    environment:
+      name: pypi
+      url: https://pypi.org/p/tailward
+    permissions:
+      # OIDC trusted publishing requires id-token write at the job
+      # level. ``contents`` defaults to none here since we only
+      # download the build artifact, never read the repo source.
+      id-token: write
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v6
+        with:
+          name: python-package-distributions
+          path: dist/
+      - name: Publish to PyPI
+        # ``release/v1`` is the moving pointer at the latest stable
+        # major. Generates PEP 740 attestations automatically (since
+        # v1.11.0) — supply-chain hygiene for free. Pin to an exact
+        # tag if attestations or the action surface drift over time.
+        uses: pypa/gh-action-pypi-publish@release/v1

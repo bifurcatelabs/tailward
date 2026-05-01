@@ -33,7 +33,10 @@ dev = [
 ]
 
 [project.urls]
+Homepage = "https://github.com/bifurcatelabs/tailward"
 Repository = "https://github.com/bifurcatelabs/tailward"
+Issues = "https://github.com/bifurcatelabs/tailward/issues"
+Changelog = "https://github.com/bifurcatelabs/tailward/blob/main/CHANGELOG.md"
 Mirror = "https://git.bifurcate.io/active/warden"
 
 [project.scripts]
