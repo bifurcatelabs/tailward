@@ -8,7 +8,7 @@
 // the set when clicked.
 
 const KNOWN_KEYS = new Set([
-  'user', 'assistant', 'tool', 'rubric', 'audit', 'perf', 'session', 'secrets',
+  'user', 'assistant', 'tool', 'rubric', 'synthesis', 'audit', 'perf', 'session', 'secrets',
 ]);
 
 export const FILTER_GROUPS = [
@@ -31,6 +31,11 @@ export const FILTER_GROUPS = [
     key: 'rubric', label: 'rubric',
     types: ['rubric_in_flight', 'rubric_sample', 'rubric_done'],
     description: 'Qwen-judged scoring runs — in-flight indicator, per-dimension score samples, and the done marker. Includes both assistant-side and self (user-side) rubric',
+  },
+  {
+    key: 'synthesis', label: 'synthesis',
+    types: ['synthesis_captured', 'synthesis_failed', 'intent_updated'],
+    description: 'session-synthesis stream — periodic + on-demand snapshots, comprehensive intent.md updates, and any failures. Covers all three triggers (periodic / on-demand / threshold) plus the failure surface',
   },
   {
     key: 'audit', label: 'audit',

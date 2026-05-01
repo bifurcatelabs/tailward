@@ -442,6 +442,65 @@
           <span class="muted small">cache {(p.cache_hit_ratio * 100).toFixed(0)}%</span>
         {/if}
       </div>
+    {:else if kind === 'synthesis_captured'}
+      <div class="row">
+        {#if p.trigger}
+          <span class="mono small muted">{p.trigger}</span>
+        {/if}
+        {#if p.model}
+          <code class="mode-prev">{p.model}</code>
+        {/if}
+        {#if p.input_chars != null}
+          <span class="muted small">{(p.input_chars / 1000).toFixed(1)}k chars in</span>
+        {/if}
+        {#if p.event_count != null}
+          <span class="muted small">· {p.event_count} events</span>
+        {/if}
+      </div>
+      <div class="muted small">
+        an incremental session snapshot landed on disk under
+        <code>~/.modmcp/projects/&lt;ph&gt;/snapshots/</code>. Open the
+        synthesis panel above to read the body or regenerate.
+      </div>
+    {:else if kind === 'synthesis_failed'}
+      <div class="row">
+        {#if p.trigger}
+          <span class="mono small muted">{p.trigger}</span>
+        {/if}
+        {#if p.error}
+          <code class="mono small">{p.error}</code>
+        {/if}
+      </div>
+      {#if p.suppressed_until_iso}
+        <div class="muted small">
+          synthesis paused after {p.consecutive_failures ?? '?'} consecutive
+          failures · retrying after {p.suppressed_until_iso}.
+        </div>
+      {:else if p.consecutive_failures}
+        <div class="muted small">
+          consecutive failures: {p.consecutive_failures}.
+        </div>
+      {/if}
+    {:else if kind === 'intent_updated'}
+      <div class="row">
+        {#if p.intent_path}
+          <code class="mono small">{p.intent_path}</code>
+        {/if}
+        {#if p.fullness_input_tokens != null}
+          <span class="muted small">at {(p.fullness_input_tokens / 1000).toFixed(0)}k claude in</span>
+        {/if}
+        {#if p.incomplete}
+          <span class="usage" style="color: var(--warn)">incomplete</span>
+        {/if}
+      </div>
+      <div class="muted small">
+        comprehensive synth produced a fresh handoff for this project.
+        The next session can pick up from this artifact without
+        re-explaining where things stand.
+        {#if p.archive_path}
+          Prior version archived to <code class="mono">{p.archive_path}</code>.
+        {/if}
+      </div>
     {/if}
   </div>
 </article>
@@ -591,6 +650,32 @@
     background: rgba(95,195,167,0.06);
     color: var(--ok);
     border-color: rgba(95,195,167,0.22);
+  }
+  /* synthesis_captured — periodic + on-demand snapshots from the
+     local LLM. Violet palette aligned with rubric / turn_metric since
+     all three are LLM-derived signals; muted alpha so the routine
+     periodic captures don't dominate the feed. */
+  .chip-synthesis_captured {
+    background: rgba(150,144,248,0.06);
+    color: var(--violet);
+    border-color: rgba(150,144,248,0.20);
+  }
+  /* synthesis_failed — palette aligned with the other failure chips
+     (constraint_violation, claim, exfiltration_alert). */
+  .chip-synthesis_failed {
+    background: rgba(232,122,122,0.10);
+    color: var(--err);
+    border-color: rgba(232,122,122,0.30);
+  }
+  /* intent_updated — the comprehensive-synth headline. Warden's
+     brand-copper at higher saturation than compact_summary so it
+     reads as "the artifact we built warden to produce just landed."
+     Solid border (compact_summary is dashed for "different shape");
+     this is a first-class warden-generated handoff. */
+  .chip-intent_updated {
+    background: rgba(232,153,104,0.14);
+    color: var(--accent);
+    border-color: rgba(232,153,104,0.45);
   }
   .mode-prev, .mode-next {
     font-family: var(--mono);
