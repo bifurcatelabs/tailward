@@ -130,6 +130,14 @@ VALIDATED_VERSIONS: frozenset[str] = frozenset({
     "2.1.117",
     "2.1.119",
     "2.1.121",
+    # Re-audited 2026-05-01. 2.1.123 emits the same top-level types,
+    # content-block types, and known-unhandled set. Two new message-
+    # level keys appeared: ``container`` and ``context_management``,
+    # both ``null`` in observed events — likely scaffolded ahead of
+    # an Anthropic context-management feature. Functionally inert
+    # for warden's parser (we don't read those fields); pinned via
+    # ``test_schema_pin`` so a future shape change doesn't surprise.
+    "2.1.123",
 })
 
 

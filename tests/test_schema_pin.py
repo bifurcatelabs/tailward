@@ -40,7 +40,7 @@ from modmcp.schema.events import parse_line
 # the synthetic ``version`` field in fixtures; the structural
 # assertions are version-agnostic but representative fixtures should
 # reflect what's actually in the wild.
-CLAUDE_CODE_VERSION_TESTED = "2.1.121"
+CLAUDE_CODE_VERSION_TESTED = "2.1.123"
 assert CLAUDE_CODE_VERSION_TESTED in VALIDATED_VERSIONS
 
 # Fields the parser hard-depends on at the top level of every event.
@@ -60,6 +60,23 @@ EXPECTED_MESSAGE_FIELDS = {
     "model",       # model identity per turn (Platform view)
     "usage",       # token accounting (turn_metrics, llm_call_metrics)
     "stop_reason", # turn-end classification
+}
+
+# Message-level fields Claude Code emits that the parser does NOT
+# read but which appear in the wild. Pinning so a shape change (e.g.,
+# context_management going from ``null`` to a populated object) is
+# noticed and considered, not silently ignored.
+KNOWN_UNREAD_MESSAGE_FIELDS = {
+    "type",                # message envelope type ("message")
+    "stop_sequence",       # paired with stop_reason; null in nearly every event
+    "stop_details",        # structured stop info; sparse
+    "diagnostics",         # message-level diagnostics; sparse
+    # Added by Claude Code 2.1.119+ as null placeholders ahead of the
+    # context-management feature. Re-audit if either becomes populated
+    # — they're load-bearing if Anthropic ships them as state we'd
+    # want to surface.
+    "container",
+    "context_management",
 }
 
 # Top-level event types Claude Code emits that fall to ``kind="unknown"``
@@ -527,3 +544,186 @@ def test_top_level_field_inventory_pins() -> None:
     assert ev.kind == "assistant_message"
     assert ev.cwd == "C:/warden"
     assert ev.message_id == "msg_01x"
+
+
+# ---------- new context-management null placeholders (2.1.119+) ----------
+
+
+def test_message_with_null_context_management_fields_parses() -> None:
+    """Claude Code 2.1.119+ emits ``container`` and
+    ``context_management`` as null fields on assistant messages
+    (scaffolded ahead of an Anthropic feature). Functionally inert
+    for the parser today, but pinned: if either becomes populated in
+    a future release, this test still passes (the parser ignores
+    unknown message keys) — but the inventory canary below fires
+    so a maintainer reviews whether warden should start consuming
+    the new state.
+    """
+    line = _line(
+        {
+            "type": "assistant",
+            "sessionId": "sess-1",
+            "cwd": "C:/warden",
+            "timestamp": "2026-05-01T01:00:00.000Z",
+            "version": CLAUDE_CODE_VERSION_TESTED,
+            "message": {
+                "role": "assistant",
+                "id": "msg_ctx",
+                "model": "claude-opus-4-7",
+                "type": "message",
+                "container": None,
+                "context_management": None,
+                "content": [{"type": "text", "text": "ack"}],
+                "stop_reason": "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 5, "output_tokens": 2},
+            },
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.kind == "assistant_message"
+    assert ev.text == "ack"
+
+
+# ---------- inventory canary: catch new shapes appearing upstream ----------
+
+
+def _fixture_corpus() -> str:
+    """A multi-line JSONL string covering every event type and field
+    shape we currently know about. The canary test below runs
+    ``audit_jsonl`` against this fixture and asserts the resulting
+    type / message-key / content-block-type inventories match what's
+    pinned in this file.
+
+    When Claude Code adds a new shape: re-audit a real recent JSONL
+    (``audit_jsonl`` is the tool); add the new shape here; update the
+    pinned inventory sets; document in
+    ``memory/project_upstream_fragility.md``. The point is that the
+    test fails *loudly* when something has drifted, forcing an
+    explicit decision rather than silent acceptance.
+    """
+    lines = [
+        # assistant message with text
+        {
+            "type": "assistant", "sessionId": "s", "cwd": "/",
+            "version": CLAUDE_CODE_VERSION_TESTED,
+            "timestamp": "2026-05-01T00:00:00.000Z",
+            "message": {
+                "role": "assistant", "id": "m1", "model": "claude-opus-4-7",
+                "type": "message",
+                "content": [{"type": "text", "text": "hi"}],
+                "stop_reason": "end_turn", "stop_sequence": None,
+                "stop_details": None, "diagnostics": None,
+                "container": None, "context_management": None,
+                "usage": {"input_tokens": 1, "output_tokens": 1},
+            },
+        },
+        # assistant message with thinking + tool_use blocks
+        {
+            "type": "assistant", "sessionId": "s", "cwd": "/",
+            "version": CLAUDE_CODE_VERSION_TESTED,
+            "message": {
+                "role": "assistant", "id": "m2", "model": "claude-opus-4-7",
+                "type": "message",
+                "content": [
+                    {"type": "thinking", "thinking": "..."},
+                    {"type": "tool_use", "id": "tu1", "name": "Bash", "input": {}},
+                ],
+                "stop_reason": "tool_use",
+            },
+        },
+        # user typed prompt
+        {
+            "type": "user", "sessionId": "s", "cwd": "/",
+            "version": CLAUDE_CODE_VERSION_TESTED,
+            "message": {"role": "user", "content": "go"},
+        },
+        # user wrapping a tool_result block
+        {
+            "type": "user", "sessionId": "s", "cwd": "/",
+            "version": CLAUDE_CODE_VERSION_TESTED,
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "tool_result", "tool_use_id": "tu1", "content": "out"},
+                ],
+            },
+        },
+        # synthesized /compact summary
+        {
+            "type": "user", "sessionId": "s", "cwd": "/",
+            "version": CLAUDE_CODE_VERSION_TESTED,
+            "isCompactSummary": True,
+            "message": {"role": "user", "content": "summary"},
+        },
+        # system event (init shape)
+        {
+            "type": "system", "sessionId": "s",
+            "version": CLAUDE_CODE_VERSION_TESTED,
+            "subtype": "init",
+        },
+        # known-unhandled event types — still parse, fall to "unknown"
+        *(
+            {"type": t, "sessionId": "s", "version": CLAUDE_CODE_VERSION_TESTED}
+            for t in KNOWN_UNHANDLED_TYPES
+        ),
+    ]
+    return "\n".join(_line(o) for o in lines)
+
+
+def test_audit_inventory_canary(tmp_path) -> None:
+    """Run ``audit_jsonl`` against a comprehensive synthetic fixture
+    and assert the inventories match the pinned sets. This is the
+    drift canary: when Claude Code adds a new top-level type, message
+    field, or content-block type that we haven't acknowledged here,
+    the test fails with a diff — forcing a deliberate decision (handle
+    the new shape, or add it to the known-but-unhandled set).
+    """
+    from modmcp.schema.audit import audit_jsonl
+
+    fixture = tmp_path / "fixture.jsonl"
+    fixture.write_text(_fixture_corpus(), encoding="utf-8")
+    report = audit_jsonl(fixture)
+
+    # Versions: only the pinned test version should appear.
+    assert set(report.versions.keys()) == {CLAUDE_CODE_VERSION_TESTED}
+
+    # Top-level types: handled set + KNOWN_UNHANDLED_TYPES.
+    expected_types = {"assistant", "user", "system", *KNOWN_UNHANDLED_TYPES}
+    seen_types = set(report.top_types.keys())
+    new_types = seen_types - expected_types
+    assert not new_types, (
+        f"new top-level event type(s) appeared: {new_types}. "
+        f"If Claude Code shipped a new event shape, decide whether to "
+        f"handle it (parser branch + dispatcher + EVENT_TYPES) or "
+        f"acknowledge it as unhandled (KNOWN_UNHANDLED_TYPES)."
+    )
+    missing_types = expected_types - seen_types
+    assert not missing_types, (
+        f"fixture corpus missing types it claimed to cover: {missing_types}. "
+        f"Update _fixture_corpus() to include them."
+    )
+
+    # Message keys: parser-read + known-unread.
+    expected_msg_keys = EXPECTED_MESSAGE_FIELDS | KNOWN_UNREAD_MESSAGE_FIELDS
+    seen_msg_keys = set(report.message_keys.keys())
+    new_msg_keys = seen_msg_keys - expected_msg_keys
+    assert not new_msg_keys, (
+        f"new message-level field(s) appeared: {new_msg_keys}. "
+        f"If the field is sparse/null and the parser doesn't need to "
+        f"read it, add to KNOWN_UNREAD_MESSAGE_FIELDS. If the field "
+        f"carries data we want to surface, extend the parser + "
+        f"EXPECTED_MESSAGE_FIELDS."
+    )
+
+    # Content block types: pinned to the four we recognize.
+    expected_block_types = {"text", "thinking", "tool_use", "tool_result"}
+    seen_block_types = set(report.content_block_types.keys())
+    new_block_types = seen_block_types - expected_block_types
+    assert not new_block_types, (
+        f"new content-block type(s) appeared: {new_block_types}. "
+        f"Likely a new content-block shape from Claude Code (e.g., "
+        f"document, image, web_search_result). The parser's "
+        f"_extract_text and tool extraction must learn about it."
+    )
