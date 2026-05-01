@@ -1,16 +1,26 @@
 # tailward
 
-A local-first **audit underlay for Claude Code**. Your session sits in the foreground; tailward quietly captures it from below — tailing the JSONL transcripts Claude Code writes, scoring them against documented failure modes via deterministic rule checks plus a **local LLM rubric**, deriving in-band inference-path metrics, probing the local LLM endpoint, and surfacing everything in a multi-view localhost web UI (Session / Reflection / Platform). No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
+A local-first **audit underlay for Claude Code**. Your session sits in the foreground; tailward quietly captures it from below — tailing the JSONL transcripts Claude Code writes, scoring them against documented failure modes via deterministic rule checks plus a **local LLM rubric**, deriving in-band inference-path metrics, probing the local LLM endpoint, synthesizing compaction-resistant snapshots so context survives across session boundaries, and surfacing everything in a multi-view localhost web UI (Session / Reflection / Platform / Settings). No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
 
 > **Three names, one tool.** `tailward` is the public name (PyPI, GitHub repo). `warden` is the CLI binary you'll type (`warden daemon start`). `modmcp` is the internal Python package, surfaced only as the path of the state directory (`~/.modmcp/`). Layout reasoning lives in [CONTRIBUTING.md](CONTRIBUTING.md).
 
 See [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the audit layer and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which failure modes tailward currently detects and how. [`V1 Proposal.md`](V1%20Proposal.md) is the original design and is preserved as a historical artifact — the project pivoted away from active prompt injection in v1.1 and reframed as a trust layer in v2.0.0.
 
+## At a glance
+
+- **Search** across user prompts, assistant turns, tool calls, and synthesized content within a project; inline-expand previews, deep-link copy, and event-id permalinks.
+- **Filter pills** on the live feed and timeline — toggle visibility by user / assistant / tool / rubric / audit / synthesis / perf / session / secrets. Multi-toggle, both surfaces share filter state.
+- **Full-session arc** — collapsible timeline strip with a time-range lens (30m / 1h / 8h / 24h / all), tick clustering for dense periods, "no activity" banding for idle gaps, hover detail per event.
+- **Snapshot panel** in the Session view — session-synthesis captures inline, click-to-expand body, "synthesize now" button, scrollable history.
+- **Past-sessions table** (Reflection) — cross-project list with the 8-mode report card and per-dimension rubric trajectory inline per row.
+- **Settings transparency** — verbatim system + user prompts per call kind, sampler params, max_tokens budget vs observed completion, finish_reason distribution.
+- **Auto-handoff** — comprehensive synth fires before Claude Code's auto-compact and writes a fresh `intent.md` so the next session has a coherent handoff artifact, no prompt injection.
+
 ## Status
 
-Actively iterated. Current release: **v2.3.0**.
+Actively iterated. Current release: **v2.6.0**.
 
-The **passive audit surface** (Session / Reflection / Platform views) is the supported daily-driver. **Active mode** (preamble injection + drift correctives, the original v1 design) is preserved as opt-in scaffolding but is not maintained beyond what the passive layer requires — see [Operating modes](#operating-modes).
+The **passive audit surface** (Session / Reflection / Platform / Settings views) is the supported daily-driver. The original v1 prompt-injection design was rejected in v1.1 — see [Operating posture](#operating-posture).
 
 Solo-dev work; expect rough edges. Issues and discussion welcome — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
@@ -24,47 +34,41 @@ Solo-dev work; expect rough edges. Issues and discussion welcome — see [CONTRI
 - **Rubric worker.** Sampled local-LLM JSON scoring across four dimensions (invariants awareness, uncertainty honesty, maintainability, provenance) — triggered on cadence, scope creep, and first-person completion claims. "Disagree" button writes feedback back to the ledger.
 - **Session-close consolidator.** After configurable idle time, one local-LLM call aggregates all collected signal into an 8-mode report card.
 - **Synthesized-turn detection.** Claude Code's `/compact` persists its summary as a `type: "user"` JSONL row with `isCompactSummary: true`. The live feed surfaces these as a distinct `compact_summary` event so they don't blend in with typed user turns.
+- **Permission-mode signals.** Mode transitions (`Shift+Tab` cycling between `default` / `acceptEdits` / `bypassPermissions` / `plan`), `tool_interrupted` events when the user declines a tool call, and `away_summary` recaps Claude Code emits during idle periods all surface as distinct chips in the feed.
+- **Exfiltration detection.** A regex pattern library scans tool inputs and content events for known secret shapes (API keys, tokens, AWS access patterns) before they land in the audit log. Matches are redacted in storage and surfaced as `exfiltration_alert` events with the source event marked so you can verify and rotate.
+- **Session synthesis stream.** A dedicated worker writes compaction-resistant snapshots to `~/.modmcp/projects/<hash>/snapshots/` on three triggers: periodic (token-based threshold), on-demand (button click), and comprehensive (when context fullness crosses a fraction of Claude's window — produces a fresh `intent.md` for the project so the next session has a coherent handoff artifact). Original v1 compaction-handoff vision delivered passively; user in the middle, no injection.
 
 **Reflection — am I behaving?**
 
-- **Derived signals (no LLM):** idle-gap distribution between typed user prompts, prompt-length distribution, destructive-action approval cadence, claim verification verdicts.
+- **Derived signals (no LLM):** idle-gap distribution between typed user prompts, prompt-length distribution, destructive-action approval cadence, tool-calls grouped by user-selected permission mode, memory-edit count.
 - **Self-rubric (LLM-scored):** four user-side dimensions — intent clarity, context coverage, verification engagement, mode coherence — sampled on a configurable cadence.
 - **Past-sessions table.** Cross-project sessions list, click-to-expand for the 8-mode report card + per-dimension rubric trajectory.
 
-**Platform — is the platform serving me consistently?**
+**Platform — is the third-party model serving me consistently?**
 
 - **In-band turn metrics.** TTFT, output TPS, cache hit ratio derived from JSONL timestamps + the `usage` block. No synthetic traffic — every metric is from a real prompt the user actually sent.
-- **Local LLM probe worker.** Periodic probes of the OpenAI-compatible endpoint tailward talks to. Deliberately *not* probing `api.anthropic.com` — that mostly measures the user's ISP and CDN edge, not Anthropic's service.
-- **LLM call budget panel.** Per-call-kind aggregates of tailward's own local-LLM calls (max_tokens vs avg completion, finish_reason distribution) so you can spot truncation before it costs you.
-- **Transparency panel.** Per-call-kind config (model, sampler params, max_tokens) plus the verbatim system + user prompt templates tailward sends. Read directly from the worker constants — drift between display and runtime is impossible.
+- **Stop-reason distribution.** Aggregate of the `stop_reason` Anthropic emits on each assistant message, deduped per `message_id`. Surfaces refusals, length-truncation, and tool-use pauses as distinct buckets.
+- **Claim verification verdicts.** First-person completion claims from the model ("I removed X", "I added Y") checked against the repo with grep. Test-fixture string literals are excluded so removal claims aren't false-flagged by their own pinning tests.
 
-**Handoff (opt-in active mode — _unmaintained_)**
+**Settings — what's running locally and at what cost?**
 
-- **Phase 1 (handoff):** `warden handoff` reads a Claude Code session's transcript and synthesizes a structured `intent.md` (active goal, open threads, active rules, known drift patterns, pending commitments, recent claims) for review in your editor.
-- **Phase 2 (continuity):** on the next session's first turn, a `UserPromptSubmit` hook injects the intent as a preamble; for the first N turns, drift against the goal queues a corrective injection on the next turn and strong claims are grepped against the repo and logged verified / contradicted / unverifiable.
+- **Local LLM profiles.** Per-call-kind config (model, sampler params, max_tokens, thinking-mode flag) plus the verbatim system + user prompt templates tailward sends. Read directly from the worker constants — drift between display and runtime is impossible.
+- **Local LLM budget.** Per-call-kind aggregates of tailward's own local-LLM calls (max_tokens vs avg completion, finish_reason distribution) so you can spot truncation before it costs you.
+- **Local endpoint probe.** Periodic probes of the OpenAI-compatible endpoint tailward talks to. Deliberately *not* probing `api.anthropic.com` — that mostly measures the user's ISP and CDN edge, not Anthropic's service.
 
-## Operating modes
+## Operating posture
 
-tailward has one top-level knob: `warden_mode` in `~/.modmcp/config.toml`.
+Passive observation is the only supported surface. Prompt injection as a paradigm was rejected in v1.1 after sustained dogfooding — observer effect, model-trust contamination, and concentrated blast radius all undermine the trust layer (see [Why passive observation only](#why-passive-observation-only)). The original active-mode code (MCP server + `UserPromptSubmit` hook + drift correctives) is preserved in source as historical artifact only — not maintained, not tested, may no longer work.
 
-| mode | hook preamble? | drift correctives? | auditing? | UI? | status |
-|---|---|---|---|---|---|
-| **`passive`** (default) | no | no | **yes** | yes | **supported** |
-| `active` | yes | yes | yes | yes | **opt-in, unmaintained** — see below |
+### Why passive observation only
 
-> **`active` is an opt-in, user-owned surface.** The injection + drift-corrective path is the original v1 design. It functions, but after the passive-first pivot the active surface stopped being maintained as a paved path: the corrective-queue UI is minimal, regression coverage is thin, the preamble contents aren't tuned against any specific handoff. Fixes here only land when they're blocking the passive layer. What's worth pushing into the preamble — and whether the drift loop fits how you work at all — is a call for you to make. Treat `active` as scaffolding you own, not a daily driver. The passive audit layer is the supported surface.
-
-### Why passive is the default
-
-Passive observation is the design constraint. If the act of measuring shapes the thing being measured, the measurement isn't reliable. The original v1 design injected preambles and corrective turns into the prompt stream, which had three problems that only surfaced after sustained dogfooding:
+If the act of measuring shapes the thing being measured, the measurement isn't reliable. The original v1 design injected preambles and corrective turns into the prompt stream, which had three problems that only surfaced after sustained dogfooding:
 
 1. **Observer effect.** Any content tailward injects becomes part of the agent's context and changes the next turn. A "drift score" measured on a session tailward is actively steering is really measuring tailward's own intervention quality, not the agent's baseline behavior. You can't A/B your own tooling if the A and B arms can't be isolated.
 2. **Model trust.** When the audit layer is invisible to the session, the agent has no incentive to perform for the audit. You get honest trajectories. The second a model can see it's being scored, the scoring task competes with the actual task.
-3. **Blast radius.** Injected preambles and corrective turns are a live wire into every prompt. A bad rubric, a regex false positive, or a daemon bug can derail a real session. In passive mode the worst tailward can do is log a wrong row in SQLite or render an ugly widget in a browser tab.
+3. **Blast radius.** Injected preambles and corrective turns are a live wire into every prompt. A bad rubric, a regex false positive, or a daemon bug can derail a real session. Passively, the worst tailward can do is log a wrong row in SQLite or render an ugly widget in a browser tab.
 
 Passive mode moves the human (you) into the loop at a decision boundary — the web UI — instead of hotwiring corrections into the model's context. You still get every signal; you just decide what to do with it.
-
-Flip to `active` when you specifically want the agent reacting to tailward's corrections in real time — typically at the start of a new session after a handoff, where the preamble is carrying context the agent genuinely needs — and flip back to `passive` after the first few turns. Active is unmaintained scaffolding (see table above): it works, but the preamble contents, drift-corrective shape, and rough ergonomics are yours to own. The passive audit layer is the supported surface.
 
 ### Why local-first
 
@@ -123,58 +127,6 @@ Click into your project → **Live** → you'll see turns and tool calls stream 
 
 Stop with `warden daemon stop`.
 
-### Adding the active-mode hook (optional, unmaintained)
-
-> Heads up: `active` mode is **opt-in and unmaintained** (see the status note above). The audit layer (passive) does not need anything in this section. Skip unless you specifically want to wire up the preamble + drift-corrective loop yourself.
-
-The MCP-server affordance was retired in v2.0.0; only the `UserPromptSubmit` hook remains for users running active mode.
-
-**0. Find the absolute path to your `warden` executable.** Claude Code spawns hook commands with the `PATH` it inherited at launch. For a venv install (`pip install -e .` inside `.venv`) that `PATH` almost never includes `.venv/Scripts` / `.venv/bin`, so a bare `command: "warden"` will silently fail to resolve. The preferred shape is the absolute path to the launcher `pip` / `pipx` created:
-
-```bash
-# Windows (inside the activated venv, or from anywhere if on PATH)
-where warden
-# -> C:\path\to\.venv\Scripts\warden.exe
-
-# macOS / Linux
-which warden
-# -> /path/to/.venv/bin/warden          (venv install)
-# -> /home/you/.local/bin/warden        (pipx install)
-```
-
-Use that path verbatim in the snippets below. Bare `warden` works too **if** its install dir is on the user/system `PATH` that Claude Code inherits at launch (typical for `pipx install` after `pipx ensurepath`, plus a Claude Code restart). The absolute form survives PATH changes, venv activations, and ambiguous multi-install setups, so it's the recommended shape. The legacy `modmcp` binary is kept as a backward-compat alias and resolves to the same entry point.
-
-**1. Register the hook.** Edit `~/.claude/settings.json`:
-
-```json
-{
-  "hooks": {
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "C:\\path\\to\\.venv\\Scripts\\warden.exe hook userpromptsubmit"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-On macOS / Linux the `command` becomes `"/path/to/.venv/bin/warden hook userpromptsubmit"`. Note the doubled backslashes in the Windows form — `settings.json` is JSON, so `\` must be escaped.
-
-The hook has a hard ≤400 ms budget and silently passes your prompt through on any failure, so it can never block you. In `warden_mode = "passive"` the daemon returns an empty response — the hook fires but injects nothing.
-
-**2. Flip the mode.** Edit `~/.modmcp/config.toml`:
-
-```toml
-warden_mode = "active"
-```
-
-...and `warden daemon stop && warden daemon start` to pick up the change.
-
 ### Daily use
 
 ```bash
@@ -190,26 +142,33 @@ warden version
 
 ## Web UI
 
-All routes live under `http://127.0.0.1:7878/`. Every project gets a 12-char hash (first 12 chars of `sha256(canonical_project_path)`). The live audit surface is the Svelte SPA at `/p/<hash>/live/<session_id>`; cross-session navigation, the self-rubric, and platform telemetry are tab-views inside that SPA.
+All routes live under `http://127.0.0.1:7878/`. Every project gets a 12-char hash (first 12 chars of `sha256(canonical_project_path)`). Top-level pages and the live audit surface are all served by a single Svelte SPA; the four views (Session / Reflection / Platform / Settings) live as hash-routed tabs inside the live session page.
 
 | route | what |
 |---|---|
-| `/` | Project index (Jinja landing page) |
-| `/p/<hash>` | Intent editor (Jinja, paired with `warden handoff`) |
-| `/p/<hash>/live/<session_id>` | **Live session view** (Svelte SPA — Session / Reflection / Platform tabs via `#hash` routing) |
+| `/` | Project index (Svelte landing page) |
+| `/p/<hash>` | Project rules viewer (read-only Svelte view of the parsed CompiledPolicy + active session_mode) |
+| `/p/<hash>/live/<session_id>` | **Live session view** (Svelte SPA — Session / Reflection / Platform / Settings tabs via `#hash` routing) |
 | `/p/<hash>/live/<session_id>/stream` | SSE stream the SPA consumes |
 | `/p/<hash>/live/<session_id>/events` | Polling fallback for `/stream` |
 | `/p/<hash>/live/<session_id>/state` | Initial UI state JSON |
 | `/p/<hash>/live/<session_id>/replay` | Recent events for reconnect / load-older |
+| `/p/<hash>/live/<session_id>/arc` | Lightweight per-event triples for the full-session timeline strip |
+| `/p/<hash>/live/<session_id>/snapshots` | List of session-synthesis snapshots (filtered to this session) |
+| `/p/<hash>/live/<session_id>/snapshots/<ts>` | Body + sidecar metadata for one snapshot |
+| `/p/<hash>/live/<session_id>/synthesize` | POST: trigger an on-demand synthesis snapshot |
 | `/p/<hash>/violations/<id>/ack` \| `/dismiss` | POST: update status |
 | `/p/<hash>/rubric/<score_id>/feedback` | POST: user disagreement |
 | `/p/<hash>/turn-metrics` | Per-turn inference metrics (Platform view) |
+| `/p/<hash>/search` | Project-scoped substring search across content-bearing events |
+| `/v2/projects` | All watched projects (landing page + HeaderBar picker) |
 | `/v2/sessions/recent` | Recent sessions across watched projects (HeaderBar picker) |
-| `/v2/reflection/<hash>` | Derived signals for the Reflection view |
+| `/v2/reflection/<hash>` | User-side derived signals for the Reflection view |
 | `/v2/reflection/<hash>/self-rubric` | LLM-scored user-side rubric summary + recent samples |
 | `/v2/reflection/sessions` | Cross-project past-sessions list |
 | `/v2/reflection/sessions/<sid>` | Per-session deep view (8-mode card + rubric trajectory) |
-| `/llm-profiles` | Per-call-kind config + verbatim prompts (Platform transparency panel) |
+| `/v2/platform/<hash>/agent-behavior` | Third-party-provider signals (claim verification + stop_reasons) |
+| `/llm-profiles` | Per-call-kind config + verbatim prompts (Settings transparency panel) |
 | `/llm-metrics/summary` | Per-call-kind aggregate of every local-LLM call |
 | `/probes/recent` | Recent local-LLM probe results |
 
@@ -218,9 +177,8 @@ All routes live under `http://127.0.0.1:7878/`. Every project gets a 12-char has
 | command | what |
 |---|---|
 | `warden daemon start\|stop\|status\|logs\|run` | lifecycle (`run` = foreground) |
-| `warden handoff [--session ID] [--no-edit] [--auto\|--manual] [--project PATH]` | run Phase 1 synthesis |
+| `warden handoff [--session ID] [--no-edit] [--auto\|--manual] [--project PATH]` | synthesize a structured `intent.md` from the session transcript |
 | `warden link [--project PATH]` | symlink `intent.md` into `<repo>/.modmcp/intent.md` |
-| `warden hook userpromptsubmit` | bridge for the Claude Code hook (stdin JSON → daemon → stdout JSON) |
 | `warden version` | print version |
 
 ## Configuration
@@ -228,9 +186,6 @@ All routes live under `http://127.0.0.1:7878/`. Every project gets a 12-char has
 First run writes `~/.modmcp/config.toml` with defaults. Restart the daemon after editing. The defaults live in [`src/modmcp/config.py`](src/modmcp/config.py) and that file is the source of truth; the highlights:
 
 ```toml
-# Top-level posture.
-warden_mode = "passive"              # "passive" | "active"
-
 # Daemon HTTP.
 http_host = "127.0.0.1"
 http_port = 7878
@@ -290,14 +245,6 @@ qwen_presence_penalty_query        = 1.5
 qwen_presence_penalty_rubric       = 0.0
 qwen_presence_penalty_consolidator = 1.5
 
-# Phase 2 (active mode).
-phase2_turns_default = 8
-drift_threshold = 0.35
-per_turn_budget_seconds = 3.0
-per_turn_hard_cap_seconds = 30.0
-claim_grep_budget = 200
-hook_timeout_ms = 400
-
 # Rubric worker: Qwen-judged score every N assistant turns + on triggers.
 rubric_turn_interval = 5
 rubric_min_text_chars = 80
@@ -350,8 +297,9 @@ All LLM calls serialize through a single queue so tailward doesn't contend with 
 
 | kind | used by | typical cost |
 |---|---|---|
-| `synth` | `warden handoff --auto` | heavy (one-shot, up to 6k out + thinking) |
-| `drift` | Phase 2 drift worker | light (per-turn, in active mode) |
+| `synth` (comprehensive) | `warden handoff --auto` + comprehensive-trigger of synthesis worker (writes a fresh `intent.md` when context fullness crosses the threshold) | heavy (one-shot, up to 6k out + thinking) |
+| `synth` (incremental) | periodic + on-demand triggers of the synthesis worker (writes markdown snapshots to disk for compaction-resistant capture) | medium (fires at token-threshold cadence) |
+| `drift` | drift classifier (records verdict to ledger; no prompt-stream side effect) | light (per-turn) |
 | `rubric` | rubric worker (assistant) + user-side rubric | medium (sampled, every N turns + triggers) |
 | `consolidator` | session-close worker | heavy (once per session close, up to 8k out + thinking) |
 
@@ -362,7 +310,7 @@ If the LLM endpoint is unreachable, tailward degrades cleanly:
 | works without LLM | needs LLM |
 |---|---|
 | Transcript watcher + live feed | `warden handoff --auto` (falls back to manual template) |
-| LiveBus + SSE | Drift classifier (active mode) |
+| LiveBus + SSE | Drift classifier (silently skips) |
 | Constraints worker + violations UI | Rubric worker (silently skips samples) |
 | Scope worker + creep detection | Self-rubric (Reflection view; silently skips) |
 | Reflection derived signals (idle gaps, prompt lengths, approvals, verification verdicts) | Session-close consolidator (skips, report stays "in progress") |
@@ -406,12 +354,12 @@ Claude Code session
 │                                                     │
 │  TranscriptWatcher ──▶ on_event dispatch            │
 │                        │                            │
-│     ┌───────────┬──────┼──────┬────────────┐        │
-│     ▼           ▼      ▼      ▼            ▼        │
-│  constraints  scope  rubric  audit        drift     │
-│  worker       worker worker  (claim-grep) worker    │
-│     │           │      │      │            │        │
-│     ▼           ▼      ▼      ▼            ▼        │
+│     ┌───────┬──────┬──┼──┬──────┬─────────┬───────┐ │
+│     ▼       ▼      ▼  ▼  ▼      ▼         ▼       ▼ │
+│  constraints scope rubric audit drift synthesis probe│
+│   worker     worker worker (claim) worker  worker  worker│
+│     │       │      │  │  │      │         │       │ │
+│     ▼       ▼      ▼  ▼  ▼      ▼         ▼       ▼ │
 │              LiveBus ◀─── session_close             │
 │                 │                  │                │
 │                 ▼                  ▼                │
@@ -420,13 +368,13 @@ Claude Code session
 └─────────────────────────────────────────────────────┘
 ```
 
-All workers run in both `passive` and `active` modes; the only mode-gated behavior is drift's corrective-enqueue step, which is suppressed in passive (the verdict is still recorded for the UI). Workers are wired lazily in [`src/modmcp/daemon/app.py`](src/modmcp/daemon/app.py) — each one is wrapped in a `try/except log.warning`, so a missing dependency or a config bug in one worker never brings down the others.
+All workers run passively — they observe and record, never mutate the prompt stream the agent sees. Workers are wired lazily in [`src/modmcp/daemon/app.py`](src/modmcp/daemon/app.py); each is wrapped in a `try/except log.warning`, so a missing dependency or a config bug in one worker never brings down the others.
 
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest -q          # ~120 tests, ~22s
+pytest -q          # ~180 tests, ~25s
 cd frontend && npm install && npm run build
 ```
 
