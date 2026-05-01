@@ -845,6 +845,8 @@ def mount_web(app: FastAPI) -> None:
                 "session (likely a periodic capture). Wait for the "
                 "synthesis_captured event, then retry.",
             )
+        except sw.SynthesisSuppressed as e:
+            raise HTTPException(503, detail=str(e))
         if meta is None:
             raise HTTPException(
                 502,

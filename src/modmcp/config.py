@@ -168,6 +168,16 @@ class Config:
     # derived as ~3.2 chars/token (conservative English estimate).
     synthesis_max_input_tokens: int = 24000
 
+    # Backoff after repeated synthesis failures. When the local LLM is
+    # unreachable, the worker would otherwise keep firing on every
+    # threshold crossing — generating noise in logs, retrying needlessly,
+    # and hammering an upstream that's already known broken. After
+    # ``synthesis_failure_threshold`` consecutive failures, suppress
+    # further attempts for ``synthesis_backoff_seconds``. Any successful
+    # call (periodic or on-demand) resets the counter.
+    synthesis_failure_threshold: int = 3
+    synthesis_backoff_seconds: float = 300.0
+
     # Live UI transport: SSE endpoint caps + replay window. The replay
     # window applies to the page-load tail and the SSE backfill on
     # reconnect; live.js caps the rendered DOM at 200 nodes regardless,

@@ -84,6 +84,23 @@ class SynthesisInFlight(Exception):
     (the ``synthesis_captured`` event will fire) and retry if needed."""
 
 
+class SynthesisSuppressed(Exception):
+    """Raised by ``on_demand`` when the worker is in backoff after
+    repeated upstream failures. Carries ``retry_after`` (epoch seconds)
+    and ``consecutive_failures`` so the HTTP layer can give a clear
+    retry-after message rather than firing a doomed call into a known-
+    broken upstream."""
+
+    def __init__(self, retry_after: float, consecutive_failures: int) -> None:
+        self.retry_after = retry_after
+        self.consecutive_failures = consecutive_failures
+        super().__init__(
+            f"synthesis paused after {consecutive_failures} consecutive "
+            f"failures; retrying after "
+            f"{time.strftime('%H:%M:%S', time.localtime(retry_after))}"
+        )
+
+
 @dataclass
 class _SessionState:
     session_id: str
@@ -99,6 +116,13 @@ class _SessionState:
     last_snapshot_input_tokens: int = 0
     in_flight: bool = False
     last_snapshot_at: float | None = None
+    # Backoff state — incremented on every failed synth call, reset on
+    # success. When ``consecutive_failures`` reaches the configured
+    # threshold, ``suppressed_until`` is set to ``time.time() + backoff``
+    # and further attempts skip (or raise SynthesisSuppressed) until
+    # the deadline passes.
+    consecutive_failures: int = 0
+    suppressed_until: float | None = None
 
 
 class SynthesisWorker:
@@ -420,13 +444,34 @@ class SynthesisWorker:
         Caller is responsible for setting ``state.in_flight`` and
         unsetting it; this function just runs the LLM call + persist.
         Surfaces failures via the ``synthesis_failed`` LiveBus event so
-        the user sees a failed call rather than a silent miss.
+        the user sees a failed call rather than a silent miss. After
+        ``synthesis_failure_threshold`` consecutive failures, enters
+        backoff: periodic calls skip silently; on-demand calls raise
+        ``SynthesisSuppressed``.
         """
         if self._daemon.qwen is None:
             log.debug("synthesis skipped: no local LLM configured")
             return None
 
         cfg = get_config()
+
+        # Backoff gate. Periodic calls during suppression skip silently
+        # (logged at debug level); on-demand calls raise so the HTTP
+        # layer can give the user a clear retry-after message.
+        now = time.time()
+        if state.suppressed_until is not None and now < state.suppressed_until:
+            if trigger == "on_demand":
+                raise SynthesisSuppressed(
+                    retry_after=state.suppressed_until,
+                    consecutive_failures=state.consecutive_failures,
+                )
+            log.debug(
+                "synthesis suppressed (periodic skipped): %d failures, retry after %s",
+                state.consecutive_failures,
+                time.strftime("%H:%M:%S", time.localtime(state.suppressed_until)),
+            )
+            return None
+
         max_input_tokens = int(getattr(cfg, "synthesis_max_input_tokens", 24000))
         max_chars = max(2048, int(max_input_tokens * self._CHARS_PER_TOKEN))
 
@@ -449,8 +494,25 @@ class SynthesisWorker:
             )
         except Exception as e:
             log.warning("synthesis call failed (%s): %s", trigger, e)
-            await self._publish_failure(state, trigger=trigger, error=str(e))
+            state.consecutive_failures += 1
+            threshold = int(getattr(cfg, "synthesis_failure_threshold", 3))
+            backoff = float(getattr(cfg, "synthesis_backoff_seconds", 300.0))
+            entered_suppression = state.consecutive_failures >= threshold
+            if entered_suppression:
+                state.suppressed_until = time.time() + backoff
+            await self._publish_failure(
+                state,
+                trigger=trigger,
+                error=str(e),
+                consecutive_failures=state.consecutive_failures,
+                suppressed_until=(
+                    state.suppressed_until if entered_suppression else None
+                ),
+            )
             return None
+        # Success: reset backoff state.
+        state.consecutive_failures = 0
+        state.suppressed_until = None
         output = (output or "").strip() or "(no notable activity)"
         meta = await self._persist(
             state,
@@ -465,17 +527,31 @@ class SynthesisWorker:
         return meta
 
     async def _publish_failure(
-        self, state: _SessionState, *, trigger: str, error: str
+        self,
+        state: _SessionState,
+        *,
+        trigger: str,
+        error: str,
+        consecutive_failures: int = 0,
+        suppressed_until: float | None = None,
     ) -> None:
         live = getattr(self._daemon, "live", None)
         if live is None:
             return
+        payload: dict = {"trigger": trigger, "error": error}
+        if consecutive_failures:
+            payload["consecutive_failures"] = consecutive_failures
+        if suppressed_until is not None:
+            payload["suppressed_until"] = suppressed_until
+            payload["suppressed_until_iso"] = time.strftime(
+                "%H:%M:%S", time.localtime(suppressed_until)
+            )
         try:
             await live.publish(
                 state.session_id,
                 state.project_hash,
                 "synthesis_failed",
-                {"trigger": trigger, "error": error},
+                payload,
             )
         except Exception:
             log.exception("synthesis_failed publish itself failed")
