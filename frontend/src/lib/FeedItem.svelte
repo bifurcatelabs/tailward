@@ -92,7 +92,14 @@
   function fmtIsoTs(ts) {
     if (!ts) return '';
     try {
-      const d = new Date(ts);
+      // ``createdAt`` rides over the wire as seconds-since-epoch
+      // (Python ``time.time()``). JS ``new Date(num)`` expects ms,
+      // so convert via ``toEpochSeconds`` then *1000. Earlier this
+      // function passed ``ts`` straight to ``new Date(...)`` and
+      // produced 1970-01-21 timestamps in copy headers.
+      const sec = toEpochSeconds(ts);
+      if (sec == null) return '';
+      const d = new Date(sec * 1000);
       const pad = (n) => String(n).padStart(2, '0');
       const off = -d.getTimezoneOffset();
       const sign = off >= 0 ? '+' : '-';
