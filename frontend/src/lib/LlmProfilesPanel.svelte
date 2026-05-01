@@ -43,7 +43,7 @@
 <section class="panel">
   <header>
     <div>
-      <h3>llm profiles</h3>
+      <h3>local llm profiles</h3>
       <p class="muted">
         the model, sampler params, and prompts sent to the local endpoint
         per call kind. read directly from the live config — what's shown

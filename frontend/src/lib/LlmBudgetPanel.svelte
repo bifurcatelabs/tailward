@@ -54,7 +54,7 @@
 <section class="panel">
   <header>
     <div>
-      <h3>llm budget · per call kind</h3>
+      <h3>local llm budget · per call kind</h3>
       <p class="muted">
         configured max_tokens vs observed completion / reasoning. fills past
         ~75% of cap or any ``finish_reason=length`` events flag truncation
