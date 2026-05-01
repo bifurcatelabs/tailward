@@ -34,7 +34,13 @@ def _synth_user_template() -> str:
     return "<denoised transcript text>"
 
 
-def _kind_profile(kind: CallKind, system: str, user_template: str) -> dict[str, Any]:
+def _kind_profile(
+    kind: CallKind,
+    system: str,
+    user_template: str,
+    *,
+    display_kind: str | None = None,
+) -> dict[str, Any]:
     cfg = get_config()
     # Per-kind sampler resolution mirrors qwen.QwenClient — keeping the
     # logic in lockstep so the displayed values are what'll actually
@@ -79,7 +85,7 @@ def _kind_profile(kind: CallKind, system: str, user_template: str) -> dict[str, 
         "consolidator": cfg.qwen_model_consolidator,
     }[kind]
     return {
-        "kind": kind,
+        "kind": display_kind or kind,
         "model": model_override or cfg.qwen_model,
         "model_overridden": bool(model_override),
         "max_tokens": max_tokens,
@@ -103,9 +109,31 @@ def all_profiles() -> list[dict[str, Any]]:
     # Lazy import so this module can be imported even if phase1's
     # transcript-denoiser deps aren't loaded yet.
     from .. import phase1
+    from . import synthesis_worker
 
     return [
-        _kind_profile("synth", phase1.SYSTEM, _synth_user_template()),
+        # Two synth flavors share the same ``synth`` CallKind (same
+        # sampler params) but use different system prompts. The
+        # comprehensive form is end-of-session-shaped (Intent JSON);
+        # the incremental form is mid-session-shaped (markdown blob,
+        # designed to chain into a comprehensive merge).
+        _kind_profile(
+            "synth",
+            phase1.SYSTEM,
+            _synth_user_template(),
+            display_kind="synth (comprehensive)",
+        ),
+        _kind_profile(
+            "synth",
+            synthesis_worker.SYSTEM_INCREMENTAL,
+            (
+                "<denoised events from the live session — USER:/ASSISTANT:/"
+                "[tool_use:NAME]/[tool_result] lines joined by `---`, "
+                "capped at synthesis_max_input_tokens (default 24000) input "
+                "tokens; tool inputs/outputs truncated to 500 chars each>"
+            ),
+            display_kind="synth (incremental)",
+        ),
         _kind_profile("drift", drift_mod.PROMPT_SYSTEM, drift_mod.PROMPT_USER_TEMPLATE),
         _kind_profile("rubric", rubric_worker.PROMPT_SYSTEM, rubric_worker.PROMPT_USER_TEMPLATE),
         _kind_profile(

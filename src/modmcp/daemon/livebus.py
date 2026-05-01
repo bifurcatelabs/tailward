@@ -85,6 +85,11 @@ EVENT_TYPES: frozenset[str] = frozenset(
         # trigger kind, on-disk path, model used, and timestamp; the
         # UI surfaces a snapshot-timeline panel that lists captures.
         "synthesis_captured",
+        # Synthesis attempt failed loudly. Fired when the local LLM
+        # call raises (timeout, connection error, malformed response,
+        # etc.) so the user sees the failure rather than silently
+        # missing a capture. Payload: trigger, error message.
+        "synthesis_failed",
     }
 )
 

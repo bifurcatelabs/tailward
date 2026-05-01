@@ -710,3 +710,145 @@ def mount_web(app: FastAPI) -> None:
                 for r in rows
             ],
         })
+
+    async def _project_path_for_hash(daemon, ph: str) -> str | None:
+        rows = await daemon.ledger.projects_summary()
+        match = next((r for r in rows if r["project_hash"] == ph), None)
+        return match["project_path"] if match else None
+
+    @app.get("/p/{ph}/live/{session_id}/snapshots")
+    async def live_snapshots(request: Request, ph: str, session_id: str) -> JSONResponse:
+        """List session-synthesis snapshots written by the synthesis_worker.
+
+        Reads ``~/.modmcp/projects/<ph>/snapshots/*.meta.json`` and filters
+        to the requested session. The Session-view ``SnapshotsPanel``
+        consumes this for backfill on mount; new captures arrive via the
+        ``synthesis_captured`` LiveBus event.
+
+        Query parameter ``limit`` caps the number of returned rows
+        (newest-first; default 50, max 1000). The response always
+        includes ``total`` so the panel can offer a "show all N"
+        expand when the on-disk count exceeds the returned slice.
+        """
+        import json as _json
+        from ..paths import project_dir
+
+        try:
+            limit = int(request.query_params.get("limit", "50") or 50)
+        except ValueError:
+            limit = 50
+        limit = max(1, min(limit, 1000))
+
+        daemon = request.app.state.daemon
+        project_path = await _project_path_for_hash(daemon, ph)
+        if project_path is None:
+            raise HTTPException(404, detail="project not found")
+
+        snap_dir = project_dir(project_path) / "snapshots"
+        if not snap_dir.exists():
+            return JSONResponse({"snapshots": [], "total": 0})
+
+        items: list[dict] = []
+        for meta_file in sorted(snap_dir.glob("*.meta.json")):
+            try:
+                meta = _json.loads(meta_file.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if meta.get("session_id") != session_id:
+                continue
+            items.append({
+                "created_at": meta.get("created_at"),
+                "trigger": meta.get("trigger"),
+                "model": meta.get("model"),
+                "fullness_input_tokens": meta.get("fullness_input_tokens"),
+                "delta_since_last_snapshot": meta.get("delta_since_last_snapshot"),
+            })
+        items.sort(key=lambda r: r.get("created_at") or "", reverse=True)
+        total = len(items)
+        return JSONResponse({"snapshots": items[:limit], "total": total})
+
+    @app.get("/p/{ph}/live/{session_id}/snapshots/{ts}")
+    async def live_snapshot_body(
+        request: Request, ph: str, session_id: str, ts: str
+    ) -> JSONResponse:
+        """Return the markdown body + sidecar metadata for one snapshot."""
+        import json as _json
+        from ..paths import project_dir
+
+        # Reject anything but the canonical timestamp shape so this can't
+        # be coaxed into reading arbitrary files via path traversal.
+        import re
+        if not re.fullmatch(r"\d{8}T\d{6}Z", ts):
+            raise HTTPException(400, detail="malformed snapshot timestamp")
+
+        daemon = request.app.state.daemon
+        project_path = await _project_path_for_hash(daemon, ph)
+        if project_path is None:
+            raise HTTPException(404, detail="project not found")
+
+        snap_dir = project_dir(project_path) / "snapshots"
+        body_path = snap_dir / f"{ts}.md"
+        meta_path = snap_dir / f"{ts}.meta.json"
+        if not body_path.exists() or not meta_path.exists():
+            raise HTTPException(404, detail="snapshot not found")
+
+        try:
+            meta = _json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+        # Belt-and-suspenders: confirm sidecar agrees with the requested
+        # session before returning content.
+        if meta.get("session_id") != session_id:
+            raise HTTPException(404, detail="snapshot not found")
+        body = body_path.read_text(encoding="utf-8")
+        return JSONResponse({"meta": meta, "body": body})
+
+    @app.post("/p/{ph}/live/{session_id}/synthesize")
+    async def live_synthesize(
+        request: Request, ph: str, session_id: str
+    ) -> JSONResponse:
+        """Trigger an on-demand synthesis snapshot for this session.
+
+        Status codes are distinct so the UI can give an honest reason:
+
+        * **200** — snapshot landed; body is its metadata
+        * **404** — project not found in the ledger
+        * **409** — another synth in flight for this session
+        * **502** — LLM call itself failed (details in the live feed
+          via the ``synthesis_failed`` event)
+        * **503** — synthesis worker / local LLM not configured
+        """
+        from ..daemon import synthesis_worker as sw
+
+        daemon = request.app.state.daemon
+        if getattr(daemon, "synthesis", None) is None:
+            raise HTTPException(503, detail="synthesis worker unavailable")
+        project_path = await _project_path_for_hash(daemon, ph)
+        if project_path is None:
+            raise HTTPException(404, detail="project not found")
+        try:
+            meta = await daemon.synthesis.on_demand(
+                session_id=session_id,
+                project_hash=ph,
+                project_path=project_path,
+            )
+        except sw.NoLocalLLM:
+            raise HTTPException(
+                503,
+                detail="no local LLM configured — synthesis needs a "
+                "qwen-compatible endpoint; configure one in settings",
+            )
+        except sw.SynthesisInFlight:
+            raise HTTPException(
+                409,
+                detail="another synthesis is already in flight for this "
+                "session (likely a periodic capture). Wait for the "
+                "synthesis_captured event, then retry.",
+            )
+        if meta is None:
+            raise HTTPException(
+                502,
+                detail="synthesis call failed — see the live feed for "
+                "the underlying error",
+            )
+        return JSONResponse(meta)

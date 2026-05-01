@@ -222,7 +222,12 @@ def create_app() -> FastAPI:
                     await daemon.user_rubric.enqueue(ev, fs)
                 if (
                     getattr(daemon, "synthesis", None) is not None
-                    and ev.kind == "assistant_message"
+                    and ev.kind in (
+                        "assistant_message",
+                        "user_message",
+                        "tool_use",
+                        "tool_result",
+                    )
                 ):
                     await daemon.synthesis.enqueue(ev, fs)
 

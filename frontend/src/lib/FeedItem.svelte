@@ -72,6 +72,7 @@
     exfiltration_alert: 'secret',
     memory_edit: 'memory',
     synthesis_captured: 'synthesis',
+    synthesis_failed: 'synthesis failed',
   };
 
   let p = $derived(event.payload || {});

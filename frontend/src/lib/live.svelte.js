@@ -69,6 +69,10 @@ const KNOWN_EVENT_TYPES = new Set([
   // model, timestamp. UI consumer is the snapshot-timeline panel on
   // the Session view (lands in a follow-up commit).
   'synthesis_captured',
+  // Synthesis attempt failed loudly (LLM unreachable, timeout, malformed
+  // response, etc). Payload carries trigger + error message; the panel
+  // surfaces this so silent misses don't accumulate.
+  'synthesis_failed',
 ]);
 
 const FEED_CAP = 250;

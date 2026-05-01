@@ -161,6 +161,13 @@ class Config:
     # users with bigger context windows can raise it.
     synthesis_periodic_tokens: int = 10000
 
+    # Input budget for incremental synthesis prompts. Conservative
+    # default so a 32k-context local model can synthesize comfortably;
+    # users with bigger models (64k, 128k, 256k context) raise this to
+    # let the prompt see more of the recent transcript. Char cap is
+    # derived as ~3.2 chars/token (conservative English estimate).
+    synthesis_max_input_tokens: int = 24000
+
     # Live UI transport: SSE endpoint caps + replay window. The replay
     # window applies to the page-load tail and the SSE backfill on
     # reconnect; live.js caps the rendered DOM at 200 nodes regardless,
