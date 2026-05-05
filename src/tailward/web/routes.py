@@ -65,9 +65,6 @@ def _resolve_v2_bundle() -> tuple[str | None, str | None]:
 def mount_web(app: FastAPI) -> None:
     templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
-    def _base_ctx() -> dict:
-        return {"warden_mode": get_config().warden_mode}
-
     if _STATIC_DIR.exists():
         # Disable caching on static assets so live.js / CSS edits land
         # without forcing a hard reload. The dev/local-first posture
@@ -81,7 +78,7 @@ def mount_web(app: FastAPI) -> None:
 
         app.mount("/static", _NoCacheStatic(directory=str(_STATIC_DIR)), name="static")
 
-    def _spa_shell(request: Request, *, title: str = "warden") -> HTMLResponse:
+    def _spa_shell(request: Request, *, title: str = "tailward") -> HTMLResponse:
         """Render the SPA shell template for non-session pages.
 
         The same Svelte bundle serves landing (``/``), project rules
@@ -95,7 +92,6 @@ def mount_web(app: FastAPI) -> None:
             request,
             "live.html",
             {
-                **_base_ctx(),
                 "ph": "",
                 "session": None,
                 "session_id": "",
@@ -108,7 +104,7 @@ def mount_web(app: FastAPI) -> None:
     @app.get("/", response_class=HTMLResponse)
     async def landing(request: Request) -> HTMLResponse:
         """Landing page — Svelte SPA reads /v2/projects to populate."""
-        return _spa_shell(request, title="warden")
+        return _spa_shell(request, title="tailward")
 
     @app.get("/p/{ph}", response_class=HTMLResponse)
     async def project_view(request: Request, ph: str) -> HTMLResponse:
@@ -121,7 +117,7 @@ def mount_web(app: FastAPI) -> None:
         # Reject obviously-bogus hashes early so 404 routing is honest.
         if not ph or "/" in ph:
             raise HTTPException(404)
-        return _spa_shell(request, title=f"warden · {ph[:8]}")
+        return _spa_shell(request, title=f"tailward · {ph[:8]}")
 
     # ------------------------------------------------------------------
     # Live session view — Svelte chassis at the canonical URL
@@ -145,7 +141,6 @@ def mount_web(app: FastAPI) -> None:
             request,
             "live.html",
             {
-                **_base_ctx(),
                 "ph": ph,
                 "session": session,
                 "session_id": session_id,
@@ -199,7 +194,7 @@ def mount_web(app: FastAPI) -> None:
     async def llm_profiles(request: Request) -> JSONResponse:
         """Per-call-kind config + verbatim prompts.
 
-        Surfaces what Warden itself is sending to the local LLM —
+        Surfaces what tailward itself is sending to the local LLM —
         model, sampler params, max_tokens, thinking on/off, plus the
         unredacted system prompt and user-prompt template for each of
         synth / drift / query / rubric / consolidator. Read by the
@@ -418,7 +413,7 @@ def mount_web(app: FastAPI) -> None:
 
     @app.get("/v2/projects")
     async def v2_projects(request: Request) -> JSONResponse:
-        """Cross-project landing-page data: one row per project warden
+        """Cross-project landing-page data: one row per project tailward
         has seen, with session count, last activity, intent.md presence,
         most-recent session id (for click-through), and the active
         session_mode label.

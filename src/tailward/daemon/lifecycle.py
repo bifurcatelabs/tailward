@@ -149,7 +149,6 @@ def status() -> dict:
         "pid": pid,
         "alive": alive,
         "healthy": healthy,
-        "mode": cfg.warden_mode,
         "log": str(daemon_log_path()),
         "url": f"http://{cfg.http_host}:{cfg.http_port}",
     }

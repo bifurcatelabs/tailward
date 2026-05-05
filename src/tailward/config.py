@@ -4,21 +4,13 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any
 
 from .paths import atomic_write_text, config_path, ensure_layout
-
-WardenMode = Literal["passive", "active"]
 
 
 @dataclass
 class Config:
-    # Warden active-participation mode. ``passive`` is the default in v1.1:
-    # no preamble injection and no MCP tool usage influences context, the
-    # daemon only observes and audits. Flip to ``active`` to re-enable the
-    # UserPromptSubmit preamble + drift-corrective queue.
-    warden_mode: WardenMode = "passive"
-
     # Qwen / llama.cpp OpenAI-compatible endpoint.
     qwen_endpoint: str = "http://127.0.0.1:8080/v1"
     qwen_model: str = "qwen2.5-8b-instruct"
@@ -224,7 +216,7 @@ class Config:
         return cls()
 
     def to_toml(self) -> str:
-        lines = ["# modmcp configuration. Restart daemon after editing.", ""]
+        lines = ["# tailward configuration. Restart daemon after editing.", ""]
         for key, value in asdict(self).items():
             if isinstance(value, str):
                 escaped = value.replace("\\", "\\\\").replace('"', '\\"')

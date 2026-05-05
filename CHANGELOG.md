@@ -1,9 +1,49 @@
 # Changelog
 
-All notable changes to warden are documented here.
+All notable changes to tailward are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [v2.8.0] — 2026-05-05
+
+### Removed
+- **Active-mode surface fully retired.** v1.1 deprecated active mode
+  on principle (observer effect, model-trust contamination, blast
+  radius — see README "Why passive observation only"). v2.8.0 deletes
+  the code:
+  - ``warden_mode`` config field + ``WardenMode`` Literal removed from
+    ``config.py``. Existing ``warden_mode = "passive"`` lines in v2.x
+    user configs are silently ignored by ``_coerce()`` — no migration
+    shim required.
+  - ``/hook/userpromptsubmit`` daemon endpoint removed; ``tailward
+    hook userpromptsubmit`` CLI subcommand + ``hook`` Typer group
+    removed; ``_build_preamble`` helper removed.
+  - Drift worker no longer gates on ``intent.front.phase2_turns_remaining``
+    — that gate had been silently suppressing drift in passive setups
+    where the field defaults to ``0``. Drift now fires on every
+    qualifying assistant turn.
+  - Drift worker's active-mode correction-enqueue branch removed;
+    high-severity surfacing path is unchanged.
+  - ``surface.py`` MCP-elicitation channel docstring removed (the MCP
+    server itself was retired earlier).
+  - Three ``test_daemon_app.py`` hook tests + ``active_mode`` conftest
+    fixture removed; ``test_e2e_passive_smoke.py`` hook assertion
+    removed.
+  - Users with the ``UserPromptSubmit`` hook still registered in
+    ``.claude/settings.json`` should remove that block — the hook
+    endpoint no longer exists. Phase 2 of the purge (intent-schema
+    ``phase2_turns_remaining`` field, session-state
+    ``preamble_delivered`` field, ledger ``enqueue_correction`` /
+    ``drain_corrections`` methods + ``corrections`` table) is queued
+    as a follow-up commit.
+
+### Changed
+- **Voice normalization.** "Warden" as a product name removed from
+  user-facing copy in favor of ``tailward``. CLI help text, daemon
+  notification titles, web SPA shell titles, frontend ``<title>``
+  tags, and remaining stale comments/docstrings updated. ``warden``
+  CLI deprecation alias preserved per v2.7.0.
 
 ## [v2.7.0] — 2026-05-01
 

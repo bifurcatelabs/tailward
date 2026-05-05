@@ -26,7 +26,7 @@
       />
     </svg>
     <span class="name">tailward</span>
-    <span class="version">2.7.0</span>
+    <span class="version">2.8.0</span>
   </a>
   <span class="tagline">audit underlay for Claude Code</span>
 </header>

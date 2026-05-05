@@ -1,9 +1,10 @@
-"""Phase 2 drift detection.
+"""Drift detection.
 
 Pattern-first, LLM-escalated. Heuristic scores keyword overlap between the
 last assistant turn and the captured-intent active_goal + open_threads. If
 the score falls below a threshold we ask Qwen to classify severity and
-produce a corrective line.
+produce a verdict; high-severity verdicts surface to the user via the
+live UI and OS toast (when enabled).
 """
 
 from __future__ import annotations
@@ -18,7 +19,7 @@ from typing import TYPE_CHECKING
 from ..config import get_config
 from ..paths import intent_path
 from ..schema.events import TranscriptEvent
-from ..schema.intent import Intent, load_intent, save_intent
+from ..schema.intent import Intent, load_intent
 
 if TYPE_CHECKING:
     from .app import Daemon
@@ -142,8 +143,6 @@ class DriftWorker:
             intent = load_intent(ip)
         except Exception:
             return
-        if intent.front.phase2_turns_remaining <= 0:
-            return
 
         # Skip turns with no meaningful prose (pure tool-call events, empty
         # text, or trivially short responses). Claude often emits several
@@ -158,20 +157,7 @@ class DriftWorker:
         )
 
         action_taken = None
-        # Correction enqueue is an active-mode affordance: the hook only
-        # drains corrections when warden_mode == "active". In passive we
-        # still compute and record the verdict (it's valuable UI signal on
-        # /p/<hash>/drift and the live feed) but skip the enqueue so the
-        # ledger doesn't accumulate rows that will never be consumed.
-        mode_active = cfg.warden_mode == "active"
-        if verdict.severity == "med" and verdict.corrective and mode_active:
-            await self._daemon.ledger.enqueue_correction(
-                fs.session_id, fs.project_hash, verdict.corrective
-            )
-            action_taken = "queued_correction"
-        elif verdict.severity == "med" and verdict.corrective:
-            action_taken = "corrective_suppressed_passive"
-        elif verdict.severity == "high":
+        if verdict.severity == "high":
             if self._daemon.surface is not None:
                 try:
                     await self._daemon.surface.surface(
@@ -206,9 +192,6 @@ class DriftWorker:
             except Exception:
                 log.exception("live publish failed (drift)")
 
-        # Decrement handled by hook endpoint when the next UserPromptSubmit fires,
-        # but we also nudge here to make zero-hook scenarios still terminate.
-        save_intent(intent, ip)
 
     async def _analyze(self, ev: TranscriptEvent, intent: Intent) -> DriftVerdict:
         goal = intent.sections.get("Active Goal", "")

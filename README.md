@@ -58,7 +58,7 @@ Solo-dev work; expect rough edges. Issues and discussion welcome — see [CONTRI
 
 ## Operating posture
 
-Passive observation is the only supported surface. Prompt injection as a paradigm was rejected in v1.1 after sustained dogfooding — observer effect, model-trust contamination, and concentrated blast radius all undermine the trust layer (see [Why passive observation only](#why-passive-observation-only)). The original active-mode code (MCP server + `UserPromptSubmit` hook + drift correctives) is preserved in source as historical artifact only — not maintained, not tested, may no longer work.
+Passive observation is the only supported surface. Prompt injection as a paradigm was rejected in v1.1 after sustained dogfooding — observer effect, model-trust contamination, and concentrated blast radius all undermine the trust layer (see [Why passive observation only](#why-passive-observation-only)). The original active-mode code (MCP server + `UserPromptSubmit` hook + drift correctives) was removed from source in v2.8.0; CHANGELOG and git history retain the design context.
 
 ### Why passive observation only
 

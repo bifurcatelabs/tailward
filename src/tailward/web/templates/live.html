@@ -3,15 +3,11 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>warden · {{ session_id[:8] }}</title>
+  <title>tailward · {{ session_id[:8] }}</title>
   {#
-    The v0.2 surface is intentionally NOT extending base.html. The
-    Svelte app owns every visible piece of chrome (header, tabs,
-    panels, footers), so wrapping it with the legacy template would
-    only inject things that no longer apply: the "modmcp" wordmark,
-    the warden_mode pill (passive is now the only product surface),
-    the v1.1 nav strip, and an htmx <script src="cdn..."> that
-    contradicts the local-first posture of the rest of the daemon.
+    The Svelte app owns every visible piece of chrome (header, tabs,
+    panels, footers), so this template intentionally does not extend
+    a legacy base — it just provides the mount node and bundle script.
   #}
   {% if v2_bundle_css %}
   <link rel="stylesheet" href="{{ v2_bundle_css }}">

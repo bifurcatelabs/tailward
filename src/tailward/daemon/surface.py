@@ -1,18 +1,12 @@
 """Surfacing: notify the user of high-stakes drift or contradicted claims.
 
-In the v1.1 passive-first world the **live web UI is the primary surface**:
-every high-severity event is published to :class:`~modmcp.daemon.livebus.LiveBus`
-and lands in the live session view + report card without touching the model's
-prompt. This module handles the two auxiliary channels for situations where
-the user isn't looking at the browser:
+The **live web UI is the primary surface**: every high-severity event is
+published to :class:`~tailward.daemon.livebus.LiveBus` and lands in the
+live session view + report card without touching the model's prompt.
+This module handles an auxiliary channel for situations where the user
+isn't looking at the browser: an OS-level toast via ``plyer``.
 
-1. An OS-level toast via ``plyer`` (works in both modes).
-2. MCP elicitation — only useful when ``warden_mode == "active"`` and the
-   MCP session is connected. The daemon doesn't own the MCP connection, so
-   the MCP server process reads surfacing rows from the ledger and relays
-   them on elicitation-capable clients.
-
-All three channels write the same surfacing row to the ledger; only the
+Both channels write the same surfacing row to the ledger; only the
 user-visible notification is debounced.
 """
 
@@ -88,9 +82,9 @@ class Surfacer:
             from plyer import notification  # type: ignore
 
             notification.notify(  # type: ignore[attr-defined]
-                title=f"warden: {kind} ({severity})",
+                title=f"tailward: {kind} ({severity})",
                 message=text[:200],
-                app_name="warden",
+                app_name="tailward",
                 timeout=10,
             )
         except Exception as e:

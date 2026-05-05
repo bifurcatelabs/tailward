@@ -9,21 +9,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException
 
 from ..config import get_config
 from ..paths import (
     daemon_log_path,
     ensure_layout,
-    intent_path,
     projects_dir,
 )
-from ..paths import (
-    project_hash as hash_path,
-)
 from ..schema import exfiltration
-from ..schema.intent import Intent, load_intent, save_intent
+from ..schema.intent import load_intent, save_intent
 from ..storage.ledger import Ledger
 from .livebus import LiveBus
 from .state import StateStore
@@ -188,7 +183,7 @@ def create_app() -> FastAPI:
             # Drift only fires on assistant turns (we're judging the assistant's
             # trajectory). Audit fires on BOTH user and assistant turns — user
             # turns often carry strong first-person claims about external
-            # state ("I just deleted X") that Warden should check against the
+            # state ("I just deleted X") that tailward should check against the
             # actual repo before that context shapes the next assistant turn.
             if daemon.drift is not None and ev.kind == "assistant_message" and fs.session_id:
                 await daemon.drift.enqueue(ev, fs)
@@ -370,7 +365,7 @@ def create_app() -> FastAPI:
             # secret in the published payload (so live_events.payload
             # never stores the cleartext) and emits a separate
             # exfiltration_alert event surfacing the leak in the live
-            # feed. See ``modmcp.schema.exfiltration``.
+            # feed. See ``tailward.schema.exfiltration``.
             if fs.session_id and fs.project_hash and ev.tool_name:
                 mode_at_call = ev.permission_mode or fs.last_permission_mode
                 input_preview, leaks = await _check_leaks(
@@ -579,7 +574,7 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning("synthesis worker unavailable: %s", e)
 
-        log.info("tailward daemon started (mode=%s)", get_config().warden_mode)
+        log.info("tailward daemon started")
         try:
             yield
         finally:
@@ -616,76 +611,6 @@ def create_app() -> FastAPI:
             "sessions": len(daemon.state.all()),
             "ts": datetime.now(UTC).isoformat(),
         }
-
-    @app.post("/hook/userpromptsubmit")
-    async def hook_userpromptsubmit(req: Request) -> JSONResponse:
-        payload = await req.json()
-        cwd = payload.get("cwd") or payload.get("project_root") or ""
-        session_id = payload.get("session_id") or payload.get("sessionId")
-        raw_prompt = payload.get("prompt") or ""
-        if not cwd:
-            return JSONResponse({})
-
-        # Passive mode: daemon still receives the POST (so Claude Code
-        # doesn't error on hook configuration) but injects nothing. All
-        # observability goes through the web UI instead.
-        if get_config().warden_mode == "passive":
-            return JSONResponse({})
-        try:
-            ip = intent_path(cwd)
-            if not ip.exists():
-                return JSONResponse({})
-            intent: Intent = load_intent(ip)
-        except Exception as e:
-            log.warning("hook intent load failed: %s", e)
-            return JSONResponse({})
-
-        ph = hash_path(cwd)
-        session = None
-        if session_id:
-            session = daemon.state.get(session_id)
-
-        pieces: list[str] = []
-
-        deliver_preamble = False
-        if session is None or not session.preamble_delivered:
-            deliver_preamble = True
-
-        if deliver_preamble:
-            preamble = _build_preamble(intent)
-            if preamble:
-                pieces.append(preamble)
-            if session is not None:
-                session.preamble_delivered = True
-
-        if session_id and intent.front.phase2_turns_remaining > 0:
-            corrections = await daemon.ledger.drain_corrections(session_id)
-            if corrections:
-                pieces.append("## Warden corrections (previous turn)")
-                pieces.extend(f"- {c}" for c in corrections)
-
-        if session_id and session is not None:
-            intent.front.phase2_turns_remaining = max(
-                0, intent.front.phase2_turns_remaining - 1
-            )
-            save_intent(intent, ip)
-
-        if not pieces:
-            return JSONResponse({})
-
-        additional_context = "\n\n".join(pieces).strip()
-        return JSONResponse(
-            {
-                "hookSpecificOutput": {
-                    "hookEventName": "UserPromptSubmit",
-                    "additionalContext": additional_context,
-                },
-                # Also return at top level for hook implementations that prefer it.
-                "additionalContext": additional_context,
-                "prompt": raw_prompt,
-                "ph": ph,
-            }
-        )
 
     @app.get("/api/projects")
     async def list_projects() -> list[dict]:
@@ -762,23 +687,6 @@ def _resolve_intent_path(ph: str) -> Path:
     if not target.exists():
         raise HTTPException(status_code=404, detail=f"no intent for project {ph}")
     return target
-
-
-def _build_preamble(intent: Intent) -> str:
-    parts = ["## Warden preamble (captured intent)"]
-    for section in (
-        "Receiving Posture",
-        "Active Goal",
-        "Open Threads",
-        "Active Rules",
-        "Known Agent Drift Patterns",
-        "Known User Drift Patterns",
-        "Commitments (pending)",
-    ):
-        body = (intent.sections.get(section) or "").strip()
-        if body:
-            parts.append(f"### {section}\n{body}")
-    return "\n\n".join(parts)
 
 
 def _snapshot(intent_file: Path) -> None:

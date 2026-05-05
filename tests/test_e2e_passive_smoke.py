@@ -1,8 +1,8 @@
-"""End-to-end smoke for the supported **passive** audit layer.
+"""End-to-end smoke for the audit layer.
 
-Boots the daemon (default ``warden_mode = "passive"``), drives it with a
-synthetic JSONL session, and asserts the v1.1 audit layer produces signal
-from watcher ingestion all the way through to the ledger and LiveBus:
+Boots the daemon, drives it with a synthetic JSONL session, and asserts
+the audit layer produces signal from watcher ingestion all the way
+through to the ledger and LiveBus:
 
 1. A forbidden-bash tool_use (``git push --force``) writes a row to
    ``constraint_violations`` with a ``forbidden-bash`` rule id.
@@ -11,11 +11,8 @@ from watcher ingestion all the way through to the ledger and LiveBus:
 3. Every detection mirrors to ``live_events`` via LiveBus.
 4. The scope worker records a ``scope_snapshots`` row on the assistant
    turn that follows the tool calls.
-5. The UserPromptSubmit hook returns ``{}`` even when an ``intent.md``
-   with content exists — passive mode never injects into the prompt.
 
-Runs fully offline; Qwen is nulled out. Complements ``test_e2e_smoke.py``,
-which guards the opt-in active-mode continuity loop.
+Runs fully offline; Qwen is nulled out.
 """
 
 from __future__ import annotations
@@ -333,16 +330,6 @@ def test_passive_pipeline_smoke(
             lambda: {"constraint_violation", "scope_snapshot"} <= _live_types()
         ), f"LiveBus missing expected types; saw: {_live_types()}"
 
-        # ---- Hook in passive mode never injects, even with intent present.
-        r = client.post(
-            "/hook/userpromptsubmit",
-            json={"session_id": SESSION_ID, "cwd": cwd, "prompt": "next"},
-        )
-        assert r.status_code == 200
-        assert r.json() == {}, (
-            "passive mode must not return a preamble or corrections; "
-            f"got: {r.json()}"
-        )
 
 
 COALESCE_SESSION_ID = "session-coalesce-001"

@@ -1,8 +1,9 @@
-"""``warden`` CLI: daemon lifecycle, handoff, hook, link.
+"""``tailward`` CLI: daemon lifecycle, handoff, link.
 
-Internal package name remains ``modmcp`` per the v2.0.0 light-path
-rebrand. The legacy ``modmcp`` console script is kept as a backward-
-compat alias; both invoke the same entry point.
+The canonical entry point as of v2.7.0 is ``tailward``. ``warden`` is
+preserved as a deprecation alias through v3.x and dispatches to the
+same ``main()`` defined here; both names are declared in
+``pyproject.toml`` ``[project.scripts]``.
 """
 
 from __future__ import annotations
@@ -33,15 +34,12 @@ from .schema.intent import empty_intent, load_intent, save_intent
 
 app = typer.Typer(
     add_completion=False,
-    help="warden — local-first audit underlay for Claude Code.",
+    help="tailward — local-first audit underlay for Claude Code.",
     no_args_is_help=True,
 )
 
 daemon_app = typer.Typer(help="Daemon lifecycle.")
 app.add_typer(daemon_app, name="daemon")
-
-hook_app = typer.Typer(help="Hook bridges invoked by Claude Code.")
-app.add_typer(hook_app, name="hook")
 
 
 # ---------------- top-level ----------------
@@ -54,7 +52,7 @@ def _root() -> None:
 
 @app.command()
 def version() -> None:
-    """Print warden version."""
+    """Print tailward version."""
     typer.echo(__version__)
 
 
@@ -70,9 +68,8 @@ def daemon_start() -> None:
         typer.echo(f"failed to start daemon: {e}", err=True)
         raise typer.Exit(code=1) from e
     typer.echo(
-        f"warden daemon started "
-        f"(pid={pid}, mode={get_config().warden_mode}, "
-        f"url={lifecycle.health_url()})"
+        f"tailward daemon started "
+        f"(pid={pid}, url={lifecycle.health_url()})"
     )
 
 
@@ -199,47 +196,6 @@ def link(
         typer.echo(f"symlink not available ({e}); copying instead", err=True)
         shutil.copy2(target, link_file)
         typer.echo(f"copied {target} -> {link_file}")
-
-
-# ---------------- hook ----------------
-
-
-@hook_app.command("userpromptsubmit")
-def hook_userpromptsubmit() -> None:
-    """Bridge for Claude Code's UserPromptSubmit hook.
-
-    Reads JSON on stdin, POSTs to the daemon, writes daemon's JSON response on
-    stdout. On any failure it exits cleanly with empty output so the user's
-    prompt is never blocked.
-    """
-    import httpx
-
-    try:
-        payload = json.loads(sys.stdin.read() or "{}")
-    except Exception:
-        sys.exit(0)
-
-    # Normalize common fields across hook schema variants.
-    normalized = {
-        "session_id": payload.get("session_id") or payload.get("sessionId"),
-        "transcript_path": payload.get("transcript_path") or payload.get("transcriptPath"),
-        "prompt": payload.get("prompt") or payload.get("user_prompt") or "",
-        "cwd": payload.get("cwd") or payload.get("project_root") or os.getcwd(),
-    }
-
-    cfg = get_config()
-    url = f"http://{cfg.http_host}:{cfg.http_port}/hook/userpromptsubmit"
-    timeout = cfg.hook_timeout_ms / 1000.0
-
-    try:
-        r = httpx.post(url, json=normalized, timeout=timeout)
-        if r.status_code == 200:
-            sys.stdout.write(r.text)
-            return
-    except Exception:
-        pass
-    # Silent pass-through on any failure.
-    sys.exit(0)
 
 
 # ---------------- helpers ----------------
