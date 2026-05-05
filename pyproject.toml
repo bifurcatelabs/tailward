@@ -37,7 +37,7 @@ Homepage = "https://github.com/bifurcatelabs/tailward"
 Repository = "https://github.com/bifurcatelabs/tailward"
 Issues = "https://github.com/bifurcatelabs/tailward/issues"
 Changelog = "https://github.com/bifurcatelabs/tailward/blob/main/CHANGELOG.md"
-Mirror = "https://git.bifurcate.io/active/warden"
+Mirror = "https://git.bifurcate.io/active/tailward"
 
 [project.scripts]
 # ``tailward`` is the canonical CLI binary as of v2.7.0 (full rename
