@@ -1,19 +1,19 @@
-# Warden audit map
+# tailward audit map
 
-How Warden audits each of the failure modes from [`failure modes.md`](failure%20modes.md).
+How tailward audits each of the failure modes from [`failure modes.md`](failure%20modes.md).
 
 This document is the single source of truth for "which failure mode is watched by which detector, what signal it produces, where it surfaces in the UI, and what we know is weak about the current coverage." Each section answers the same five questions so you can compare modes at a glance.
 
-The in-scope list lives in code at [`src/modmcp/daemon/session_close.py`](src/modmcp/daemon/session_close.py) as `FAILURE_MODES`; this doc tracks it by hand. If you change one, change the other.
+The in-scope list lives in code at [`src/tailward/daemon/session_close.py`](src/tailward/daemon/session_close.py) as `FAILURE_MODES`; this doc tracks it by hand. If you change one, change the other.
 
 ## Scope: 8 of 10 modes
 
-Warden audits **modes 1, 2, 4, 5, 6, 8, 9, 10** from `failure modes.md`. Modes 3 and 7 are intentionally out of scope:
+tailward audits **modes 1, 2, 4, 5, 6, 8, 9, 10** from `failure modes.md`. Modes 3 and 7 are intentionally out of scope:
 
 | # | Mode | Why skipped |
 |---|---|---|
-| 3 | Behaves consistently over time | Requires a replay harness with fixed prompts + repo snapshots measured over weeks. Warden observes live sessions on a single machine; it's the wrong instrument for a longitudinal variance study. |
-| 7 | Aligns with real engineering outcomes | Requires running CI pipelines, integration tests, migrations, and deploy dry-runs. Warden is a session observer, not a CI system. Everything past "did the assistant turn look plausible" is out of band. |
+| 3 | Behaves consistently over time | Requires a replay harness with fixed prompts + repo snapshots measured over weeks. tailward observes live sessions on a single machine; it's the wrong instrument for a longitudinal variance study. |
+| 7 | Aligns with real engineering outcomes | Requires running CI pipelines, integration tests, migrations, and deploy dry-runs. tailward is a session observer, not a CI system. Everything past "did the assistant turn look plausible" is out of band. |
 
 Both are legitimate trust dimensions — they just need a different tool.
 
@@ -34,7 +34,7 @@ Both are legitimate trust dimensions — they just need a different tool.
 
 | | |
 |---|---|
-| **Detector** | rule-based: [`constraints_worker`](src/modmcp/daemon/constraints_worker.py) + [`schema/constraints.py`](src/modmcp/schema/constraints.py); LLM: consolidator at session close |
+| **Detector** | rule-based: [`constraints_worker`](src/tailward/daemon/constraints_worker.py) + [`schema/constraints.py`](src/tailward/schema/constraints.py); LLM: consolidator at session close |
 | **Trigger** | every event with a tool call — bare `tool_use` events *and* assistant messages whose content list wraps a `tool_use` block (the dominant Claude Code shape) |
 | **Signal** | `constraint_violations` table; `constraint_violation` LiveBus event |
 | **UI surface** | Live view → Violations pane (ack/dismiss), `/p/<hash>/violations` history, report card row 1 |
@@ -46,7 +46,7 @@ Both are legitimate trust dimensions — they just need a different tool.
 - `ImmutableFiles` (a convenience alias around `PathPolicy.deny`)
 - `ForbiddenBashPatterns` (regexes matched against `bash_command(tool_call)`)
 
-Plus a baseline [`default_policy()`](src/modmcp/schema/constraints.py) that applies regardless of what's in Active Rules. It ships three categories of guardrails:
+Plus a baseline [`default_policy()`](src/tailward/schema/constraints.py) that applies regardless of what's in Active Rules. It ships three categories of guardrails:
 
 - **Destructive commands** — `git push --force`, `rm -rf /`, fork-bomb syntax.
 - **Mute-the-alarm** (overlaps with mode 5) — `--no-verify`, named test/lint tools piped to `|| true`, `pytest --deselect`, `pytest -k 'not ...'`.
@@ -66,7 +66,7 @@ See Mode 5 and Mode 10 below for the full mapping.
 
 | | |
 |---|---|
-| **Detector** | LLM-only: [`rubric_worker`](src/modmcp/daemon/rubric_worker.py) dimension `invariants_awareness`; consolidator |
+| **Detector** | LLM-only: [`rubric_worker`](src/tailward/daemon/rubric_worker.py) dimension `invariants_awareness`; consolidator |
 | **Trigger** | every `rubric_turn_interval` assistant turns, plus on scope-creep and completion-claim triggers |
 | **Signal** | `rubric_scores` with `dimension = invariants_awareness`; `rubric_sample` + `rubric_done` LiveBus events |
 | **UI surface** | Progressive rubric bar (invariants), report card row 2 |
@@ -87,7 +87,7 @@ See Mode 5 and Mode 10 below for the full mapping.
 
 | | |
 |---|---|
-| **Detector** | hybrid: [`audit`](src/modmcp/daemon/audit.py) (`CLAIM_PATTERNS` regex + filesystem cross-check); rubric dimension `uncertainty_honesty`; consolidator |
+| **Detector** | hybrid: [`audit`](src/tailward/daemon/audit.py) (`CLAIM_PATTERNS` regex + filesystem cross-check); rubric dimension `uncertainty_honesty`; consolidator |
 | **Trigger** | audit runs on every user/assistant turn; rubric fires on first-person completion claims via the same regex |
 | **Signal** | `claims` table with `verdict ∈ {verified, contradicted, unverifiable}`; `claim` LiveBus event; `rubric_scores.uncertainty_honesty` |
 | **UI surface** | `/p/<hash>/ledger` (claim verdicts), rubric bar (uncertainty), report card row 4 |
@@ -107,7 +107,7 @@ See Mode 5 and Mode 10 below for the full mapping.
 
 | | |
 |---|---|
-| **Detector** | rule-based: [`constraints_worker`](src/modmcp/daemon/constraints_worker.py) + [`default_policy()`](src/modmcp/schema/constraints.py) mute-the-alarm baselines; consolidator |
+| **Detector** | rule-based: [`constraints_worker`](src/tailward/daemon/constraints_worker.py) + [`default_policy()`](src/tailward/schema/constraints.py) mute-the-alarm baselines; consolidator |
 | **Trigger** | every tool call carrying a Bash command (bare `tool_use` events or assistant-wrapped `tool_use` blocks) |
 | **Signal** | `constraint_violations` (severity rule-dependent); `constraint_violation` LiveBus event |
 | **UI surface** | Violations pane, report card row 5 |
@@ -157,7 +157,7 @@ Baseline patterns are anchored to named test/lint tools so that legitimate `mkdi
 
 | | |
 |---|---|
-| **Detector** | rule-based: [`scope_worker`](src/modmcp/daemon/scope_worker.py); consolidator |
+| **Detector** | rule-based: [`scope_worker`](src/tailward/daemon/scope_worker.py); consolidator |
 | **Trigger** | every tool call (bare `tool_use` or assistant-wrapped `tool_use` block) — emits a snapshot post-update; tool-less assistant turns also emit one snapshot per logical turn as a timeline marker |
 | **Signal** | `scope_snapshots` table; `scope_snapshot` + `scope_creep` LiveBus events |
 | **UI surface** | Live counter strip (files touched, diff bytes, tool-kind breakdown), creep markers on timeline, report card row 8 |
@@ -169,7 +169,7 @@ Baseline patterns are anchored to named test/lint tools so that legitimate `mkdi
 files_touched > max(baseline * scope_creep_factor, scope_creep_floor)
 ```
 
-Default thresholds in [`config.py`](src/modmcp/config.py): `scope_baseline_window = 5`, `scope_creep_factor = 2.0`, `scope_creep_floor = 12`. Scope-creep also triggers an out-of-cadence rubric run.
+Default thresholds in [`config.py`](src/tailward/config.py): `scope_baseline_window = 5`, `scope_creep_factor = 2.0`, `scope_creep_floor = 12`. Scope-creep also triggers an out-of-cadence rubric run.
 
 **Known gaps.**
 - [ ] First `scope_baseline_window` sessions for a project have no baseline; only `scope_creep_floor` applies. Cold-start is noisier.
@@ -192,7 +192,7 @@ Default thresholds in [`config.py`](src/modmcp/config.py): `scope_baseline_windo
 **How it works.** Qwen is asked *"Does the turn explain why each touched file/function changed?"* Independently, the audit worker's claim-verification path checks whether specific claims ("I removed the deprecated handler") match filesystem state. A claim that can be verified is evidence of provenance; a contradicted or unverifiable claim is a provenance failure.
 
 **Known gaps.**
-- [ ] No per-file rationale extraction. Ideally each touched file would be tied to a cited test failure, error, or requirement. `failure modes.md` suggests "require per-file rationale in PRs" — Warden doesn't enforce this.
+- [ ] No per-file rationale extraction. Ideally each touched file would be tied to a cited test failure, error, or requirement. `failure modes.md` suggests "require per-file rationale in PRs" — tailward doesn't enforce this.
 - [ ] Provenance score is invisible to the user during the session; it only surfaces on rubric samples. A UI affordance that shows "which files in this session still have no stated reason" would be a natural extension.
 
 ---
@@ -203,7 +203,7 @@ Default thresholds in [`config.py`](src/modmcp/config.py): `scope_baseline_windo
 
 | | |
 |---|---|
-| **Detector** | hybrid: rule-based (`constraints_worker` + [`default_policy()`](src/modmcp/schema/constraints.py) target-gaming baselines) **and** consolidator (LLM, session close) |
+| **Detector** | hybrid: rule-based (`constraints_worker` + [`default_policy()`](src/tailward/schema/constraints.py) target-gaming baselines) **and** consolidator (LLM, session close) |
 | **Trigger** | every tool call carrying a Bash command or a touched path (bare `tool_use` or assistant-wrapped `tool_use` block); session-close consolidation |
 | **Signal** | `constraint_violations` + `constraint_violation` LiveBus event (live); report card row 10 (end-of-session) |
 | **UI surface** | Violations pane, live feed, report card row 10 |
@@ -250,7 +250,7 @@ Default thresholds in [`config.py`](src/modmcp/config.py): `scope_baseline_windo
 
 ## Closing-the-gap priorities
 
-If you're extending Warden's coverage, these are the sharpest wins in rough ROI order. Each is a flagged gap from one or more mode sections above:
+If you're extending tailward's coverage, these are the sharpest wins in rough ROI order. Each is a flagged gap from one or more mode sections above:
 
 1. ~~**Baseline forbidden-bash for mute-the-alarm + target-gaming patterns** (modes 5 and 10).~~ — **shipped in v1.1.1.** `default_policy()` now ships `--no-verify`, silenced test/lint tools, `--override-ini`, `--cov-fail-under=0`, and `coverage --omit` as baseline violations.
 2. ~~**Baseline immutable-path for measurement artifacts** (mode 10).~~ — **shipped in v1.1.1.** `.github/workflows/**`, `.github/actions/**`, `.coveragerc`, `codecov.yml`, `tox.ini`, `.pre-commit-config.yaml`, and `jest.config.*` are immutable by default.

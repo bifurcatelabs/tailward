@@ -1,18 +1,18 @@
 # Contributing
 
-Warden is a local-first audit overlay for AI coding sessions. It's solo-developed and intentionally opinionated — passive-only, no prompt injection, evidence-not-verdicts. Some categories of contribution are great; others fight the architectural posture.
+tailward is a local-first audit overlay for AI coding sessions. It's solo-developed and intentionally opinionated — passive-only, no prompt injection, evidence-not-verdicts. Some categories of contribution are great; others fight the architectural posture.
 
 ## In scope
 
 - **Audit signal expansion** — new event-type detection, new derived metrics from JSONL, new surface views.
 - **Bug fixes + reliability** — anything making the daemon, watcher, or web UI more robust.
-- **Schema-pinning + version validation** — Claude Code's JSONL schema shifts; tests + audit helpers catching the drift are valuable. See `src/modmcp/schema/audit.py`.
+- **Schema-pinning + version validation** — Claude Code's JSONL schema shifts; tests + audit helpers catching the drift are valuable. See `src/tailward/schema/audit.py`.
 - **UI / UX clarity** — making the three views (Session / Reflection / Platform) communicate evidence more clearly.
 - **Documentation** — anywhere README or in-code docs are unclear.
 
 ## Out of scope
 
-- **Active prompt injection / drift correctives.** The passive-first pivot in v1.1 was deliberate (see [Why passive is the default](README.md#why-passive-is-the-default)). The opt-in `active` mode is preserved for users who want it but is not actively developed.
+- **Active prompt injection / drift correctives.** Rejected on principle (see [Why passive observation only](README.md#why-passive-observation-only)). The active-mode code was removed in v2.8.0; CHANGELOG and git history retain the design context.
 - **Cloud / SaaS integrations.** The local-first stance is load-bearing (see [Why local-first](README.md#why-local-first)). Telemetry, hosted scoring, or anything that ships transcripts off-machine is a hard no.
 - **MCP server features.** Retired in v2.0.0.
 
@@ -31,8 +31,10 @@ cd frontend && npm ci && cd ..
 Daemon (binds `127.0.0.1:7878`):
 
 ```bash
-warden daemon start
+tailward daemon start
 ```
+
+(``warden daemon start`` works too — preserved as a v2.x deprecation alias.)
 
 Frontend dev server (hot reload, proxies to daemon):
 
@@ -61,4 +63,4 @@ CI runs all three on PRs — see `.github/workflows/test.yml` and `.gitlab-ci.ym
 
 - **Bug reports:** OS, Python version, Claude Code version (`claude --version`), and the JSONL line if relevant. Sanitize personal paths first.
 - **Feature requests:** state the audit signal you're trying to surface, not the implementation. Helps figure out whether it fits the posture.
-- **Schema drift:** Claude Code emits an event type Warden doesn't handle? Attach a sample JSONL line and what you'd expect in the UI.
+- **Schema drift:** Claude Code emits an event type tailward doesn't handle? Attach a sample JSONL line and what you'd expect in the UI.

@@ -1,4 +1,4 @@
-# GitLab CI for warden. Aspirational until runners are provisioned on
+# GitLab CI for tailward. Aspirational until runners are provisioned on
 # the on-prem GitLab CE — file is in place so the moment a runner is
 # online, jobs gate PRs without further config.
 #
@@ -56,5 +56,5 @@ frontend-build:
     - npm run build
   artifacts:
     paths:
-      - src/modmcp/web/static/dist/
+      - src/tailward/web/static/dist/
     expire_in: 1 week

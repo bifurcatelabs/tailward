@@ -1,6 +1,6 @@
 ## Instrument Trust in Coding Agents
 
-> **Warden v1.1 audits 8 of the 10 modes below.** For a per-mode mapping from each row to the specific detector, live signal, UI surface, coverage rating, and known gaps, see [`AUDIT_MAP.md`](AUDIT_MAP.md). Modes 3 (behaves consistently over time) and 7 (aligns with real engineering outcomes) are intentionally out of scope — they need a replay harness and a CI system respectively, both of which are a different kind of tool.
+> **tailward audits 8 of the 10 modes below.** For a per-mode mapping from each row to the specific detector, live signal, UI surface, coverage rating, and known gaps, see [`AUDIT_MAP.md`](AUDIT_MAP.md). Modes 3 (behaves consistently over time) and 7 (aligns with real engineering outcomes) are intentionally out of scope — they need a replay harness and a CI system respectively, both of which are a different kind of tool.
 
 
 | Behavior | Descriptive model behavior | Example observation of engineer | Result | Auditability (and how) |
