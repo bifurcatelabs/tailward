@@ -844,7 +844,7 @@ class Ledger:
         return [dict(r) for r in rows]
 
     async def projects_summary(self) -> list[dict]:
-        """One row per project warden has seen, with session count and
+        """One row per project tailward has seen, with session count and
         most-recent activity. Used by the v2.1 landing page.
         """
         async with self.conn.execute(
@@ -864,7 +864,7 @@ class Ledger:
 
         Powers the v0.2 HeaderBar session picker, which lets the user
         jump between active and recent sessions across the projects
-        Warden is watching. Returns the columns the picker actually
+        tailward is watching. Returns the columns the picker actually
         renders — id, project, recency, model, turn count — so the
         frontend doesn't paint a heavy row.
         """
@@ -1024,7 +1024,7 @@ class Ledger:
 
         Maps to the Reflection view's "destructive-action approval
         cadence" panel: how often did the user acknowledge versus
-        dismiss versus leave new the violations Warden surfaced?
+        dismiss versus leave new the violations tailward surfaced?
         """
         async with self.conn.execute(
             """SELECT status, count(*) AS n
@@ -1201,7 +1201,7 @@ class Ledger:
         in Python (sqlite has no first-class JSON path indexing in
         the WAL build we ship). Skips empty placeholder rows that
         carry no ``message_id`` — those are historical artifacts
-        from older warden code that published empty turn shells; the
+        from older tailward code that published empty turn shells; the
         current dispatcher doesn't produce them. Filtering at query
         time keeps the panel honest: every counted row represents an
         actual assistant message.
@@ -1220,7 +1220,7 @@ class Ledger:
             rows = await cur.fetchall()
 
         # Dedupe by message_id and pick the final stop_reason per
-        # message — warden's dispatcher publishes some messages as
+        # message — tailward's dispatcher publishes some messages as
         # multiple turn events (a partial emit for the visible text,
         # then a final emit once the full block stream lands). The
         # panel asks "how did messages END?", so we count once per

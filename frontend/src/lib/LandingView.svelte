@@ -1,6 +1,6 @@
 <script>
   /**
-   * Landing — what greets a user on ``/``. Lists projects warden has
+   * Landing — what greets a user on ``/``. Lists projects tailward has
    * seen + their most-recent session, with click-through to the
    * audit surface. Replaces the legacy Jinja project-index page in
    * v2.1 so the SPA owns every visible surface.
@@ -54,7 +54,7 @@
 <section class="view">
   <header class="hd">
     <h2>projects</h2>
-    <p>local-first audit, reflection, and platform telemetry across every project warden is watching.</p>
+    <p>local-first audit, reflection, and platform telemetry across every project tailward is watching.</p>
     <button class="reload" onclick={load} disabled={loading} title="refresh">↻</button>
   </header>
 
@@ -64,7 +64,7 @@
     <div class="empty err">{error}</div>
   {:else if projects.length === 0}
     <div class="empty">
-      No projects yet. Warden watches every project under
+      No projects yet. tailward watches every project under
       <code>~/.claude/projects/</code>; once Claude Code writes a
       transcript for a project, it'll appear here.
     </div>

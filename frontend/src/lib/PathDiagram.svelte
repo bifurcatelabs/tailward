@@ -19,7 +19,7 @@
   <p class="lede">
     your data round-trip touches several layers we can't see directly.
     rather than synthetically pinging external endpoints (which would
-    mostly capture isp + cdn variance), warden derives signal from
+    mostly capture isp + cdn variance), tailward derives signal from
     timestamps and usage on the data that actually flows through your
     sessions.
   </p>
@@ -41,7 +41,7 @@
     <span class="key key-measured"></span>
     measured in-band
     <span class="key key-opaque"></span>
-    opaque to warden
+    opaque to tailward
   </p>
 </section>
 

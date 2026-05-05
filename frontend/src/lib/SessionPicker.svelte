@@ -1,7 +1,7 @@
 <script>
   /**
    * Cross-project session picker. Opt-in surface — collapsed by default
-   * so the HeaderBar stays minimal for the "Warden is an audit overlay"
+   * so the HeaderBar stays minimal for the "tailward is an audit overlay"
    * posture. Expanded, it shows recent sessions across all watched
    * projects so the user can jump between them.
    *
@@ -148,10 +148,10 @@
       {/if}
 
       <div class="footnote">
-        Cross-project. Warden watches every project under
+        Cross-project. tailward watches every project under
         <code>~/.claude/projects/</code> by default; configure
         <code>watch_paths</code> / <code>exclude_paths</code> in
-        <code>~/.modmcp/config.toml</code> to scope.
+        <code>~/.tailward/config.toml</code> to scope.
       </div>
     </div>
   {/if}

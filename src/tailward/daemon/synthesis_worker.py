@@ -314,7 +314,7 @@ class SynthesisWorker:
         """Trigger 3: produce a fresh ``intent.md`` for the project.
 
         Reuses ``phase1.synthesize_async`` (the existing comprehensive
-        synth path that powers ``warden handoff``). The current
+        synth path that powers ``tailward handoff``). The current
         ``intent.md`` is archived under
         ``~/.tailward/projects/<hash>/archive/intent-<ts>.md`` before
         being overwritten so prior versions stay recoverable. Disarms

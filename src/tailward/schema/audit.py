@@ -8,7 +8,7 @@ Powers two use cases:
    Code versions observed. Cheaper than the ad-hoc shell script and
    gives stable output we can diff across versions.
 
-2. **Future ``warden doctor``-style sanity checks**: same function
+2. **Future ``tailward doctor``-style sanity checks**: same function
    answers "is this transcript written by a Claude Code version we've
    validated against?" — far stronger signal than ``claude --version``
    from the shell, which reports the binary on disk rather than the
@@ -135,14 +135,14 @@ VALIDATED_VERSIONS: frozenset[str] = frozenset({
     # level keys appeared: ``container`` and ``context_management``,
     # both ``null`` in observed events — likely scaffolded ahead of
     # an Anthropic context-management feature. Functionally inert
-    # for warden's parser (we don't read those fields); pinned via
+    # for tailward's parser (we don't read those fields); pinned via
     # ``test_schema_pin`` so a future shape change doesn't surprise.
     "2.1.123",
 })
 
 
 def is_validated_version(v: str | None) -> bool:
-    """``True`` if ``v`` is on the list of Claude Code versions warden
+    """``True`` if ``v`` is on the list of Claude Code versions tailward
     has been audited against. ``None`` returns ``False`` — we treat
     "no version field" as untrusted rather than assuming compatibility.
     """

@@ -187,7 +187,7 @@ async def synthesize_async(qwen, transcript: Path, intent: Intent) -> Intent:
 def synthesize(qwen, transcript: Path, intent: Intent) -> Intent:
     """Sync wrapper: load transcript, call Qwen, validate + retry once, fill intent.
 
-    Used by the CLI ``warden handoff`` path. Internal callers from
+    Used by the CLI ``tailward handoff`` path. Internal callers from
     inside an event loop (the ``synthesis_worker`` comprehensive
     trigger) should use :func:`synthesize_async` instead.
     """

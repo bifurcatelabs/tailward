@@ -9,7 +9,7 @@
    * users edit it in their editor of choice.
    *
    * The deliberate non-feature here: there is no in-browser editor.
-   * v1's session-handoff workflow (warden handoff → intent editor)
+   * v1's session-handoff workflow (tailward handoff → intent editor)
    * is being deprecated; intent.md persists as a per-project rules
    * config artifact, not as a UI-driven document. See memory:
    * project_v3_handoff_deprecation.md.

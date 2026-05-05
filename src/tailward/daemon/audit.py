@@ -71,7 +71,7 @@ def _is_code_like(w: str) -> bool:
     """Filter English-dictionary words out of identifier candidates.
 
     We keep tokens that LOOK like symbols: CamelCase, snake_case, contain a
-    digit, or all-caps constants. Plain lowercase English words ("warden",
+    digit, or all-caps constants. Plain lowercase English words ("session",
     "repo", "gone", "everything") are dropped — grepping for them finds
     matches in prose and config files that have nothing to do with the
     semantic claim, producing noisy "contradicted" evidence like
@@ -95,7 +95,7 @@ def _is_code_like(w: str) -> bool:
 #   * inline backtick spans (`...`)
 #   * blockquote lines (lines starting with ``> ``)
 # These are where the assistant *quotes* something — a doc snippet, a
-# transcript excerpt, a meta-discussion of warden itself — rather than
+# transcript excerpt, a meta-discussion of tailward itself — rather than
 # asserting "I just removed X." Without this, a turn that says
 # ``the audit flagged my "I removed FooBar"`` becomes its own
 # contradicted-claim row, even though the model wasn't claiming

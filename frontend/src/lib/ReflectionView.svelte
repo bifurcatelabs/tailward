@@ -306,7 +306,7 @@
           {/if}
         </div>
         <div class="footnote">
-          How you responded when Warden surfaced a constraint violation. Many "new" → events going unread; many "dismissed" → noise mismatch worth investigating.
+          How you responded when tailward surfaced a constraint violation. Many "new" → events going unread; many "dismissed" → noise mismatch worth investigating.
         </div>
       </div>
 

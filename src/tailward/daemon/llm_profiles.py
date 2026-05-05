@@ -1,9 +1,9 @@
 """Aggregated per-call-kind LLM configuration + prompt templates.
 
 Surfaced via ``GET /llm-profiles`` so the Platform view can show the
-user, verbatim, what Warden is asking the local LLM for each call
+user, verbatim, what tailward is asking the local LLM for each call
 kind (synth / drift / query / rubric / consolidator). Transparency
-about Warden's own prompts is on-mission for the trust-layer pitch:
+about tailward's own prompts is on-mission for the trust-layer pitch:
 the user shouldn't have to read source to know what the daemon is
 sending on their behalf.
 
@@ -22,7 +22,7 @@ from . import drift as drift_mod
 from . import rubric_worker, session_close
 from .qwen import CallKind
 
-# Synth lives in modmcp.phase1, imported lazily so this module can be
+# Synth lives in tailward.phase1, imported lazily so this module can be
 # imported even before phase1's transcript-denoiser deps are loaded.
 # The MCP server module + its ``query`` prompt was retired in v2.0.0;
 # the ``query`` CallKind remains as the generic fallback in

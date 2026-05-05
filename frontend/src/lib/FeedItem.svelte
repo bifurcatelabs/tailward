@@ -459,7 +459,7 @@
       </div>
       <div class="muted small">
         an incremental session snapshot landed on disk under
-        <code>~/.modmcp/projects/&lt;ph&gt;/snapshots/</code>. Open the
+        <code>~/.tailward/projects/&lt;ph&gt;/snapshots/</code>. Open the
         synthesis panel above to read the body or regenerate.
       </div>
     {:else if kind === 'synthesis_failed'}
@@ -667,11 +667,11 @@
     color: var(--err);
     border-color: rgba(232,122,122,0.30);
   }
-  /* intent_updated — the comprehensive-synth headline. Warden's
+  /* intent_updated — the comprehensive-synth headline. tailward's
      brand-copper at higher saturation than compact_summary so it
-     reads as "the artifact we built warden to produce just landed."
+     reads as "the artifact we built tailward to produce just landed."
      Solid border (compact_summary is dashed for "different shape");
-     this is a first-class warden-generated handoff. */
+     this is a first-class tailward-generated handoff. */
   .chip-intent_updated {
     background: rgba(232,153,104,0.14);
     color: var(--accent);

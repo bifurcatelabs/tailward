@@ -56,7 +56,7 @@ const KNOWN_EVENT_TYPES = new Set([
   // private key block, etc.) was detected in a tool_call payload
   // before it landed in live_events. The original event's payload is
   // sanitized; this alert surfaces the redacted match so the user
-  // can see + verify + rotate. See `modmcp.schema.exfiltration`.
+  // can see + verify + rotate. See `tailward.schema.exfiltration`.
   'exfiltration_alert',
   // Edit landed in a Claude Code memory file (~/.claude/projects/
   // <ph>/memory/**). Path-policy would otherwise count this as a
@@ -65,7 +65,7 @@ const KNOWN_EVENT_TYPES = new Set([
   // the signal stays visible without polluting the violation count.
   'memory_edit',
   // Session-synthesis snapshot captured to disk by the synthesis_worker
-  // (~/.modmcp/projects/<ph>/snapshots/). Payload: trigger kind, path,
+  // (~/.tailward/projects/<ph>/snapshots/). Payload: trigger kind, path,
   // model, timestamp. UI consumer is the snapshot-timeline panel on
   // the Session view (lands in a follow-up commit).
   'synthesis_captured',

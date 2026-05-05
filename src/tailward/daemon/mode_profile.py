@@ -17,7 +17,7 @@ Two non-negotiables baked into the design:
 
 1. **Unknown labels are not punished.** "yolo" / "shower thoughts" /
    anything custom resolves to the permissive ``DEFAULT_PROFILE``.
-   The act of self-labeling is itself the trust signal — Warden
+   The act of self-labeling is itself the trust signal — tailward
    capturing it on every persisted row is the value.
 2. **Default is permissive, not strict.** When ``session_mode`` is
    unset, the audit lands on the lightest-touch profile. To opt
@@ -81,7 +81,7 @@ class ModeProfile:
 
 
 # Built-in profiles. The default here is *permissive* on purpose:
-# Warden non-punishing by default, opt-in to stricter surfacing via
+# tailward non-punishing by default, opt-in to stricter surfacing via
 # explicit labeling. See the module docstring.
 
 _BUILD = ModeProfile(

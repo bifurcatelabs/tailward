@@ -5,7 +5,7 @@
 
   // Thin wrapper around uPlot. Takes a chronological array of x
   // values and one or more y-series, renders a dark-themed line
-  // chart matching the warden palette, and rebuilds when the data
+  // chart matching the tailward palette, and rebuilds when the data
   // shape changes (number of points or series count). Otherwise it
   // updates in place via uPlot's setData for cheap reactive
   // re-renders.
@@ -39,7 +39,7 @@
   let hoverValues = $state([]);
   let hoverXLabel = $state('');
 
-  // ----- styling that matches the warden palette ------------------
+  // ----- styling that matches the tailward palette ------------------
   // Resolved at build time off the design tokens declared in App.svelte's
   // ``:global(:root)``. We pass concrete colors to uPlot rather than
   // CSS variables because the chart's canvas paint can't read CSS

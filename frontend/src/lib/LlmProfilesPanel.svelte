@@ -1,6 +1,6 @@
 <script>
   // Reads /llm-profiles and surfaces, per call kind, the model
-  // Warden uses, the sampler params it's configured with, and the
+  // tailward uses, the sampler params it's configured with, and the
   // verbatim prompts it sends to the local LLM. Collapsible cards
   // so the panel stays compact by default and the user opens what
   // they want to inspect.

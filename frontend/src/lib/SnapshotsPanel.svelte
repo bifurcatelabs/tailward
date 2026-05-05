@@ -3,7 +3,7 @@
    * Session synthesis stream — captured snapshots for the current session.
    *
    * Lists snapshots written by ``synthesis_worker`` to
-   * ``~/.modmcp/projects/<ph>/snapshots/`` and offers a "synthesize now"
+   * ``~/.tailward/projects/<ph>/snapshots/`` and offers a "synthesize now"
    * button that triggers an on-demand capture. Subscribes to the
    * reactive ``live.events`` so new ``synthesis_captured`` events
    * append without a manual refresh.
@@ -235,7 +235,7 @@
       <code>usage.input_tokens</code> when the snapshot fired —
       Claude's context fullness, not your local LLM's. Hover the
       row for the local-side numbers (chars sent to synth, event
-      count). Captures land in <code>~/.modmcp/projects/&lt;ph&gt;/snapshots/</code>
+      count). Captures land in <code>~/.tailward/projects/&lt;ph&gt;/snapshots/</code>
       with a sidecar JSON (model, sampler kind, trigger,
       <code>input_chars</code>, <code>input_chars_cap</code>) so A/B
       runs across configurations are comparable.
