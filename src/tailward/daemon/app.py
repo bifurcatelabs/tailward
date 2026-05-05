@@ -633,7 +633,6 @@ def create_app() -> FastAPI:
                         "path": intent.front.project_path,
                         "updated": intent.front.updated.isoformat(),
                         "session_mode": intent.front.session_mode,
-                        "phase2_turns_remaining": intent.front.phase2_turns_remaining,
                     }
                 )
             except Exception as e:

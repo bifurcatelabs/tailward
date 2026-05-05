@@ -113,33 +113,6 @@ class Ledger:
             row = await cur.fetchone()
         return dict(row) if row else None
 
-    # ------- correction_queue -------
-
-    async def enqueue_correction(self, session_id: str, project_hash: str, text: str) -> None:
-        await self.conn.execute(
-            """INSERT INTO correction_queue(session_id, project_hash, text, created_at)
-               VALUES(?, ?, ?, ?)""",
-            (session_id, project_hash, text, _now_iso()),
-        )
-        await self.conn.commit()
-
-    async def drain_corrections(self, session_id: str) -> list[str]:
-        async with self.conn.execute(
-            """SELECT id, text FROM correction_queue
-               WHERE session_id=? AND consumed=0 ORDER BY id""",
-            (session_id,),
-        ) as cur:
-            rows = await cur.fetchall()
-        if not rows:
-            return []
-        ids = [r["id"] for r in rows]
-        await self.conn.executemany(
-            "UPDATE correction_queue SET consumed=1, consumed_at=? WHERE id=?",
-            [(_now_iso(), i) for i in ids],
-        )
-        await self.conn.commit()
-        return [r["text"] for r in rows]
-
     # ------- drift_events -------
 
     async def record_drift(

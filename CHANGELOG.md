@@ -5,6 +5,39 @@ All notable changes to tailward are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+- **Phase 2 of the active-mode purge** — internal cleanup of dead state
+  left behind by v2.8.0. No user surface impact; existing v2.x state
+  on disk is unaffected.
+  - ``Frontmatter.phase2_turns_remaining`` field removed from
+    ``schema/intent.py``. Pydantic's default ``extra="ignore"`` drops
+    the stale frontmatter key on next parse; ``dump_markdown`` no
+    longer writes it. Existing ``intent.md`` files lose the line on
+    first save after this lands.
+  - ``SessionState.preamble_delivered`` field removed from
+    ``daemon/state.py``. In-memory only; nothing read it after v2.8.0.
+  - ``Ledger.enqueue_correction`` and ``Ledger.drain_corrections``
+    removed from ``storage/ledger.py``.
+  - ``correction_queue`` table + index removed from
+    ``storage/migrations.py`` ``SCHEMA_STATEMENTS``. Dead
+    ``phase2_active`` column also dropped from the ``session_state``
+    CREATE statement (no readers anywhere). Existing v2.x ledger.db
+    files keep both as inert artifacts — destructive migrations are
+    still deferred until ``schema_version`` machinery lands.
+  - ``test_correction_queue_drain_once`` deleted from
+    ``tests/test_ledger.py``.
+
+### Changed
+- **GitHub Actions deprecation bumps.** ``actions/upload-artifact@v5``
+  → ``@v7``; ``actions/download-artifact@v6`` → ``@v8``. Both flagged
+  during the v2.8.0 publish run for running on Node.js 20, which
+  GitHub force-migrates June 2026 / removes September 2026.
+- **GitLab mirror URL aligned.** ``pyproject.toml`` ``Mirror`` field
+  updated to ``active/tailward`` following the on-prem GitLab project
+  rename.
+
 ## [v2.8.0] — 2026-05-05
 
 ### Removed

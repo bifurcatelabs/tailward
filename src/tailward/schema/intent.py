@@ -37,7 +37,6 @@ class Frontmatter(BaseModel):
     created: datetime
     updated: datetime
     session_mode: SessionMode = "build"
-    phase2_turns_remaining: int = 8
     incomplete: bool = False
 
 
@@ -110,7 +109,6 @@ def dump_markdown(intent: Intent) -> str:
         "created": intent.front.created.isoformat(),
         "updated": intent.front.updated.isoformat(),
         "session_mode": intent.front.session_mode,
-        "phase2_turns_remaining": intent.front.phase2_turns_remaining,
     }
     if intent.front.incomplete:
         metadata["incomplete"] = True

@@ -18,21 +18,6 @@ async def test_offset_round_trip() -> None:
 
 
 @pytest.mark.asyncio
-async def test_correction_queue_drain_once() -> None:
-    ledger = Ledger()
-    await ledger.connect()
-    try:
-        await ledger.enqueue_correction("s1", "ph", "stay on goal")
-        await ledger.enqueue_correction("s1", "ph", "minimal change")
-        drained = await ledger.drain_corrections("s1")
-        assert drained == ["stay on goal", "minimal change"]
-        drained2 = await ledger.drain_corrections("s1")
-        assert drained2 == []
-    finally:
-        await ledger.close()
-
-
-@pytest.mark.asyncio
 async def test_record_claim_and_drift() -> None:
     ledger = Ledger()
     await ledger.connect()

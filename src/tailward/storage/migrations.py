@@ -86,27 +86,11 @@ SCHEMA_STATEMENTS: list[str] = [
     );
     """,
     """
-    CREATE TABLE IF NOT EXISTS correction_queue (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL,
-        project_hash TEXT NOT NULL,
-        text TEXT NOT NULL,
-        consumed INTEGER NOT NULL DEFAULT 0,
-        created_at TEXT NOT NULL,
-        consumed_at TEXT
-    );
-    """,
-    """
-    CREATE INDEX IF NOT EXISTS idx_correction_pending
-        ON correction_queue(session_id, consumed);
-    """,
-    """
     CREATE TABLE IF NOT EXISTS session_state (
         session_id TEXT PRIMARY KEY,
         project_hash TEXT NOT NULL,
         project_path TEXT NOT NULL,
         turns_seen INTEGER NOT NULL DEFAULT 0,
-        phase2_active INTEGER NOT NULL DEFAULT 1,
         started_at TEXT NOT NULL,
         last_seen_at TEXT NOT NULL,
         last_message_id TEXT,

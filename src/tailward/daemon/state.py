@@ -17,7 +17,6 @@ class SessionState:
     last_assistant_text: str = ""
     last_assistant_at: datetime | None = None
     recent_tool_calls: list[dict[str, Any]] = field(default_factory=list)
-    preamble_delivered: bool = False
     # Last seen ``message.id`` from an assistant event. Claude Code splits
     # a logical turn across multiple JSONL events (one per content block);
     # all blocks of one turn share this id, so the watcher can recover
