@@ -6,4 +6,4 @@ CLI deprecation alias for v2.x users (slated for v4 removal). See
 ``CHANGELOG.md`` for the rename history.
 """
 
-__version__ = "2.8.0"
+__version__ = "2.9.0"

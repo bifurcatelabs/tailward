@@ -5,7 +5,7 @@ All notable changes to tailward are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v2.9.0] — 2026-05-05
 
 ### Fixed
 - **Comprehensive synth no longer clobbers Active Rules on regeneration.**
@@ -29,6 +29,17 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
   Regression test in ``test_phase1.py`` pins the prior-intent passing
   behavior so the bug can't quietly reappear.
+
+  Verified in production on 2026-05-05: a comprehensive synth firing
+  on the live tailward dogfooding session preserved all five prior
+  Active Rules, all three Open Threads, and both Known Agent Drift
+  Patterns from the prior ``intent.md``, while drifting Receiving
+  Posture and adding new items from the latest transcript. The merge
+  semantics held under real-world conditions. Note this verifies
+  the mechanical behavior — preserve-prior + integrate-new — not
+  Qwen's ability to identify failure modes from non-discussion
+  signal; that's a separate question of synthesis quality untouched
+  by this fix.
 
 ### Removed
 - **Phase 2 of the active-mode purge** — internal cleanup of dead state
