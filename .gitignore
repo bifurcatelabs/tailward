@@ -41,3 +41,8 @@ Thumbs.db
 
 # Scratch dir for working notes / drafts that aren't ready to commit
 .scratch/
+
+# Tauri bundled-Python sidecar binaries — built per-platform via PyInstaller.
+# Build artifacts, not source; CI produces them.
+# (target/ and gen/schemas/ are already excluded by src-tauri/.gitignore.)
+src-tauri/binaries/

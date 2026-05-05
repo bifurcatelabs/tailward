@@ -8,6 +8,28 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **v3 milestone 1: Tauri scaffold + bundled-Python sidecar
+  experiment.** First commit toward the v3 native-distribution
+  milestone. Scaffolds ``src-tauri/`` (Rust + Tauri 2.11.0), wires
+  up a PyInstaller-bundled Python stub as a Tauri ``externalBin``
+  sidecar, and confirms end-to-end that the bundled Python runs
+  with ``frozen=True`` and Tauri captures its stdout cleanly. This
+  was the gating experiment for the v3 architecture choice
+  (per ``.scratch/v3-tauri-scope.md``) — PyInstaller's onefile
+  output is accepted by Tauri's externalBin without path /
+  signing / cooperation issues, so the v3 bundle stays on
+  PyInstaller (smaller, simpler, single-file) instead of pivoting
+  to python-build-standalone (bigger, multi-file, less-trodden
+  Tauri integration). No user-facing functionality yet — the
+  scaffold isn't connected to the real tailward daemon. That's
+  milestone 2.
+
+  Implementation notes captured in
+  ``.scratch/v3-tauri-implementation-plan.md`` and
+  ``.scratch/tauri-milestone-1/PLAN.md``. ``src-tauri/binaries/``
+  gitignored — sidecar binaries are build artifacts, produced by
+  PyInstaller, not source.
+
 - **Network exposure warning when daemon is bound non-loopback.** Tailward
   has no authentication; the loopback default keeps the audit surface
   unreachable from other devices on the wire. If a user changes
