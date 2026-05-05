@@ -13,13 +13,21 @@ from .schema.intent import SECTIONS, Intent
 
 log = logging.getLogger(__name__)
 
-SYSTEM = """You synthesize a structured handoff document from a Claude Code session transcript.
+SYSTEM = """You synthesize a structured handoff document by MERGING recent session activity into the prior intent state.
 
-Rules:
-- Be specific, not generic. Capture rules and commitments VERBATIM where the user or assistant stated them.
+Inputs (delimited in the user message):
+1. PRIOR INTENT — the existing handoff document synthesized from earlier session activity. Preserve its rules, threads, drift patterns, and commitments unless the recent transcript shows them being explicitly retracted, completed, or superseded.
+2. RECENT TRANSCRIPT — new activity since the prior intent was synthesized. Mine for new items + refinements to existing ones.
+
+Merge rules:
+- Active Rules, Open Threads, Commitments, Drift Patterns ACCUMULATE across regenerations. Don't drop a prior item unless the transcript explicitly retracts or completes it.
+- Receiving Posture is the one section that may drift to reflect the latest session arc.
+- A "fresh start" / session-boundary signal in the transcript updates Receiving Posture; it does NOT reset accumulated rules or threads.
+- Be specific, not generic. Capture rules and commitments VERBATIM where stated.
 - Keep each list item under 25 words. Keep the whole document under 800 tokens.
-- Prefer fewer high-signal items over many vague ones. Empty arrays are fine.
-- Output strict JSON with exactly these keys — no prose, no markdown fences:
+- Prefer fewer high-signal items over many vague ones. Empty arrays are fine — but only if the prior intent also had nothing AND the transcript didn't introduce new items.
+
+Output strict JSON with exactly these keys — no prose, no markdown fences:
 
 {
   "receiving_posture": "1-3 sentences on how the next agent should receive the user",
@@ -39,15 +47,51 @@ Rules:
 def _max_chars() -> int:
     """Size the transcript slice to fit the model's context window.
 
-    Leaves room for system prompt + synthesis output budget.
+    Leaves room for system prompt + synthesis output budget + prior
+    intent block (~800 tokens, the same cap the synth output respects).
     """
     from tailward.config import get_config
 
     cfg = get_config()
-    reserved = cfg.qwen_max_tokens_synth + 1500  # output + system prompt
+    # output + system prompt + prior intent block
+    reserved = cfg.qwen_max_tokens_synth + 1500 + 800
     usable_tokens = max(2048, cfg.qwen_context_tokens - reserved)
     # ~3.2 chars/token is a conservative English estimate.
     return int(usable_tokens * 3.2)
+
+
+def _render_prior_intent(intent: Intent) -> str:
+    """Render the current intent.sections as markdown for Qwen's input.
+
+    Skips empty sections to keep the prompt tight. Frontmatter is
+    intentionally omitted — ``session_mode`` is a JSON output key, so
+    including it in the input could bias the regenerated value toward
+    the prior label rather than the latest signal.
+    """
+    chunks: list[str] = []
+    for section in SECTIONS:
+        body = (intent.sections.get(section) or "").strip()
+        if not body:
+            continue
+        chunks.append(f"### {section}\n{body}")
+    if not chunks:
+        return "(empty — no prior intent state, treat the transcript as the sole source)"
+    return "\n\n".join(chunks)
+
+
+def _build_user_prompt(intent: Intent, denoised: str) -> str:
+    """Compose the dual-context user prompt: prior intent + recent transcript.
+
+    Qwen's job is to merge — preserve prior state, integrate new activity.
+    The delimiters mirror the SYSTEM prompt so the model can ground its
+    merge logic on clearly-named sections.
+    """
+    return (
+        "## PRIOR INTENT\n\n"
+        + _render_prior_intent(intent)
+        + "\n\n## RECENT TRANSCRIPT\n\n"
+        + denoised
+    )
 
 
 def _denoise(transcript_text: str) -> str:
@@ -137,13 +181,13 @@ def _payload_to_intent(payload: dict, intent: Intent) -> Intent:
     return intent
 
 
-async def _run_synth(qwen, denoised: str, intent: Intent) -> dict:
+async def _run_synth(qwen, user_prompt: str, intent: Intent) -> dict:
     """Inner async core: call Qwen, validate, retry once if needed.
     Mutates ``intent.front.incomplete`` on persistent validation failure
     so save points carry the warning. Returns the best payload it got.
     """
     try:
-        payload = await qwen.complete_json(SYSTEM, denoised, kind="synth")
+        payload = await qwen.complete_json(SYSTEM, user_prompt, kind="synth")
     except Exception as e:
         log.warning("phase 1 first-pass failed: %s", e)
         payload = {}
@@ -152,7 +196,7 @@ async def _run_synth(qwen, denoised: str, intent: Intent) -> dict:
         return payload
 
     retry_prompt = (
-        denoised
+        user_prompt
         + "\n\n---\nYour previous output failed validation with errors: "
         + "; ".join(errors)
         + ". Return corrected JSON only, strictly matching the schema. Keep values concise."
@@ -177,10 +221,17 @@ async def _run_synth(qwen, denoised: str, intent: Intent) -> dict:
 async def synthesize_async(qwen, transcript: Path, intent: Intent) -> Intent:
     """Async-native variant of :func:`synthesize`. Use from inside a
     running event loop (e.g. the synthesis worker's comprehensive
-    trigger) where ``asyncio.run`` would error."""
+    trigger) where ``asyncio.run`` would error.
+
+    Passes the prior intent's sections to Qwen alongside the recent
+    transcript so the synthesis is a merge, not a replacement —
+    preserves accumulated rules/threads/commitments across
+    regenerations.
+    """
     text = Path(transcript).read_text(encoding="utf-8", errors="replace")
     denoised = _denoise(text)
-    payload = await _run_synth(qwen, denoised, intent)
+    user_prompt = _build_user_prompt(intent, denoised)
+    payload = await _run_synth(qwen, user_prompt, intent)
     return _payload_to_intent(payload, intent)
 
 
@@ -189,18 +240,21 @@ def synthesize(qwen, transcript: Path, intent: Intent) -> Intent:
 
     Used by the CLI ``tailward handoff`` path. Internal callers from
     inside an event loop (the ``synthesis_worker`` comprehensive
-    trigger) should use :func:`synthesize_async` instead.
+    trigger) should use :func:`synthesize_async` instead. Same merge
+    semantics: prior intent state is included in the user prompt so
+    Qwen refines rather than replaces.
     """
     text = Path(transcript).read_text(encoding="utf-8", errors="replace")
     denoised = _denoise(text)
+    user_prompt = _build_user_prompt(intent, denoised)
 
     try:
-        payload = asyncio.run(_run_synth(qwen, denoised, intent))
+        payload = asyncio.run(_run_synth(qwen, user_prompt, intent))
     except RuntimeError:
         # If there's an existing event loop (unlikely from CLI), fall back.
         loop = asyncio.new_event_loop()
         try:
-            payload = loop.run_until_complete(_run_synth(qwen, denoised, intent))
+            payload = loop.run_until_complete(_run_synth(qwen, user_prompt, intent))
         finally:
             loop.close()
 

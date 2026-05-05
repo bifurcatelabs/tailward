@@ -7,6 +7,29 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Fixed
+- **Comprehensive synth no longer clobbers Active Rules on regeneration.**
+  The synth was passing only the recent transcript to Qwen; the prior
+  ``intent.md`` was loaded server-side but never reached the model. Each
+  comprehensive trigger therefore produced fresh-from-transcript output
+  that overwrote accumulated rules / threads / commitments — silently,
+  on every regeneration. Observed concretely 2026-05-04: a v3 scoping
+  session's six architectural decisions were captured cleanly in the
+  archived ``intent-20260501T221939Z.md`` and ``intent-20260501T223241Z.md``
+  versions, then wiped from the live ``intent.md`` by the final
+  20:22 regeneration when the session pivoted to fresh-start orientation.
+
+  Fix has two layers: ``phase1.SYSTEM`` now instructs Qwen to merge
+  prior intent state with new transcript activity rather than synthesize
+  from scratch; the user prompt now includes a ``PRIOR INTENT`` block
+  alongside the ``RECENT TRANSCRIPT`` so Qwen can actually see what to
+  preserve. Receiving Posture is still allowed to drift (it's the
+  fresh-session orientation surface); Active Rules / Open Threads /
+  Commitments / Drift Patterns are now expected to accumulate.
+
+  Regression test in ``test_phase1.py`` pins the prior-intent passing
+  behavior so the bug can't quietly reappear.
+
 ### Removed
 - **Phase 2 of the active-mode purge** — internal cleanup of dead state
   left behind by v2.8.0. No user surface impact; existing v2.x state

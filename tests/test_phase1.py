@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from tailward.phase1 import _denoise, _payload_to_intent, _validate, synthesize
+import pytest
+
+from tailward.phase1 import (
+    _denoise,
+    _payload_to_intent,
+    _render_prior_intent,
+    _validate,
+    synthesize,
+    synthesize_async,
+)
 from tailward.schema.intent import empty_intent, load_intent, save_intent
 
 
@@ -68,6 +77,92 @@ class _FakeQwen:
 
     async def complete_json(self, system, user, **kw):
         return self._payload
+
+
+def test_render_prior_intent_skips_empty_sections() -> None:
+    intent = empty_intent("/tmp/x", "x")
+    intent.set("Active Rules", "- rule alpha\n- rule beta")
+    intent.set("Active Goal", "ship the thing")
+    rendered = _render_prior_intent(intent)
+    assert "### Active Rules" in rendered
+    assert "rule alpha" in rendered
+    assert "rule beta" in rendered
+    assert "### Active Goal" in rendered
+    # Sections that are empty / placeholder-only should not appear
+    assert "### Notes" not in rendered
+    assert "### Recent Claims" not in rendered
+
+
+def test_render_prior_intent_handles_empty_intent() -> None:
+    intent = empty_intent("/tmp/x", "x")
+    # empty_intent seeds Receiving Posture + Active Goal with placeholder
+    # text. Strip those so we can exercise the truly-empty branch.
+    intent.sections = {}
+    rendered = _render_prior_intent(intent)
+    assert "empty" in rendered.lower()
+
+
+@pytest.mark.asyncio
+async def test_comprehensive_synth_passes_prior_intent_to_qwen(
+    tmp_path: Path,
+) -> None:
+    """The comprehensive synth must include the prior intent's sections in
+    the user prompt so Qwen can merge new transcript activity with the
+    accumulated rules/threads instead of replacing them.
+
+    Regression test for the synthesis-clobber bug observed 2026-05-04 —
+    Qwen never saw the prior intent's Active Rules, so its fresh-from-
+    transcript synthesis silently overwrote them on every comprehensive
+    regeneration. Fix: pass intent.sections to Qwen alongside the
+    transcript.
+    """
+    captured: list[tuple[str, str]] = []
+
+    class _CapturingQwen:
+        async def complete_json(self, system, user, **kw):
+            captured.append((system, user))
+            return {
+                "receiving_posture": "carry on",
+                "active_goal": "ship the test",
+                "open_threads": [],
+                "active_rules": [
+                    "distinctive prior rule alpha",
+                    "distinctive prior rule beta",
+                    "new rule from transcript",
+                ],
+                "known_user_drift_patterns": [],
+                "known_agent_drift_patterns": [],
+                "commitments_pending": [],
+                "recent_claims": [],
+                "notes": "",
+                "session_mode": "build",
+            }
+
+    intent = empty_intent("/proj", "proj")
+    intent.set(
+        "Active Rules",
+        "- distinctive prior rule alpha\n- distinctive prior rule beta",
+    )
+    intent.set("Active Goal", "prior goal — refactor x")
+
+    transcript = (
+        Path(__file__).parent / "fixtures" / "transcripts" / "sample_build.jsonl"
+    )
+
+    await synthesize_async(_CapturingQwen(), transcript, intent)
+
+    assert len(captured) == 1
+    system, user = captured[0]
+    # SYSTEM prompt instructs merge semantics
+    assert "merg" in system.lower()
+    assert "preserve" in system.lower() or "accumulate" in system.lower()
+    # User prompt actually contains the prior rules + goal so Qwen can
+    # merge them into its output rather than re-deriving from scratch.
+    assert "PRIOR INTENT" in user
+    assert "RECENT TRANSCRIPT" in user
+    assert "distinctive prior rule alpha" in user
+    assert "distinctive prior rule beta" in user
+    assert "prior goal — refactor x" in user
 
 
 def test_synthesize_writes_valid_intent(tmp_path: Path) -> None:
