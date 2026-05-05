@@ -1,4 +1,4 @@
-"""SQLite schema for the modmcp ledger.
+"""SQLite schema for the tailward ledger.
 
 Idempotent. Called on daemon start-up (and by the test harness).
 

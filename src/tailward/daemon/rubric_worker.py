@@ -2,15 +2,15 @@
 
 Triggers:
   * Every ``rubric_turn_interval`` assistant turns.
-  * Scope-creep events from :class:`~modmcp.daemon.scope_worker.ScopeWorker`
+  * Scope-creep events from :class:`~tailward.daemon.scope_worker.ScopeWorker`
     (via :meth:`trigger`).
   * First-person completion claims detected by the audit regex
-    (:data:`modmcp.daemon.audit.CLAIM_PATTERNS`).
+    (:data:`tailward.daemon.audit.CLAIM_PATTERNS`).
 
 Each run asks Qwen for a structured JSON score across four dimensions
 (invariants awareness, uncertainty honesty, maintainability, provenance).
 Per-dimension rows are written to the ledger and individually published to
-:class:`~modmcp.daemon.livebus.LiveBus` so the UI's rubric rail fills in
+:class:`~tailward.daemon.livebus.LiveBus` so the UI's rubric rail fills in
 progressively.
 """
 

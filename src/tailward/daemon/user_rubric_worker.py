@@ -1,6 +1,6 @@
 """User-side rubric — Qwen-judged self-rubric for the user's own turns.
 
-The assistant-side :class:`~modmcp.daemon.rubric_worker.RubricWorker`
+The assistant-side :class:`~tailward.daemon.rubric_worker.RubricWorker`
 scores the agent's behavior on coding-trustworthiness dimensions.
 This worker is its mirror for the user: how well is the human side
 of the collaboration showing up?

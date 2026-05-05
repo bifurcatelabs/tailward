@@ -1,4 +1,4 @@
-"""``python -m modmcp.daemon`` entry point (spawned by lifecycle.start)."""
+"""``python -m tailward.daemon`` entry point (spawned by lifecycle.start)."""
 
 from __future__ import annotations
 

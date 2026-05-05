@@ -1,6 +1,6 @@
 """Server-Sent Events endpoint for the live session view.
 
-Reads replay from the ledger, subscribes to :class:`~modmcp.daemon.livebus.LiveBus`,
+Reads replay from the ledger, subscribes to :class:`~tailward.daemon.livebus.LiveBus`,
 and yields ``data:`` frames in SSE wire format. Keepalive comments stop
 long-polling proxies from cutting the connection. Subscriber caps are
 enforced at the bus level; we gracefully 503 if a session is saturated so
@@ -73,7 +73,7 @@ def unwrap_stored_payload(payload_str: str | None) -> dict:
     """Return the inner payload for a ``live_events.payload`` row.
 
     New rows (after the persister fix) store the inner payload directly.
-    Older rows stored the full :class:`~modmcp.daemon.livebus.LiveEvent`
+    Older rows stored the full :class:`~tailward.daemon.livebus.LiveEvent`
     envelope — detected by the presence of both ``type`` and a nested
     ``payload`` field — and must be unwrapped before the client sees them,
     or the live-view renderers show ``undefined`` for everything.

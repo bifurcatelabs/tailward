@@ -1,7 +1,7 @@
 """Schema-pinning regression test for the Claude Code JSONL parser.
 
-The parser in :mod:`modmcp.schema.events` makes structural assumptions
-about Claude Code's transcript format. Those assumptions are warden's
+The parser in :mod:`tailward.schema.events` makes structural assumptions
+about Claude Code's transcript format. Those assumptions are tailward's
 primary external failure surface (see
 ``memory/project_upstream_fragility.md``): a major schema change at
 the upstream end can silently misclassify every event without raising
@@ -13,7 +13,7 @@ a major schema change — fields renamed, types reshaped, the
 hard rather than letting the audit silently corrupt.
 
 **Pinned against:** the set of Claude Code versions in
-``modmcp.schema.audit.VALIDATED_VERSIONS`` (currently 2.1.117,
+``tailward.schema.audit.VALIDATED_VERSIONS`` (currently 2.1.117,
 2.1.119, 2.1.121). 2.1.119 was the running session at the original
 audit on 2026-04-28; 2.1.121 was verified compatible after a fresh
 session post-restart. The audit script (``audit_jsonl``) is the

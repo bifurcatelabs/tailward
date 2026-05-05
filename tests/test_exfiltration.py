@@ -3,7 +3,7 @@ contract.
 
 These tests document which secret shapes are caught and what the
 sanitized output looks like. Adding a new pattern to
-``modmcp.schema.exfiltration`` should land alongside a test here
+``tailward.schema.exfiltration`` should land alongside a test here
 covering both detection (positive case) and a non-detection case
 (text that resembles the pattern but doesn't actually match) so
 false-positive risk is visible at review time.

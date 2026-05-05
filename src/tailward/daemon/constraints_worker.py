@@ -1,10 +1,10 @@
 """Rule-based constraint audit.
 
 Tails ``tool_use`` events, resolves the current session's
-:class:`~modmcp.schema.constraints.CompiledPolicy` (recompiled whenever
+:class:`~tailward.schema.constraints.CompiledPolicy` (recompiled whenever
 ``Active Rules`` changes), and writes each violation to the ledger
 ``constraint_violations`` table. Every violation is also pushed onto the
-:class:`~modmcp.daemon.livebus.LiveBus` so the web UI sees it within a
+:class:`~tailward.daemon.livebus.LiveBus` so the web UI sees it within a
 watcher tick.
 
 Covers failure modes 1 (constraint-respecting), 5 (fails-loudly via

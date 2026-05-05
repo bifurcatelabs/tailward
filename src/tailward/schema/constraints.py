@@ -3,11 +3,11 @@
 We extract three kinds of rules:
 
 * :class:`PathPolicy` — allow/deny globs matched against
-  :func:`modmcp.schema.events.target_paths`.
+  :func:`tailward.schema.events.target_paths`.
 * :class:`ImmutableFiles` — paths the agent must not edit (a convenience
   alias around PathPolicy ``deny``).
 * :class:`ForbiddenBashPatterns` — regex patterns matched against
-  :func:`modmcp.schema.events.bash_command`.
+  :func:`tailward.schema.events.bash_command`.
 
 Parsing is heuristic: we look for hints in the rule text and fall back to
 treating the whole line as a tag-free note. Ambiguous rules do not raise;

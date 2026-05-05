@@ -67,7 +67,7 @@ def test_memory_edit_path_rejects_non_memory() -> None:
 
 
 def test_memory_edit_path_rejects_project_root_edit() -> None:
-    assert not is_memory_edit_path(r"C:\warden\src\modmcp\app.py")
+    assert not is_memory_edit_path(r"C:\warden\src\tailward\app.py")
 
 
 def test_memory_edit_path_rejects_empty() -> None:

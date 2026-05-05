@@ -69,7 +69,7 @@ EVENT_TYPES: frozenset[str] = frozenset(
         # Known secret pattern detected in a tool_call payload before
         # it landed in live_events. The original event's payload is
         # sanitized; this alert surfaces the redacted match so the
-        # user can verify + rotate. See modmcp.schema.exfiltration.
+        # user can verify + rotate. See tailward.schema.exfiltration.
         "exfiltration_alert",
         # Edit landed in a Claude Code memory file
         # (``~/.claude/projects/<ph>/memory/**``). Path-policy would
