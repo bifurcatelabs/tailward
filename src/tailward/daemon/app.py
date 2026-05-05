@@ -11,7 +11,7 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException
 
-from ..config import get_config
+from ..config import get_config, is_loopback_bind
 from ..paths import (
     daemon_log_path,
     ensure_layout,
@@ -575,6 +575,18 @@ def create_app() -> FastAPI:
             log.warning("synthesis worker unavailable: %s", e)
 
         log.info("tailward daemon started")
+        cfg = get_config()
+        if not is_loopback_bind(cfg.http_host):
+            log.warning(
+                "SECURITY: tailward is bound to %s, not loopback. "
+                "Every device that can reach this port can read all "
+                "sessions, intent files, drift verdicts, and captured "
+                "exfiltration alerts. tailward has no authentication. "
+                "Recommended: bind to 127.0.0.1 and use SSH or "
+                "WireGuard tunnel forwarding for cross-device access. "
+                "See README 'Network exposure' section.",
+                cfg.http_host,
+            )
         try:
             yield
         finally:
@@ -610,6 +622,33 @@ def create_app() -> FastAPI:
             "ok": True,
             "sessions": len(daemon.state.all()),
             "ts": datetime.now(UTC).isoformat(),
+        }
+
+    @app.get("/api/bind-info")
+    async def bind_info() -> dict[str, Any]:
+        """Surface the daemon's HTTP binding for the Settings view.
+
+        Returns a non-null ``warning`` when the bind exposes the
+        unauthenticated audit surface beyond loopback. UI renders this
+        as a banner; a daemon-side log warning fires at startup with
+        the same message in less compressed form.
+        """
+        cfg = get_config()
+        is_loopback = is_loopback_bind(cfg.http_host)
+        warning = None
+        if not is_loopback:
+            warning = (
+                f"tailward is bound to {cfg.http_host} — every device that "
+                "can reach this port can read all sessions, intent files, "
+                "drift verdicts, and captured events. tailward has no "
+                "authentication. Recommended: bind to 127.0.0.1 and use "
+                "SSH or WireGuard tunnel forwarding for cross-device access."
+            )
+        return {
+            "http_host": cfg.http_host,
+            "http_port": cfg.http_port,
+            "is_loopback": is_loopback,
+            "warning": warning,
         }
 
     @app.get("/api/projects")

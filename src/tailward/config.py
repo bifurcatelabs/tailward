@@ -4,9 +4,31 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import asdict, dataclass, field
+from ipaddress import ip_address
 from typing import Any
 
 from .paths import atomic_write_text, config_path, ensure_layout
+
+
+def is_loopback_bind(host: str) -> bool:
+    """True if ``host`` keeps the daemon invisible beyond the local machine.
+
+    Loopback bindings (``127.0.0.1``, ``localhost``, ``::1``, anything in
+    ``127.0.0.0/8``) keep the audit surface unreachable from other devices.
+    Non-loopback bindings (``0.0.0.0``, an explicit network IP) expose the
+    unauthenticated audit data to anything on the wire — see
+    ``project_localhost_binding_security.md`` in memory for the foot-gun
+    discussion.
+    """
+    if not host:
+        return False
+    h = host.strip().lower()
+    if h in ("localhost",):
+        return True
+    try:
+        return ip_address(h).is_loopback
+    except ValueError:
+        return False
 
 
 @dataclass

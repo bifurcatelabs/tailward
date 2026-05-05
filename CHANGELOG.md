@@ -5,6 +5,36 @@ All notable changes to tailward are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Network exposure warning when daemon is bound non-loopback.** Tailward
+  has no authentication; the loopback default keeps the audit surface
+  unreachable from other devices on the wire. If a user changes
+  ``http_host`` to ``0.0.0.0`` or an explicit network IP — the realistic
+  foot-gun for v3 adopters reaching for "make this LAN-accessible" —
+  the daemon now logs a prominent ``WARNING`` at startup explaining
+  the exposure, and the Settings view shows a non-loopback banner
+  with the recommended SSH/WireGuard tunnel pattern.
+
+  Implementation: ``is_loopback_bind()`` helper in ``config.py`` using
+  ``ipaddress.is_loopback`` (handles 127.0.0.0/8 + ::1 + ``localhost``
+  cleanly). ``GET /api/bind-info`` endpoint surfaces the bind state +
+  warning text to the SPA. New ``BindInfoPanel.svelte`` renders it
+  in the Settings view. Unit tests pin loopback / non-loopback /
+  edge cases (whitespace, case, garbage input). Endpoint integration
+  test pins the warning text on a 0.0.0.0 binding so the user-facing
+  surface can't silently regress.
+
+  README's Configuration section now has a "Network exposure" subsection
+  documenting the loopback-plus-tunnel pattern as the supported model
+  for cross-device access. The warning is loud but not enforced —
+  tailward trusts users to know what they're doing while making the
+  foot-gun visible.
+
+  See ``memory/project_localhost_binding_security.md`` for the full
+  threat model + queued Phase 2 (opt-in token auth) work.
+
 ## [v2.9.0] — 2026-05-05
 
 ### Fixed

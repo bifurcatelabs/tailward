@@ -11,6 +11,7 @@
    * here so that users running local inference can verify what's
    * configured without digging through config files.
    */
+  import BindInfoPanel from './BindInfoPanel.svelte';
   import LlmProfilesPanel from './LlmProfilesPanel.svelte';
   import LlmBudgetPanel from './LlmBudgetPanel.svelte';
 </script>
@@ -27,6 +28,7 @@
     </p>
   </header>
 
+  <BindInfoPanel />
   <LlmProfilesPanel />
   <LlmBudgetPanel />
 </section>

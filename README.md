@@ -284,6 +284,20 @@ Environment overrides:
 - `TAILWARD_HOME` — relocate the state directory (default `~/.tailward`). `MODMCP_HOME` is honored as a deprecation alias for v2.x users; will be removed in v4.
 - `CLAUDE_PROJECTS_ROOT` — relocate the Claude Code transcript root (default `~/.claude/projects`).
 
+### Network exposure
+
+`http_host = "127.0.0.1"` is the default and the only configuration tailward is designed for. Loopback binding keeps the daemon's HTTP surface invisible to other devices on your network — only processes on the same machine can connect to it.
+
+**Don't change `http_host` to `0.0.0.0` to access tailward from another device.** It works mechanically — the UI loads from across the LAN — but tailward has **no authentication**. Every device that can reach the port (guest devices, IoT, work laptop, anything else on the wire) can read all your sessions, intent files, drift verdicts, and captured exfiltration alerts. That's a meaningful exposure for an audit tool.
+
+The right pattern for cross-device access keeps the daemon on loopback and uses a tunnel for traversal:
+
+- **SSH tunnel** — `ssh -L 7878:127.0.0.1:7878 user@host` from your laptop, then browse to `http://127.0.0.1:7878` locally. SSH does the network traversal; tailward never sees a non-loopback address.
+- **WireGuard / Tailscale** — peer-to-peer overlay. Daemon stays on loopback within each peer's namespace; the tunnel makes the remote peer reachable.
+- **Reverse proxy with auth** — nginx / Caddy in front of the daemon with HTTP Basic auth. Heavier setup but appropriate for multi-user deployments.
+
+If you do change `http_host` to a non-loopback value, the daemon logs a prominent startup warning and the Settings view shows a banner explaining the exposure. Both are visible reminders, not enforced restrictions — tailward trusts you to know what you're doing, but makes the foot-gun loud.
+
 ## Local LLM endpoint
 
 tailward expects an OpenAI-compatible HTTP endpoint on `localhost` (see [Why local-first](#why-local-first) for the reasoning). Any local LLM that exposes that interface works — Qwen 2.5 / 3, Gemma, Llama 3.x, Mistral, Phi, and others. The config keys below carry a `qwen_` prefix as a historical artifact (Qwen was the first model used for development); the values aren't model-specific. Some servers that expose the interface:
