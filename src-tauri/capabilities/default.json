@@ -11,9 +11,14 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/tailward-sidecar-stub",
+          "name": "binaries/tailward-daemon",
           "sidecar": true,
-          "args": []
+          "args": [
+            "--host",
+            "127.0.0.1",
+            "--port",
+            "7878"
+          ]
         }
       ]
     }

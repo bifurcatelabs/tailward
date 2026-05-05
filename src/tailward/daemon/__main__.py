@@ -1,4 +1,13 @@
-"""``python -m tailward.daemon`` entry point (spawned by lifecycle.start)."""
+"""``python -m tailward.daemon`` entry point (spawned by lifecycle.start).
+
+Imports are intentionally absolute (``from tailward.daemon.app import
+create_app``) rather than relative (``from .app``) so this module can
+also serve as a PyInstaller bundle entry point — relative imports
+break when PyInstaller treats ``__main__.py`` as a top-level script.
+Absolute imports work for both ``python -m tailward.daemon`` (the
+``-m`` switch sets up the package context correctly) and the
+PyInstaller-bundled ``tailward-daemon.exe`` path.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +15,7 @@ import argparse
 
 import uvicorn
 
-from .app import create_app
+from tailward.daemon.app import create_app
 
 
 def main() -> None:

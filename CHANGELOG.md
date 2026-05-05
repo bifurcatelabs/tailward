@@ -8,6 +8,41 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **v3 milestone 2: real daemon integration via PyInstaller
+  sidecar.** Replaces the milestone 1 stub with the actual
+  ``tailward-daemon`` binary bundled via PyInstaller (``--add-data``
+  flags pull in the Jinja templates + Svelte SPA dist). The Tauri
+  Rust shell now does spawn-or-reuse:
+  - Probe ``http://127.0.0.1:7878/health`` first.
+  - If a daemon already responds (e.g. user started ``tailward
+    daemon start`` from the CLI), **reuse it** and don't own its
+    lifecycle — leave it alone on app exit.
+  - If nothing responds, spawn the bundled daemon as an
+    ``externalBin`` sidecar, drain its stdout/stderr to the Tauri
+    shell's terminal for visibility, and poll ``/health`` every
+    500ms until it responds (or 30s timeout).
+
+  Verified end-to-end on Windows: bundled daemon is 23.6MB onefile,
+  boot-to-healthy under 2s, serves the Svelte SPA + ``/v2/projects``
+  + live-event stream identically to the pipx-installed daemon.
+  Path-resolution gotcha caught + fixed: ``daemon/__main__.py`` now
+  uses absolute imports (``from tailward.daemon.app import
+  create_app``) instead of relative — relative imports break when
+  PyInstaller treats ``__main__.py`` as a top-level script.
+
+  New Rust deps: ``reqwest`` (HTTP probe, rustls-tls minimal
+  features), ``tokio`` (``time::sleep`` for the poll loop).
+
+  Still TODO before v3.0.0:
+  - Single-instance enforcement (Tauri plugin) so double-launching
+    the app doesn't confuse the spawn-or-reuse decision
+  - Clean shutdown of the spawned daemon on app exit (currently
+    Tauri kills its child processes via OS-level cleanup, but
+    explicit SIGTERM-then-force is more robust)
+  - A real bundled-build CI step (currently the binary is
+    PyInstaller'd ad-hoc; CI matrix per platform comes in
+    milestones 3-5)
+
 - **v3 milestone 1: Tauri scaffold + bundled-Python sidecar
   experiment.** First commit toward the v3 native-distribution
   milestone. Scaffolds ``src-tauri/`` (Rust + Tauri 2.11.0), wires

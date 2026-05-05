@@ -46,3 +46,9 @@ Thumbs.db
 # Build artifacts, not source; CI produces them.
 # (target/ and gen/schemas/ are already excluded by src-tauri/.gitignore.)
 src-tauri/binaries/
+
+# PyInstaller auto-generated .spec file. Auto-regenerated on every
+# pyinstaller invocation; contains host-OS-specific path separators.
+# A curated portable .spec file for CI builds lands later (milestones
+# 3-6 of v3).
+tailward-daemon.spec

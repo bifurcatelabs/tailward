@@ -22,3 +22,12 @@ log = "0.4"
 tauri = { version = "2.11.0" }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
+# Used for the daemon health-check probe in setup() — minimal feature set
+# since we only ever hit plain-HTTP loopback. ``rustls-tls`` is pulled in
+# only because reqwest's default builder requires *some* TLS backend
+# config; we never actually negotiate TLS here.
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+# Pulled in for ``tokio::time::sleep`` in the health-check poll loop.
+# Tauri uses tokio internally but doesn't re-export the time module.
+# Minimum viable feature set; we don't need the full tokio surface.
+tokio = { version = "1", features = ["time"] }

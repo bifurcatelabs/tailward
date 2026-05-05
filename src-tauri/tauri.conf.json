@@ -32,7 +32,7 @@
       "icons/icon.ico"
     ],
     "externalBin": [
-      "binaries/tailward-sidecar-stub"
+      "binaries/tailward-daemon"
     ],
     "android": {
       "debugApplicationIdSuffix": ".debug"
