@@ -22,6 +22,13 @@ log = "0.4"
 tauri = { version = "2.11.0" }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
+# Prevents a second invocation of tailward.exe from spawning a duplicate
+# window when one is already running. Forwards the second invocation's
+# args + cwd to the existing instance, which focuses its window. Crucial
+# for the spawn-or-reuse decision: without this, double-launching the app
+# would race two instances at the bundled-daemon spawn step and the
+# second one's :7878 bind would fail.
+tauri-plugin-single-instance = "2"
 # Used for the daemon health-check probe in setup() — minimal feature set
 # since we only ever hit plain-HTTP loopback. ``rustls-tls`` is pulled in
 # only because reqwest's default builder requires *some* TLS backend

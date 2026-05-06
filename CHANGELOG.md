@@ -8,6 +8,22 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 ## [Unreleased]
 
 ### Added
+- **v3 single-instance enforcement.** Adds
+  ``tauri-plugin-single-instance`` so a second invocation of
+  ``tailward.exe`` doesn't spawn a duplicate window or race the
+  bundled-daemon spawn against an already-running first instance.
+  When a second launch happens, it forwards its args + cwd to the
+  existing instance and exits; the existing instance's callback
+  unminimizes + focuses its window. Plugin is wired in as the FIRST
+  plugin in the Tauri builder chain so it runs as a gatekeeper
+  before any other setup logic. Verified end-to-end on Windows:
+  two launches → one process; second launch produces zero stdout
+  and exits cleanly with code 0.
+
+  Closes one of the v3.0.0 prerequisites flagged in the milestone
+  2 commit message. Clean-shutdown of the spawned daemon on app
+  exit remains as a queued follow-up.
+
 - **v3 milestone 2: real daemon integration via PyInstaller
   sidecar.** Replaces the milestone 1 stub with the actual
   ``tailward-daemon`` binary bundled via PyInstaller (``--add-data``

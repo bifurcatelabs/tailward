@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use tauri::Manager;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::CommandEvent;
 
@@ -24,6 +25,16 @@ async fn daemon_is_healthy(client: &reqwest::Client) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    // Single-instance enforcement runs as the FIRST plugin so a second
+    // invocation of tailward.exe is rejected before it can race the
+    // bundled-daemon spawn or the health-check probe. The closure runs
+    // INSIDE the existing instance — so we can safely focus its window.
+    .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+      if let Some(window) = app.get_webview_window("main") {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
+      }
+    }))
     .plugin(tauri_plugin_shell::init())
     .setup(|app| {
       if cfg!(debug_assertions) {
