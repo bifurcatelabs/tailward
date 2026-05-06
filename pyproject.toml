@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "tailward"
-version = "2.9.0"
+version = "2.10.0"
 description = "A local-first audit underlay for Claude Code. Tails JSONL transcripts and surfaces user, agent, and platform signal across four views (Session / Reflection / Platform / Settings); deterministic rule checks plus optional local-LLM scoring."
 readme = "README.md"
 requires-python = ">=3.12"

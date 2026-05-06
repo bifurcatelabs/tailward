@@ -57,7 +57,7 @@
       />
     </svg>
     <a href="/" class="name" style="text-decoration:none;color:inherit">tailward</a>
-    <span class="version">2.9.0</span>
+    <span class="version">2.10.0</span>
   </div>
 
   <div class="session">

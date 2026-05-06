@@ -5,9 +5,70 @@ All notable changes to tailward are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [v2.10.0] — 2026-05-06
 
 ### Added
+- **Content-Security-Policy + standard hardening headers on daemon
+  responses.** Third leg of the v3 security triad (after the
+  bind-warning startup log and the Tauri capabilities allowlist
+  locking the sidecar to fixed args). Tauri-side CSP is explicitly
+  disabled in ``tauri.conf.json``, so daemon-served headers are the
+  only XSS guard for the v3 webview; v2 (pipx) browser users get the
+  same protection.
+
+  Policy is strict on scripts (``script-src 'self'`` — no inline, no
+  eval) and on connect egress (``connect-src 'self'`` — blocks data
+  exfil to external endpoints if a script is ever injected).
+  ``style-src`` allows ``'unsafe-inline'`` for Svelte component-scoped
+  styles. ``frame-ancestors 'none'`` blocks clickjacking; ``object-src
+  'none'`` kills Flash/applet attack surface; ``base-uri 'self'``
+  prevents ``<base>`` hijacking. ``X-Frame-Options: DENY`` and
+  ``X-Content-Type-Options: nosniff`` accompany the CSP.
+
+  What CSP does NOT address: browser extensions bypass page CSP
+  entirely (they're part of the browser's trusted code base). For a
+  trust tool handling sessions / intents / captured exfiltration
+  alerts, eliminating that surface is a v3 property — see
+  ``memory/project_v3_surface_reduction.md`` for the framing — not a
+  CSP property.
+
+- **v3 clean shutdown of spawned daemon on Tauri exit.** Last v3.0.0
+  prerequisite from milestone 2's TODO list. Captures the
+  bundled-daemon ``CommandChild`` handle into Tauri-managed state on
+  spawn; on ``RunEvent::ExitRequested`` POSTs ``/shutdown`` to the
+  daemon and polls ``/health`` for up to 5s for graceful confirmation,
+  falling back to ``child.kill()`` with a loud log line if the daemon
+  doesn't respond. Reuse-path (existing daemon attached instead of
+  spawned) leaves the managed slot empty so the exit hook is a no-op;
+  the user owns that daemon's lifecycle.
+
+- **Bounded cooperative daemon shutdown via ``/shutdown`` endpoint.**
+  New POST ``/shutdown`` flips uvicorn's ``should_exit`` so external
+  supervisors (v3 Tauri shell, future systemd unit, ad-hoc HTTP probe)
+  can request graceful teardown without sending OS signals. Lifespan
+  finally now runs worker stops in parallel via ``asyncio.gather``
+  with a 5s ``wait_for`` budget per worker; ledger close stays
+  unbounded for data integrity.
+
+  Without further intervention, ``asyncio.run()`` (which uvicorn uses)
+  calls ``loop.shutdown_default_executor()`` in its finally and blocks
+  until every ThreadPoolExecutor worker thread finishes — including
+  threads running uncancellable sync work via ``asyncio.to_thread``
+  (a blocking sync OpenAI client call to a slow LLM endpoint hits
+  this exactly). End of lifespan finally now calls ``os._exit(0)``
+  once data-integrity work has finished, bypassing the loop teardown
+  wait. Gated by ``app.state.exit_on_lifespan_close`` which
+  ``__main__.py`` sets explicitly; TestClient and other in-process
+  consumers leave it unset and lifespan returns normally.
+
+  Tests in ``tests/test_daemon_shutdown.py`` spawn the daemon as a
+  subprocess, POST ``/shutdown``, and assert the actual process exits
+  within 10s. Three cases: clean (no in-flight work), cancellable-slow
+  worker (``asyncio.sleep``), hung-thread worker (``to_thread`` +
+  ``time.sleep`` — same uncancellability profile as a blocking LLM
+  HTTP call). The hung-thread case is the regression motivating the
+  change. Also improves v2 ``Ctrl+C`` shutdown latency.
+
 - **v3 single-instance enforcement.** Adds
   ``tauri-plugin-single-instance`` so a second invocation of
   ``tailward.exe`` doesn't spawn a duplicate window or race the
