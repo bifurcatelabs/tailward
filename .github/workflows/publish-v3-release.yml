@@ -1,0 +1,237 @@
+name: publish v3 release
+
+# Triggered by pushing a ``v*`` tag (e.g. ``v3.0.0``). Builds the
+# Tauri desktop app for Windows + Linux in parallel, signs the
+# Windows artifacts via Azure Trusted Signing (federated OIDC, no
+# PFX or client secret in CI), and creates a draft GitHub Release
+# with all artifacts attached.
+#
+# The release stays a DRAFT until a maintainer publishes it from
+# the Releases page — same human-gated pattern as the ``pypi``
+# environment used by publish-to-pypi.yml.
+#
+# Tag trigger is broad (``v*``); the ``release`` environment's
+# "Deployment branches and tags" rule restricts the actual gated
+# steps to v*.*.* (semver-only). Pre-release tags like
+# ``v3.0.0-rc1`` will trigger the workflow but block at the
+# Windows signing job until a maintainer relaxes the rule.
+#
+# macOS is not currently supported. v3.0.0 ships Windows + Linux;
+# macOS lands when Apple-Silicon hardware is available.
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: build + sign windows
+    runs-on: windows-latest
+    environment: release
+    permissions:
+      id-token: write    # OIDC token for Azure auth
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Tauri CLI
+        # taiki-e/install-action uses prebuilt binaries when available;
+        # falls back to ``cargo install`` otherwise. ~10s vs ~5min for
+        # building tauri-cli from source.
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@^2.0
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pyinstaller
+
+      - name: Build frontend (Svelte SPA)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build PyInstaller daemon bundle
+        run: |
+          pyinstaller --onefile --name tailward-daemon --noconfirm `
+            --add-data "src/tailward/web/templates;tailward/web/templates" `
+            --add-data "src/tailward/web/static/dist;tailward/web/static/dist" `
+            src/tailward/daemon/__main__.py
+        shell: pwsh
+
+      - name: Place sidecar binary at Tauri's expected path
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries | Out-Null
+          Copy-Item dist/tailward-daemon.exe `
+            src-tauri/binaries/tailward-daemon-x86_64-pc-windows-msvc.exe
+        shell: pwsh
+
+      - name: Build Tauri app (release)
+        working-directory: src-tauri
+        run: cargo tauri build
+
+      - name: Azure login via OIDC federation
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Sign Windows artifacts via Azure Trusted Signing
+        uses: azure/trusted-signing-action@v0.5
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          endpoint: https://eus.codesigning.azure.net/
+          trusted-signing-account-name: bifurcate
+          certificate-profile-name: tailward-public-trust
+          files-folder: src-tauri/target/release/bundle
+          files-folder-recurse: true
+          files-folder-filter: exe,msi
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: tailward-windows
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+
+  build-linux:
+    name: build linux (unsigned)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Linux Tauri system deps
+        # webkit2gtk + GTK + appindicator + librsvg are Tauri's runtime
+        # WebView dependencies on Linux. libssl-dev is needed by the
+        # Rust ``reqwest`` crate's rustls-tls feature for the daemon
+        # health probe.
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libssl-dev
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@^2.0
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pyinstaller
+
+      - name: Build frontend (Svelte SPA)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build PyInstaller daemon bundle
+        # PyInstaller --add-data uses ``:`` as separator on Linux/macOS
+        # vs ``;`` on Windows. Match the OS or the bundle silently
+        # treats the second half as a separate input file.
+        run: |
+          pyinstaller --onefile --name tailward-daemon --noconfirm \
+            --add-data "src/tailward/web/templates:tailward/web/templates" \
+            --add-data "src/tailward/web/static/dist:tailward/web/static/dist" \
+            src/tailward/daemon/__main__.py
+
+      - name: Place sidecar binary at Tauri's expected path
+        run: |
+          mkdir -p src-tauri/binaries
+          cp dist/tailward-daemon \
+            src-tauri/binaries/tailward-daemon-x86_64-unknown-linux-gnu
+
+      - name: Build Tauri app (release)
+        working-directory: src-tauri
+        run: cargo tauri build
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: tailward-linux
+          path: |
+            src-tauri/target/release/bundle/appimage/*.AppImage
+            src-tauri/target/release/bundle/deb/*.deb
+
+  publish:
+    name: create draft github release
+    needs: [build-windows, build-linux]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write    # required for creating the release
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v8
+        with:
+          path: artifacts/
+          merge-multiple: true
+
+      - name: Create draft release
+        # Draft = release shows up on the Releases page but is not
+        # public. Maintainer publishes manually after smoke-testing
+        # the artifacts. Same human-gated pattern as the pypi flow.
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*
+          draft: true
+          generate_release_notes: true
