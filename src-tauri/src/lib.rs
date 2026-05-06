@@ -1,12 +1,19 @@
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tauri::Manager;
+use tauri::{Manager, RunEvent};
 use tauri_plugin_shell::ShellExt;
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
 const DAEMON_HEALTH_URL: &str = "http://127.0.0.1:7878/health";
 const HEALTH_TIMEOUT_SECS: u64 = 30;
 const HEALTH_POLL_INTERVAL_MS: u64 = 500;
+
+/// Holds the bundled daemon's child handle when we spawned it ourselves.
+/// Stays ``None`` on the reuse path — the user owns that daemon's
+/// lifecycle and we don't terminate it on app exit.
+#[derive(Default)]
+struct SpawnedDaemon(Arc<Mutex<Option<CommandChild>>>);
 
 /// Probe the daemon's ``/health`` endpoint with a tight timeout. Returns
 /// true on a 2xx response; false on any error / non-2xx / timeout.
@@ -44,6 +51,13 @@ pub fn run() {
             .build(),
         )?;
       }
+
+      // Manage the spawned-daemon handle so the exit hook can find it.
+      // Cloned ``child_slot`` goes into the spawn task; the original
+      // lives in app state and is read from the run-event callback.
+      let spawned = SpawnedDaemon::default();
+      let child_slot = spawned.0.clone();
+      app.manage(spawned);
 
       // Milestone 2: spawn-or-reuse the tailward daemon.
       //
@@ -88,13 +102,19 @@ pub fn run() {
           }
         };
 
-        let (mut rx, _child) = match sidecar.spawn() {
+        let (mut rx, child) = match sidecar.spawn() {
           Ok(x) => x,
           Err(e) => {
             eprintln!("[tailward] failed to spawn tailward-daemon sidecar: {e}");
             return;
           }
         };
+
+        // Hand the child off to the manage()'d slot so the exit hook
+        // can terminate it. We own this daemon's lifecycle from here.
+        if let Ok(mut slot) = child_slot.lock() {
+          *slot = Some(child);
+        }
 
         // Drain the daemon's stdout/stderr to our terminal so a user
         // running ``cargo tauri dev`` sees backend logs interleaved.
@@ -143,6 +163,82 @@ pub fn run() {
 
       Ok(())
     })
-    .run(tauri::generate_context!())
-    .expect("error while running tauri application");
+    .build(tauri::generate_context!())
+    .expect("error while building tauri application")
+    .run(|app_handle, event| {
+      // Clean-shutdown of the spawned daemon. Fires when the user
+      // closes the window (or the app is otherwise asked to exit).
+      // The reuse-path leaves the slot ``None`` so this is a no-op
+      // when we're not the lifecycle owner.
+      //
+      // Cooperative path is required because the daemon is a
+      // PyInstaller --onefile bundle: the spawned PID is the
+      // bootloader, which exec's the actual Python interpreter as a
+      // child. ``CommandChild::kill()`` (TerminateProcess on Windows /
+      // SIGKILL on Unix) does not cascade to children, so killing the
+      // bootloader leaves the Python child orphaned. Instead we POST
+      // ``/shutdown`` so the Python process flips uvicorn's
+      // ``should_exit`` flag and tears itself down — when the child
+      // exits, the bootloader follows naturally. ``kill()`` is kept
+      // as a fallback for the rare case where the daemon is
+      // unresponsive, even though it leaves the same orphan window.
+      if let RunEvent::ExitRequested { .. } = event {
+        let state = app_handle.state::<SpawnedDaemon>();
+        let child = state.0.lock().ok().and_then(|mut g| g.take());
+
+        if let Some(child) = child {
+          let pid = child.pid();
+          println!("[tailward] requesting daemon shutdown (pid={pid})");
+
+          let shutdown_ok = tauri::async_runtime::block_on(async {
+            let client = match reqwest::Client::builder()
+              .timeout(Duration::from_secs(2))
+              .build()
+            {
+              Ok(c) => c,
+              Err(_) => return false,
+            };
+
+            // Fire and forget: an EOF mid-response is normal if
+            // uvicorn closes the socket before flushing. Anything
+            // that arrives at all means the signal was accepted.
+            let _ = client
+              .post("http://127.0.0.1:7878/shutdown")
+              .send()
+              .await;
+
+            // Poll /health until it stops responding (process is
+            // dying) or our timeout expires. Five seconds is enough
+            // for uvicorn lifespan teardown (workers stop, ledger
+            // closes); if it takes longer, something is wedged.
+            let started = std::time::Instant::now();
+            let timeout = Duration::from_secs(5);
+            loop {
+              if started.elapsed() >= timeout {
+                return false;
+              }
+              if !daemon_is_healthy(&client).await {
+                return true;
+              }
+              tokio::time::sleep(Duration::from_millis(200)).await;
+            }
+          });
+
+          if shutdown_ok {
+            println!("[tailward] daemon shut down gracefully");
+          } else {
+            eprintln!(
+              "[tailward] !!! daemon did not respond to /shutdown within \
+               5s; force-killing bootloader (pid={pid}). The Python child \
+               may be orphaned. Check ~/.tailward/logs/daemon.log for what \
+               was holding the daemon alive — likely a worker stuck on an \
+               uncancellable in-flight LLM call. Bug, not expected."
+            );
+            if let Err(e) = child.kill() {
+              eprintln!("[tailward] failed to terminate spawned daemon: {e}");
+            }
+          }
+        }
+      }
+    });
 }
