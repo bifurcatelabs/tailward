@@ -25,9 +25,6 @@ import time
 import urllib.error
 import urllib.request
 
-import pytest
-
-
 SHUTDOWN_BUDGET_SECS = 10.0
 
 

@@ -663,7 +663,7 @@ def create_app() -> FastAPI:
                     return
                 try:
                     await asyncio.wait_for(worker.stop(), timeout=5.0)
-                except asyncio.TimeoutError:
+                except TimeoutError:
                     log.warning(
                         "shutdown: %s.stop() exceeded 5s budget; "
                         "abandoning. Likely an in-flight LLM call "
