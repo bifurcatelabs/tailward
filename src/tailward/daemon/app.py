@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 
 from ..config import get_config, is_loopback_bind
 from ..paths import (
@@ -574,6 +575,37 @@ def create_app() -> FastAPI:
         except Exception as e:
             log.warning("synthesis worker unavailable: %s", e)
 
+        # Test-only hooks for tests/test_daemon_shutdown.py. Production
+        # code path: env vars are unset and these are no-ops.
+        #
+        # TAILWARD_TEST_SLOW_WORKER_SECS — stop() awaits a cancellable
+        # asyncio.sleep. Verifies wait_for-based cancellation works.
+        # TAILWARD_TEST_HUNG_WORKER_SECS — stop() awaits asyncio.to_thread
+        # wrapping time.sleep, which is uncancellable. Reproduces the
+        # actual production failure: cancelling the coroutine doesn't
+        # cancel the underlying thread, and asyncio's loop teardown
+        # blocks on executor.shutdown waiting for the thread.
+        test_slow_secs = os.environ.get("TAILWARD_TEST_SLOW_WORKER_SECS")
+        if test_slow_secs:
+            secs = float(test_slow_secs)
+            class _TestSlowWorker:
+                async def stop(self) -> None:
+                    await asyncio.sleep(secs)
+            daemon._test_slow_worker = _TestSlowWorker()  # type: ignore[attr-defined]
+
+        test_hung_secs = os.environ.get("TAILWARD_TEST_HUNG_WORKER_SECS")
+        if test_hung_secs:
+            import time as _time
+            secs = float(test_hung_secs)
+            class _TestHungWorker:
+                async def stop(self) -> None:
+                    # to_thread(time.sleep) — cancelling the coroutine
+                    # does NOT interrupt time.sleep in the executor
+                    # thread. Same failure mode as a blocking HTTP
+                    # call to a slow LLM endpoint.
+                    await asyncio.to_thread(_time.sleep, secs)
+            daemon._test_hung_worker = _TestHungWorker()  # type: ignore[attr-defined]
+
         log.info("tailward daemon started")
         cfg = get_config()
         if not is_loopback_bind(cfg.http_host):
@@ -590,28 +622,101 @@ def create_app() -> FastAPI:
         try:
             yield
         finally:
-            if daemon.watcher:
-                await daemon.watcher.stop()
-            if daemon.drift:
-                await daemon.drift.stop()
-            if daemon.audit:
-                await daemon.audit.stop()
-            if daemon.constraints:
-                await daemon.constraints.stop()
-            if daemon.scope:
-                await daemon.scope.stop()
-            if daemon.rubric:
-                await daemon.rubric.stop()
-            if getattr(daemon, "user_rubric", None):
-                await daemon.user_rubric.stop()
-            if daemon.session_close:
-                await daemon.session_close.stop()
-            if daemon.probe:
-                await daemon.probe.stop()
-            if getattr(daemon, "synthesis", None):
-                await daemon.synthesis.stop()
+            # Bounded parallel worker shutdown.
+            #
+            # Each worker.stop() can block waiting on its in-flight
+            # work — most importantly, asyncio.to_thread calls into
+            # the LLM HTTP client, which aren't natively cancellable.
+            # Without bounding, a slow inference (10-60s) holds the
+            # entire daemon shutdown hostage. We give each worker a
+            # 5s budget; if it exceeds, we abandon it and the
+            # underlying thread continues until its blocking call
+            # returns (the post-server.run() grace loop in
+            # __main__.py force-exits the process if threads remain).
+            #
+            # Parallel via gather so worst case is ~5s total, not
+            # 5s × N workers. Workers are independent — they consume
+            # from the watcher's event stream but don't depend on
+            # each other for shutdown. Ledger close is unbounded
+            # (pending writes matter for data integrity).
+            #
+            # Proper fix tracked: replace to_thread+sync OpenAI client
+            # with native async client (httpx) so LLM calls cancel at
+            # the socket level when worker.stop() propagates cancel.
+            workers = [
+                ("watcher", daemon.watcher),
+                ("drift", daemon.drift),
+                ("audit", daemon.audit),
+                ("constraints", daemon.constraints),
+                ("scope", daemon.scope),
+                ("rubric", daemon.rubric),
+                ("user_rubric", getattr(daemon, "user_rubric", None)),
+                ("session_close", daemon.session_close),
+                ("probe", daemon.probe),
+                ("synthesis", getattr(daemon, "synthesis", None)),
+                ("test_slow", getattr(daemon, "_test_slow_worker", None)),
+                ("test_hung", getattr(daemon, "_test_hung_worker", None)),
+            ]
+
+            async def _stop_with_budget(name: str, worker: Any) -> None:
+                if worker is None:
+                    return
+                try:
+                    await asyncio.wait_for(worker.stop(), timeout=5.0)
+                except asyncio.TimeoutError:
+                    log.warning(
+                        "shutdown: %s.stop() exceeded 5s budget; "
+                        "abandoning. Likely an in-flight LLM call "
+                        "holding the worker open; underlying thread "
+                        "may continue until the call returns.",
+                        name,
+                    )
+                except Exception as e:
+                    log.warning(
+                        "shutdown: %s.stop() raised %s: %s",
+                        name, type(e).__name__, e,
+                    )
+
+            await asyncio.gather(
+                *[_stop_with_budget(n, w) for n, w in workers],
+                return_exceptions=True,
+            )
             await daemon.ledger.close()
             log.info("tailward daemon stopped")
+
+            # Gate the os._exit so it only fires in the actual daemon
+            # process. In-process FastAPI usage (TestClient, in-tree
+            # ASGI hosting, future programmatic embedding) must NOT
+            # kill the host. ``__main__.py`` sets this flag explicitly;
+            # everything else leaves it unset.
+            #
+            # Bypassing asyncio's post-lifespan loop teardown is the
+            # whole point of os._exit here.
+            #
+            # ``asyncio.run()`` (which uvicorn's ``Server.run()`` uses)
+            # calls ``loop.shutdown_default_executor()`` in its finally
+            # block, which blocks until ALL ThreadPoolExecutor worker
+            # threads finish — including ones running uncancellable
+            # sync work via ``asyncio.to_thread`` (e.g., a blocking
+            # OpenAI sync call to a slow LLM endpoint). Cancelling the
+            # awaiting coroutine doesn't interrupt the underlying
+            # thread, so without this exit the process can linger
+            # tens of seconds after our graceful teardown completes.
+            #
+            # All data-integrity work (worker stops with 5s budget +
+            # ledger close, both above) has finished by this point.
+            # What we skip is uvicorn's "Application shutdown complete"
+            # log and asyncio's loop/executor teardown — none of which
+            # is load-bearing. Tested via
+            # ``tests/test_daemon_shutdown.py``.
+            #
+            # Proper future fix (tracked separately): replace
+            # ``to_thread`` + sync LLM client with a native async
+            # client (httpx) so cancellation propagates to the socket.
+            # Once that lands, this becomes the safety net, not the
+            # load-bearing exit path.
+            if getattr(app.state, "exit_on_lifespan_close", False):
+                os._exit(0)
 
     app = FastAPI(title="tailward", lifespan=lifespan)
     app.state.daemon = daemon
@@ -623,6 +728,28 @@ def create_app() -> FastAPI:
             "sessions": len(daemon.state.all()),
             "ts": datetime.now(UTC).isoformat(),
         }
+
+    @app.post("/shutdown")
+    async def shutdown(request: Request) -> dict[str, Any]:
+        """Cooperative shutdown signal for the v3 Tauri shell.
+
+        Flips uvicorn's ``should_exit`` flag; the server completes the
+        current response, runs the lifespan ``finally`` block (workers
+        stop, ledger closes), and exits cleanly. The PyInstaller
+        bootloader follows because its child Python interpreter dies.
+
+        No auth — daemon binds to loopback by default. Anyone with
+        localhost access can already terminate the process at the OS
+        level; this just exposes a graceful path.
+        """
+        server = getattr(request.app.state, "uvicorn_server", None)
+        if server is None:
+            raise HTTPException(
+                status_code=503,
+                detail="shutdown unavailable: server reference not set",
+            )
+        server.should_exit = True
+        return {"ok": True}
 
     @app.get("/api/bind-info")
     async def bind_info() -> dict[str, Any]:
