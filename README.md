@@ -2,8 +2,6 @@
 
 A local-first **audit underlay for Claude Code**. Your session sits in the foreground; tailward quietly captures it from below — tailing the JSONL transcripts Claude Code writes, scoring them against documented failure modes via deterministic rule checks plus a **local LLM rubric**, deriving in-band inference-path metrics, probing the local LLM endpoint, synthesizing compaction-resistant snapshots so context survives across session boundaries, and surfacing everything in a multi-view localhost web UI (Session / Reflection / Platform / Settings). No transcripts, code, or scoring judgments leave your machine; the prompt is not modified by default.
 
-> **One name** as of v2.7.0 — `tailward` is the PyPI package, the GitHub repo, the CLI binary you'll type (`tailward daemon start`), the internal Python package, and the state directory (`~/.tailward/`). `warden` is preserved as a deprecation alias for the CLI from the v2.x line — both `warden daemon start` and `tailward daemon start` work, but `tailward` is canonical (alias removal slated for v4). State directories created under `~/.modmcp/` by older v2.x installs auto-migrate forward on first v2.7+ run.
-
 See [`failure modes.md`](failure%20modes.md) for the taxonomy that drives the audit layer and [`AUDIT_MAP.md`](AUDIT_MAP.md) for exactly which failure modes tailward currently detects and how. [`V1 Proposal.md`](V1%20Proposal.md) is the original design and is preserved as a historical artifact — the project pivoted away from active prompt injection in v1.1 and reframed as a trust layer in v2.0.0.
 
 ## At a glance
