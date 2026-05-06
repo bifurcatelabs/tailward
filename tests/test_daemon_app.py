@@ -102,6 +102,40 @@ def test_web_landing_and_project_pages_serve_spa(
     assert 'id="app"' in r.text
 
 
+def test_html_responses_carry_security_headers(client: TestClient) -> None:
+    """Daemon-served HTML responses must include CSP + X-Frame-Options.
+
+    Tauri-side CSP is disabled by design (``"csp": null`` in
+    tauri.conf.json), so the daemon's headers are the only XSS guard
+    for the v3 webview as well as any browser pointed at the v2 pipx
+    install. Regression guard: if these headers stop appearing, an
+    injected script could exfiltrate sessions/intents to an external
+    endpoint or escalate through the Tauri JS-to-Rust bridge.
+    """
+    r = client.get("/")
+    assert r.status_code == 200
+    csp = r.headers.get("content-security-policy", "")
+    # Strict on scripts (no inline, no eval), restrict network egress.
+    assert "script-src 'self'" in csp
+    assert "connect-src 'self'" in csp
+    assert "default-src 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    # Companion headers.
+    assert r.headers.get("x-frame-options") == "DENY"
+    assert r.headers.get("x-content-type-options") == "nosniff"
+
+
+def test_json_responses_skip_html_only_headers(client: TestClient) -> None:
+    """CSP + X-Frame-Options are HTML-specific; don't pollute JSON
+    responses with directives meant for browser-rendered pages."""
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert "content-security-policy" not in {k.lower() for k in r.headers.keys()}
+    assert "x-frame-options" not in {k.lower() for k in r.headers.keys()}
+    # nosniff still applies — cheap protection, no downside on JSON.
+    assert r.headers.get("x-content-type-options") == "nosniff"
+
+
 def test_api_ledger_and_drift_empty(tmp_path: Path, client: TestClient) -> None:
     proj = tmp_path / "proj3"
     proj.mkdir()

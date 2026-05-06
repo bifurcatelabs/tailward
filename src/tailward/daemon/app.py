@@ -721,6 +721,58 @@ def create_app() -> FastAPI:
     app = FastAPI(title="tailward", lifespan=lifespan)
     app.state.daemon = daemon
 
+    # Content-Security-Policy + standard security headers.
+    #
+    # Tauri-side CSP is explicitly disabled (``"csp": null`` in
+    # tauri.conf.json), so daemon-served headers are the only line of
+    # defense against XSS-via-injected-content escalating through the
+    # webview's JS-to-Rust bridge. v2 (pipx) users get the same
+    # protection in any browser pointed at the daemon.
+    #
+    # Policy rationale:
+    # - ``default-src 'self'``: only same-origin (the daemon) by default.
+    # - ``script-src 'self'``: strict — no inline scripts, no eval. The
+    #   Svelte SPA bundle is served from /static/dist; nothing else
+    #   should execute JS.
+    # - ``style-src 'self' 'unsafe-inline'``: Svelte component styles
+    #   and the live.html inline fallback need inline. CSS injection
+    #   on a loopback service is low-risk vs. the cost of nonces.
+    # - ``connect-src 'self'``: XHR/fetch/EventSource only to the
+    #   daemon. Blocks data exfil to external endpoints if a script
+    #   does get injected.
+    # - ``img-src 'self' data:``: inline favicons, icons, generated
+    #   images.
+    # - ``frame-ancestors 'none'``: no embedding in iframes (clickjack).
+    # - ``object-src 'none'``: no Flash/applets.
+    # - ``base-uri 'self'``: prevent <base> hijacking of relative URLs.
+    # - ``form-action 'self'``: forms only submit to the daemon.
+    CSP_POLICY = (
+        "default-src 'self'; "
+        "script-src 'self'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "connect-src 'self'; "
+        "img-src 'self' data:; "
+        "font-src 'self'; "
+        "object-src 'none'; "
+        "base-uri 'self'; "
+        "form-action 'self'; "
+        "frame-ancestors 'none'"
+    )
+
+    @app.middleware("http")
+    async def _security_headers(request: Request, call_next):  # type: ignore[no-untyped-def]
+        response = await call_next(request)
+        # X-Content-Type-Options applies to all responses (cheap, no
+        # downside; blocks MIME sniffing on JSON/SSE/HTML alike).
+        response.headers.setdefault("X-Content-Type-Options", "nosniff")
+        # CSP + frame-options are HTML-specific (don't pollute JSON
+        # responses with browser-rendering directives).
+        ctype = response.headers.get("content-type", "")
+        if ctype.startswith("text/html"):
+            response.headers.setdefault("Content-Security-Policy", CSP_POLICY)
+            response.headers.setdefault("X-Frame-Options", "DENY")
+        return response
+
     @app.get("/health")
     async def health() -> dict[str, Any]:
         return {
