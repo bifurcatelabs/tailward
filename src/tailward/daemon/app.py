@@ -82,28 +82,54 @@ def create_app() -> FastAPI:
             # bakes in ``ev.id=0`` here because the row id isn't known
             # until after this insert, which broke SSE-replay dedup and
             # the ack/dismiss buttons on the live page.
+            #
+            # ``ev.created_at`` is a Unix epoch float; forward it as ISO
+            # so backlog-persisted rows carry the original event time.
             import json as _json
 
+            ts_iso = (
+                datetime.fromtimestamp(ev.created_at, UTC).isoformat()
+                if ev.created_at
+                else None
+            )
             return await daemon.ledger.record_live_event(
                 ev.session_id,
                 ev.project_hash,
                 ev.type,
                 _json.dumps(ev.payload, ensure_ascii=False, default=str),
+                ts=ts_iso,
             )
 
         daemon.live.set_persister(_persist_live)
 
         async def on_event(ev, fs, is_backlog: bool = False):
             # ``is_backlog=True`` for events parsed from existing JSONL
-            # content during the watcher's prime pass at startup.
-            # ``False`` for real-time events arriving via filesystem
-            # change notifications. LLM-call workers (drift, audit,
-            # rubric, user_rubric, synthesis) skip backlog events to
-            # prevent every daemon startup from firing tens of LLM
-            # calls catching up on history. Rule-based workers
-            # (constraints, scope) and structural-data writes (ledger,
-            # live-bus markers) still fire — those are effectively free
-            # and produce useful audit signal even on backlog content.
+            # content during the watcher's prime pass at startup or
+            # when a project is opted-in via the Seed UI. ``False`` for
+            # real-time events arriving via filesystem change
+            # notifications. LLM-call workers (drift, audit, rubric,
+            # user_rubric, synthesis) skip backlog events to prevent
+            # every daemon startup from firing tens of LLM calls
+            # catching up on history. Rule-based workers (constraints,
+            # scope) and structural-data writes (ledger, live-bus
+            # rows) still fire — those are effectively free and
+            # produce useful audit signal even on backlog content.
+            #
+            # Live broadcasts are gated on backlog: persisted to
+            # ``live_events`` (so the past-session view of a seeded
+            # project shows real turns) but not fanned out to SSE
+            # subscribers (so historical replay doesn't flood the
+            # live feed and lock the browser main thread). Persisted
+            # rows carry the JSONL event's original timestamp via
+            # ``ts``, not insert time, so the historical timeline
+            # reads accurately.
+            _ts_epoch: float | None = (
+                ev.timestamp.timestamp() if ev.timestamp else None
+            )
+            _pub_kwargs: dict[str, Any] = {
+                "broadcast": not is_backlog,
+                "ts": _ts_epoch,
+            }
             # Exfiltration helper: scans any text that's about to land
             # in live_events.payload, emits an exfiltration_alert per
             # match, and returns the redacted form. Wrapping every
@@ -141,6 +167,7 @@ def create_app() -> FastAPI:
                             "source_event_type": source_event_type,
                             **extra,
                         },
+                        **_pub_kwargs,
                     )
                 return (
                     exfiltration.redact(text, matches),
@@ -219,12 +246,12 @@ def create_app() -> FastAPI:
                     "tool_use",
                     "assistant_message",
                 ):
-                    await daemon.constraints.enqueue(ev, fs)
+                    await daemon.constraints.enqueue(ev, fs, is_backlog=is_backlog)
                 if daemon.scope is not None and ev.kind in (
                     "tool_use",
                     "assistant_message",
                 ):
-                    await daemon.scope.enqueue(ev, fs)
+                    await daemon.scope.enqueue(ev, fs, is_backlog=is_backlog)
                 if not is_backlog:
                     if daemon.rubric is not None and ev.kind == "assistant_message":
                         await daemon.rubric.enqueue(ev, fs)
@@ -315,6 +342,7 @@ def create_app() -> FastAPI:
                     fs.project_hash,
                     "turn",
                     payload,
+                    **_pub_kwargs,
                 )
                 if st is not None:
                     st.last_turn_emit_msg_id = ev.message_id
@@ -350,6 +378,7 @@ def create_app() -> FastAPI:
                             fs.project_hash,
                             "compact_summary",
                             cs_payload,
+                            **_pub_kwargs,
                         )
                     else:
                         preview, leaks = await _check_leaks(preview, "user_turn")
@@ -364,6 +393,7 @@ def create_app() -> FastAPI:
                             fs.project_hash,
                             "user_turn",
                             ut_payload,
+                            **_pub_kwargs,
                         )
 
             # Tool-call markers fire whenever a tool_use is present, whether
@@ -405,6 +435,7 @@ def create_app() -> FastAPI:
                     fs.project_hash,
                     "tool_call",
                     tc_payload,
+                    **_pub_kwargs,
                 )
                 if ev.tool_use_id:
                     fs.tool_use_names[ev.tool_use_id] = ev.tool_name
@@ -446,6 +477,7 @@ def create_app() -> FastAPI:
                         "tool_use_id": ev.tool_use_id,
                         "permission_mode": mode_at_interrupt,
                     },
+                    **_pub_kwargs,
                 )
 
             # Permission-mode transitions. Claude Code carries
@@ -470,6 +502,7 @@ def create_app() -> FastAPI:
                         "mode": ev.permission_mode,
                         "previous_mode": fs.last_permission_mode,
                     },
+                    **_pub_kwargs,
                 )
             if ev.permission_mode is not None:
                 fs.last_permission_mode = ev.permission_mode
@@ -499,6 +532,7 @@ def create_app() -> FastAPI:
                         fs.project_hash,
                         "away_summary",
                         as_payload,
+                        **_pub_kwargs,
                     )
 
         cfg = get_config()

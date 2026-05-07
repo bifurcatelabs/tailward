@@ -515,12 +515,19 @@ class Ledger:
         project_hash: str,
         event_type: str,
         payload: str,
+        *,
+        ts: str | None = None,
     ) -> int:
+        # ``ts`` lets callers persist an event with the original
+        # JSONL-event timestamp instead of insert-time. The watcher's
+        # backlog/seed path passes the parsed event's timestamp so the
+        # historical past-session view renders with accurate clock
+        # ordering rather than treating every replay as "just now."
         cur = await self.conn.execute(
             """INSERT INTO live_events(
                  session_id, project_hash, event_type, payload, created_at
                ) VALUES(?, ?, ?, ?, ?)""",
-            (session_id, project_hash, event_type, payload, _now_iso()),
+            (session_id, project_hash, event_type, payload, ts or _now_iso()),
         )
         await self.conn.commit()
         return int(cur.lastrowid or 0)

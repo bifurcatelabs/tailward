@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -54,6 +55,75 @@ async def test_publish_only_session_isolated() -> None:
     assert a.type == "turn"
 
     assert qb.empty(), "s2 subscriber should not receive s1 events"
+
+
+@pytest.mark.asyncio
+async def test_publish_with_broadcast_false_persists_but_skips_fanout() -> None:
+    """``broadcast=False`` persists the event for past-session views
+    but skips the in-memory recent cache + SSE subscriber queues.
+
+    Used by the watcher's backlog/seed path so historical JSONL
+    replay populates ``live_events`` (so the past-session view of a
+    seeded project shows real turns) without flooding the live feed
+    with stale activity. Pinned here so a future LiveBus refactor
+    can't silently re-fan-out backlog events.
+    """
+    bus = LiveBus()
+    persisted: list = []
+
+    async def fake_persist(ev) -> int:
+        persisted.append(ev)
+        return len(persisted)
+
+    bus.set_persister(fake_persist)
+    q = await bus.subscribe("s1")
+
+    # Backlog path: persists, but no fan-out to subscribers.
+    await bus.publish("s1", "ph", "turn", {"turn_idx": 1}, broadcast=False)
+    assert len(persisted) == 1, "backlog event should still persist"
+    assert q.empty(), "broadcast=False must not fan out to subscribers"
+
+    # Realtime path (default): persists and fans out.
+    await bus.publish("s1", "ph", "turn", {"turn_idx": 2})
+    assert len(persisted) == 2
+    delivered = await asyncio.wait_for(q.get(), 1.0)
+    assert delivered.payload["turn_idx"] == 2, (
+        "realtime publish (broadcast=True) must reach subscribers"
+    )
+
+
+@pytest.mark.asyncio
+async def test_publish_with_ts_overrides_created_at() -> None:
+    """``ts`` overrides ``LiveEvent.created_at`` so backlog-persisted
+    rows carry the original JSONL event timestamp instead of insert
+    time. Without this, replayed historical events stamp at "now"
+    and the past-session view shows them as if they just happened.
+    """
+    bus = LiveBus()
+    captured: list = []
+
+    async def fake_persist(ev) -> int:
+        captured.append(ev)
+        return 1
+
+    bus.set_persister(fake_persist)
+
+    # Backlog path: ts kwarg pins created_at to the original event time.
+    historical_ts = 1_700_000_000.0
+    await bus.publish(
+        "s1", "ph", "turn", {"turn_idx": 1}, ts=historical_ts
+    )
+    assert captured[0].created_at == historical_ts, (
+        "ts kwarg must override LiveEvent.created_at"
+    )
+
+    # Default path (no ts): created_at is set to insert time.
+    before = time.time()
+    await bus.publish("s1", "ph", "turn", {"turn_idx": 2})
+    after = time.time()
+    assert before <= captured[1].created_at <= after, (
+        "default created_at should be insert-time when ts unset"
+    )
 
 
 def test_svelte_feed_renders_every_event_type() -> None:

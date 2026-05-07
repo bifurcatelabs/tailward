@@ -46,14 +46,18 @@ class _PolicyCache:
 class ConstraintsWorker:
     def __init__(self, daemon: Daemon) -> None:
         self._daemon = daemon
-        self._q: asyncio.Queue[tuple[TranscriptEvent, object]] = asyncio.Queue()
+        self._q: asyncio.Queue[tuple[TranscriptEvent, object, bool]] = asyncio.Queue()
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._policies: dict[str, _PolicyCache] = {}
         self._seen_violations: dict[str, set[tuple[str, str]]] = {}
 
-    async def enqueue(self, ev: TranscriptEvent, fs) -> None:
-        await self._q.put((ev, fs))
+    async def enqueue(self, ev: TranscriptEvent, fs, *, is_backlog: bool = False) -> None:
+        # ``is_backlog`` rides through the queue so the publish step
+        # can suppress live broadcast for backlog-derived violations
+        # (the violation still lands in the ledger; it just doesn't
+        # fan out to the live feed as if it just happened).
+        await self._q.put((ev, fs, is_backlog))
 
     async def start(self) -> None:
         self._stop.clear()
@@ -71,11 +75,11 @@ class ConstraintsWorker:
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
-                ev, fs = await asyncio.wait_for(self._q.get(), timeout=1.0)
+                ev, fs, is_backlog = await asyncio.wait_for(self._q.get(), timeout=1.0)
             except TimeoutError:
                 continue
             try:
-                await self._process(ev, fs)
+                await self._process(ev, fs, is_backlog=is_backlog)
             except Exception:
                 log.exception("constraints processing failed")
 
@@ -93,9 +97,19 @@ class ConstraintsWorker:
         self._policies[project_path] = _PolicyCache(policy, digest)
         return policy
 
-    async def _process(self, ev: TranscriptEvent, fs) -> None:
+    async def _process(self, ev: TranscriptEvent, fs, *, is_backlog: bool = False) -> None:
         if not fs.project_path or not fs.session_id:
             return
+        # Persist findings with the original event timestamp; suppress
+        # broadcast for backlog so historical replay doesn't appear in
+        # the live feed.
+        _ts_epoch: float | None = (
+            ev.timestamp.timestamp() if ev.timestamp else None
+        )
+        _pub_kwargs: dict[str, object] = {
+            "broadcast": not is_backlog,
+            "ts": _ts_epoch,
+        }
         # Accept bare ``tool_use`` events and assistant messages that wrap
         # a tool_use content block. Real Claude Code transcripts only
         # ever emit the embedded shape; the bare shape exists in tests
@@ -158,6 +172,7 @@ class ConstraintsWorker:
                             "tool": ev.tool_name,
                             "path": path,
                         },
+                        **_pub_kwargs,
                     )
                 except Exception:
                     log.exception("live publish failed (memory_edit)")
@@ -203,6 +218,7 @@ class ConstraintsWorker:
                             "severity": severity,
                             "tool": ev.tool_name,
                         },
+                        **_pub_kwargs,
                     )
                 except Exception:
                     log.exception("live publish failed (constraint)")

@@ -41,13 +41,17 @@ class _SessionScope:
 class ScopeWorker:
     def __init__(self, daemon: Daemon) -> None:
         self._daemon = daemon
-        self._q: asyncio.Queue[tuple[TranscriptEvent, object]] = asyncio.Queue()
+        self._q: asyncio.Queue[tuple[TranscriptEvent, object, bool]] = asyncio.Queue()
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._by_session: dict[str, _SessionScope] = {}
 
-    async def enqueue(self, ev: TranscriptEvent, fs) -> None:
-        await self._q.put((ev, fs))
+    async def enqueue(self, ev: TranscriptEvent, fs, *, is_backlog: bool = False) -> None:
+        # ``is_backlog`` rides through the queue so the publish step
+        # can suppress live broadcast for backlog-derived snapshots
+        # (snapshot still lands in ledger; just doesn't fan out to
+        # the live feed as if it just happened).
+        await self._q.put((ev, fs, is_backlog))
 
     async def start(self) -> None:
         self._stop.clear()
@@ -65,17 +69,27 @@ class ScopeWorker:
     async def _run(self) -> None:
         while not self._stop.is_set():
             try:
-                ev, fs = await asyncio.wait_for(self._q.get(), timeout=1.0)
+                ev, fs, is_backlog = await asyncio.wait_for(self._q.get(), timeout=1.0)
             except TimeoutError:
                 continue
             try:
-                await self._process(ev, fs)
+                await self._process(ev, fs, is_backlog=is_backlog)
             except Exception:
                 log.exception("scope processing failed")
 
-    async def _process(self, ev: TranscriptEvent, fs) -> None:
+    async def _process(self, ev: TranscriptEvent, fs, *, is_backlog: bool = False) -> None:
         if not fs.session_id or not fs.project_hash:
             return
+        # Persist with original event timestamp; suppress broadcast
+        # for backlog so historical replays don't appear as live
+        # snapshots in the feed.
+        _ts_epoch: float | None = (
+            ev.timestamp.timestamp() if ev.timestamp else None
+        )
+        _pub_kwargs: dict[str, object] = {
+            "broadcast": not is_backlog,
+            "ts": _ts_epoch,
+        }
         scope = self._by_session.setdefault(fs.session_id, _SessionScope())
 
         # Tool-use signal can arrive in two shapes: a bare ``tool_use``
@@ -99,7 +113,7 @@ class ScopeWorker:
             # had clearly touched files.
             state = self._daemon.state.get(fs.session_id)
             scope.turn_idx = state.turns_seen if state else scope.turn_idx
-            await self._emit_snapshot(scope, fs)
+            await self._emit_snapshot(scope, fs, pub_kwargs=_pub_kwargs)
             return
 
         if ev.kind == "assistant_message" and ev.new_turn:
@@ -111,9 +125,16 @@ class ScopeWorker:
             if new_turn_idx == scope.last_snapshot_turn:
                 return
             scope.turn_idx = new_turn_idx
-            await self._emit_snapshot(scope, fs)
+            await self._emit_snapshot(scope, fs, pub_kwargs=_pub_kwargs)
 
-    async def _emit_snapshot(self, scope: _SessionScope, fs) -> None:
+    async def _emit_snapshot(
+        self,
+        scope: _SessionScope,
+        fs,
+        *,
+        pub_kwargs: dict[str, object] | None = None,
+    ) -> None:
+        _kw = pub_kwargs or {}
         from .mode_profile import (
             active_profile_for_project,
             session_mode_for_project,
@@ -176,6 +197,7 @@ class ScopeWorker:
                         "label": profile.scope_event_label,
                         "session_mode": mode_label or profile.name,
                     },
+                    **_kw,
                 )
             except Exception:
                 log.exception("live publish failed (scope_snapshot)")
@@ -203,6 +225,7 @@ class ScopeWorker:
                             "threshold": creep_threshold,
                             "tool_kinds": dict(scope.tool_kinds),
                         },
+                        **_kw,
                     )
                 except Exception:
                     log.exception("live publish failed (scope_creep)")

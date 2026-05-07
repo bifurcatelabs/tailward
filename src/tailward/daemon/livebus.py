@@ -161,7 +161,19 @@ class LiveBus:
         project_hash: str,
         event_type: str,
         payload: dict[str, Any],
+        *,
+        broadcast: bool = True,
+        ts: float | None = None,
     ) -> LiveEvent:
+        # ``broadcast=False`` persists the event but skips the
+        # in-memory recent cache and the SSE subscriber fan-out.
+        # Used by the watcher's backlog/seed path so historical
+        # JSONL replay populates the ``live_events`` table (so the
+        # past-session view of a seeded project shows real turns)
+        # without flooding the live feed with stale activity.
+        # ``ts`` overrides the event's ``created_at`` so the
+        # persisted row carries the original event's timestamp,
+        # not the insert time.
         if event_type not in EVENT_TYPES:
             raise ValueError(
                 f"unknown live event type {event_type!r}; "
@@ -173,12 +185,17 @@ class LiveBus:
             type=event_type,
             payload=payload,
         )
+        if ts is not None:
+            ev.created_at = ts
 
         if self._persist is not None:
             try:
                 ev.id = await self._persist(ev)
             except Exception:
                 log.exception("livebus: persist failed for %s", event_type)
+
+        if not broadcast:
+            return ev
 
         recent = self._recent.setdefault(
             session_id, deque(maxlen=self._recent_per_session)
