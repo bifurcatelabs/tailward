@@ -23,6 +23,18 @@ on:
   push:
     tags:
       - "v*"
+  # Manual trigger for smoke-testing the workflow infrastructure
+  # without burning a real Trusted Signing transaction. Default
+  # ``dry_run=true`` is intentional — clicking "Run workflow" with
+  # no changes does the safe thing. To fully exercise signing from
+  # a dispatch (instead of from a tag push), uncheck dry_run in the
+  # Actions UI.
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Skip Azure signing + release creation (smoke-tests build only)"
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -106,6 +118,11 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Sign Windows artifacts via Azure Trusted Signing
+        # Skipped on dispatch with dry_run=true (default for manual
+        # runs). Tag pushes always sign — ``inputs.dry_run`` is
+        # undefined on push triggers and the comparison evaluates as
+        # not-equal-to-true.
+        if: ${{ inputs.dry_run != true }}
         uses: azure/trusted-signing-action@v0.5
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -216,6 +233,10 @@ jobs:
   publish:
     name: create draft github release
     needs: [build-windows, build-linux]
+    # Skipped on dispatch with dry_run=true. Build artifacts still
+    # land on the workflow run page (downloadable from there) — no
+    # release polluting the Releases page on smoke-test runs.
+    if: ${{ inputs.dry_run != true }}
     runs-on: ubuntu-latest
     permissions:
       contents: write    # required for creating the release
