@@ -1246,3 +1246,40 @@ class Ledger:
         ) as cur:
             row = await cur.fetchone()
         return int(row["n"]) if row else 0
+
+    # ------- per-project seed flag -------
+
+    async def is_project_seeded(self, project_hash: str) -> bool:
+        """True if the user has opted this project into deep-parse on
+        startup. Non-seeded projects are enumerated only (session rows
+        written from filesystem inspection, content not parsed)."""
+        async with self.conn.execute(
+            "SELECT 1 FROM seeded_projects WHERE project_hash=?",
+            (project_hash,),
+        ) as cur:
+            row = await cur.fetchone()
+        return row is not None
+
+    async def mark_project_seeded(self, project_hash: str) -> None:
+        """Record that the user has opted this project into deep-parse.
+        Idempotent — re-seeding is a no-op (preserves the original
+        seeded_at timestamp)."""
+        await self.conn.execute(
+            """
+            INSERT INTO seeded_projects(project_hash, seeded_at)
+            VALUES(?, ?)
+            ON CONFLICT(project_hash) DO NOTHING
+            """,
+            (project_hash, _now_iso()),
+        )
+        await self.conn.commit()
+
+    async def seeded_project_hashes(self) -> set[str]:
+        """All currently-seeded project hashes. Returned as a set so
+        the watcher's prime-pass loop can do an O(1) check per
+        JSONL file without a per-file SQL roundtrip."""
+        async with self.conn.execute(
+            "SELECT project_hash FROM seeded_projects"
+        ) as cur:
+            rows = await cur.fetchall()
+        return {row["project_hash"] for row in rows}

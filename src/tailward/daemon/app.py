@@ -907,6 +907,36 @@ def create_app() -> FastAPI:
     async def api_drift(ph: str) -> list[dict]:
         return await daemon.ledger.recent_drift(ph)
 
+    @app.get("/api/projects/{ph}/seeded")
+    async def api_is_project_seeded(ph: str) -> dict[str, Any]:
+        """Whether the project is opted into deep-parse on startup.
+
+        UI uses this to render the per-project "seeded" indicator on
+        the project list and to decide whether to show the Seed
+        button in default vs already-seeded state."""
+        return {"project_hash": ph, "seeded": await daemon.ledger.is_project_seeded(ph)}
+
+    @app.post("/api/projects/{ph}/seed")
+    async def api_seed_project(ph: str) -> dict[str, Any]:
+        """Opt the project into deep-parse on startup. Triggers an
+        immediate parse pass over its existing JSONL content. Workers
+        fire per the backlog/realtime distinction (rule-based yes,
+        LLM-cost no — see ``project_llm_inference_load_principles.md``).
+
+        Idempotent — re-seeding a seeded project re-parses without
+        changing the ``seeded_at`` timestamp."""
+        if not daemon.watcher:
+            raise HTTPException(
+                status_code=503,
+                detail="watcher not initialized; daemon may still be starting",
+            )
+        files_seeded = await daemon.watcher.seed_project(ph)
+        return {
+            "ok": True,
+            "project_hash": ph,
+            "files_seeded": files_seeded,
+        }
+
     # Mount web UI (M9). Import lazily so M0 boots even if templates missing.
     try:
         from ..web.routes import mount_web

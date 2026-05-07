@@ -300,4 +300,17 @@ SCHEMA_STATEMENTS: list[str] = [
     CREATE INDEX IF NOT EXISTS idx_llm_metrics_kind_id
         ON llm_call_metrics(call_kind, id);
     """,
+    # ---- per-project seed flag ----
+    # Tracks which projects the user has explicitly opted into deep-parse
+    # for. Watcher's prime pass parses historical session content (plus
+    # fires rule-based workers) only for seeded projects; non-seeded
+    # projects are enumerated only (session rows written, content not
+    # parsed). LLM-call workers respect ``is_backlog`` regardless — see
+    # ``project_llm_inference_load_principles.md``.
+    """
+    CREATE TABLE IF NOT EXISTS seeded_projects (
+        project_hash TEXT PRIMARY KEY,
+        seeded_at TEXT NOT NULL
+    );
+    """,
 ]

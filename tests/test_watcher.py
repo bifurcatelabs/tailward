@@ -7,7 +7,17 @@ import pytest
 
 from tailward.daemon.state import StateStore
 from tailward.daemon.watcher import TranscriptWatcher
+from tailward.paths import project_hash
 from tailward.storage.ledger import Ledger
+
+
+async def _seed_cwd(ledger: Ledger, cwd: str) -> None:
+    """Mark a project (identified by its cwd) as seeded so the
+    watcher's prime pass parses its existing JSONL content. The
+    daemon's prime-pass behavior is opt-in per `seeded_projects`
+    table; tests that drop fixture content before `watcher.start()`
+    must seed first or prime will skip the content."""
+    await ledger.mark_project_seeded(project_hash(cwd))
 
 
 @pytest.mark.asyncio
@@ -26,6 +36,8 @@ async def test_watcher_picks_up_existing_jsonl(tmp_path: Path) -> None:
 
     ledger = Ledger()
     await ledger.connect()
+    # Sample fixture has cwd="/tmp/example".
+    await _seed_cwd(ledger, "/tmp/example")
     try:
         state = StateStore()
         events: list = []
@@ -73,6 +85,8 @@ async def test_exclude_paths_skips_matching_project(tmp_path: Path) -> None:
 
     ledger = Ledger()
     await ledger.connect()
+    # _write_minimal_jsonl uses cwd="/p"; seed so prime parses it.
+    await _seed_cwd(ledger, "/p")
     try:
         state = StateStore()
         seen: list[str] = []
@@ -107,6 +121,8 @@ async def test_watch_paths_whitelists_only_listed(tmp_path: Path) -> None:
 
     ledger = Ledger()
     await ledger.connect()
+    # _write_minimal_jsonl uses cwd="/p"; seed so prime parses it.
+    await _seed_cwd(ledger, "/p")
     try:
         state = StateStore()
         seen: list[str] = []
@@ -175,6 +191,11 @@ async def test_filestate_rehydrates_project_from_session_state(
 
     ledger = Ledger()
     await ledger.connect()
+    # The watcher's prime _is_seeded check reads the first event's cwd
+    # ("C:/warden/frontend") to compute the project_hash. Seed that
+    # hash so prime parses; the test then asserts FileState rehydrates
+    # the canonical_hash from session_state, not the subdir hash.
+    await _seed_cwd(ledger, "C:/warden/frontend")
     try:
         # Pre-seed session_state as it would be after a prior daemon run.
         await ledger.upsert_session(sid, canonical_hash, canonical_path)
@@ -210,6 +231,8 @@ async def test_watch_paths_accepts_desanitized_form(tmp_path: Path) -> None:
 
     ledger = Ledger()
     await ledger.connect()
+    # _write_minimal_jsonl uses cwd="/p"; seed so prime parses it.
+    await _seed_cwd(ledger, "/p")
     try:
         state = StateStore()
         seen: list[str] = []
@@ -236,6 +259,59 @@ async def test_watch_paths_accepts_desanitized_form(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_non_seeded_project_skipped_on_prime_seed_then_parses(
+    tmp_path: Path,
+) -> None:
+    """End-to-end seed mechanism: a project whose JSONL content exists
+    before watcher start is NOT parsed by the prime pass when the
+    project is non-seeded. After ``seed_project()`` runs, that same
+    content is parsed (with ``is_backlog=True`` so LLM workers skip).
+
+    Regression guard for the v3 launch-UX fix: every daemon start
+    should NOT parse arbitrary historical projects without explicit
+    user opt-in. The Seed mechanism is the user opt-in surface.
+    """
+    claude_root = tmp_path / "claude"
+    _write_minimal_jsonl(claude_root / "C--example" / "session-x.jsonl")
+
+    ledger = Ledger()
+    await ledger.connect()
+    # Deliberately do NOT seed up front — exercises the skip path.
+    try:
+        state = StateStore()
+        captured: list[tuple[bool, str | None]] = []
+
+        async def capture(ev, fs, is_backlog=False):
+            captured.append((is_backlog, ev.kind))
+
+        watcher = TranscriptWatcher(
+            state, ledger, on_event=capture, root=claude_root
+        )
+        await watcher.start()
+        await asyncio.sleep(0.3)
+
+        assert not captured, (
+            "non-seeded project should be skipped on prime; "
+            f"got {len(captured)} unexpected events"
+        )
+
+        # Seed and verify content now flows through.
+        target_hash = project_hash("/p")  # _write_minimal_jsonl uses cwd="/p"
+        files_seeded = await watcher.seed_project(target_hash)
+        await asyncio.sleep(0.2)
+        await watcher.stop()
+
+        assert files_seeded == 1, f"expected 1 file seeded, got {files_seeded}"
+        assert captured, "seed_project should have parsed the JSONL content"
+        # All seeded events must carry is_backlog=True so LLM workers skip them.
+        assert all(is_bl for is_bl, _ in captured), (
+            "seed_project events should be tagged is_backlog=True"
+        )
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
 async def test_prime_pass_tags_events_as_backlog(tmp_path: Path) -> None:
     """Events parsed from JSONL content that existed at watcher start
     must be tagged ``is_backlog=True``. Real-time events arriving after
@@ -254,6 +330,8 @@ async def test_prime_pass_tags_events_as_backlog(tmp_path: Path) -> None:
 
     ledger = Ledger()
     await ledger.connect()
+    # _write_minimal_jsonl uses cwd="/p"; seed so prime parses it.
+    await _seed_cwd(ledger, "/p")
     try:
         state = StateStore()
         captured: list[bool] = []

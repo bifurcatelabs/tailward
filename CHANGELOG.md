@@ -7,6 +7,33 @@ This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.htm
 
 ## [Unreleased]
 
+### Added
+- **Per-project Seed mechanism: opt-in deep-parse for historical
+  sessions.** New `seeded_projects` table + ledger methods (`is_project_seeded`,
+  `mark_project_seeded`, `seeded_project_hashes`); new daemon API
+  endpoints `GET /api/projects/{ph}/seeded` and `POST /api/projects/{ph}/seed`.
+  Watcher's prime pass now gates parsing per project: seeded projects
+  parse historical content (subject to the backlog/realtime distinction
+  — rule-based workers still fire, LLM-cost ones skip); non-seeded
+  projects have non-empty JSONLs offset-marked at EOF so subsequent
+  appends parse only the delta. Watcher's `start()` now blocks until
+  the prime pass completes; lifespan startup callers see a fully-primed
+  daemon before the daemon starts serving.
+
+  This is the "d-g" backend kernel of the larger redesign. Frontend
+  Seed button + per-project "seeded" indicator land in the next
+  commit. Per-session manual analysis triggers (drift/rubric/audit on
+  closed sessions) are deferred to the future user-analytics panel
+  surface (Task #18) rather than bolted onto Reflection.
+
+  Project-hash resolution: the watcher reads each JSONL's first
+  event line to extract the canonical cwd, then computes
+  `project_hash(cwd)` to check against the seeded set. Falls back to
+  the sanitized-folder-name derivation when the file is empty or the
+  first line lacks a cwd. This matches what the API endpoint and UI
+  use, so seeding a project from the UI checks correctly against the
+  watcher's prime decisions.
+
 ### Changed
 - **Watcher backlog/realtime distinction; LLM-call workers skip
   backlog events.** Events parsed during the watcher's startup

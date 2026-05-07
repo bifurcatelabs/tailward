@@ -122,6 +122,13 @@ class TranscriptWatcher:
         # Config.watch_paths / Config.exclude_paths for semantics.
         self._watch_paths = list(watch_paths or ())
         self._exclude_paths = list(exclude_paths or ())
+        # Project hashes the user has opted into deep-parse via the
+        # Seed mechanism. Loaded from the ledger on ``_run`` start;
+        # mutated in-memory by ``seed_project``. Non-seeded projects
+        # have their JSONLs offset-marked at EOF on prime so
+        # pre-existing content stays invisible until seeded, while
+        # real-time appends (via the awatch loop) still process.
+        self._seeded_hashes: set[str] = set()
 
     def _path_allowed(self, jsonl_path: Path) -> bool:
         if self._exclude_paths and _path_matches_filter(
@@ -136,7 +143,18 @@ class TranscriptWatcher:
 
     async def start(self) -> None:
         self._stop.clear()
+        # ``_prime_done`` lets ``start()`` block until the prime pass
+        # has finished. Without this, the watcher task is scheduled
+        # but may not begin executing before downstream code (tests
+        # writing fixture events, the daemon serving requests) starts
+        # mutating the watched filesystem. Prime would then see the
+        # mutations as "pre-existing content" and mark-eof the offset,
+        # silently dropping events. Lifespan startup awaits start(),
+        # so blocking here ensures the daemon is fully primed before
+        # serving anything.
+        self._prime_done = asyncio.Event()
         self._task = asyncio.create_task(self._run(), name="transcript-watcher")
+        await self._prime_done.wait()
 
     async def stop(self) -> None:
         self._stop.set()
@@ -154,6 +172,8 @@ class TranscriptWatcher:
             while not self._root.exists() and not self._stop.is_set():
                 await asyncio.sleep(2.0)
             if self._stop.is_set():
+                # Unblock start() before bailing.
+                self._prime_done.set()
                 return
 
         # Hydrate in-memory SessionState from the persisted session_state
@@ -165,7 +185,25 @@ class TranscriptWatcher:
         except Exception:
             log.exception("session-state hydrate failed; continuing fresh")
 
-        await self._prime_existing()
+        # Load the seeded-project set. Non-seeded projects have their
+        # JSONLs skipped on prime; only their post-startup appends
+        # process via the awatch loop.
+        try:
+            self._seeded_hashes = await self._ledger.seeded_project_hashes()
+        except Exception:
+            log.exception(
+                "seeded_project_hashes load failed; treating no projects "
+                "as seeded (prime pass will skip all historical content)"
+            )
+            self._seeded_hashes = set()
+
+        try:
+            await self._prime_existing()
+        finally:
+            # Signal start() that prime is done (or has failed) so
+            # the lifespan caller unblocks. Done in finally so an
+            # exception during prime doesn't leave start() hung.
+            self._prime_done.set()
 
         try:
             async for changes in awatch(
@@ -192,14 +230,148 @@ class TranscriptWatcher:
             log.exception("transcript watcher exited on unexpected RuntimeError: %s", e)
 
     async def _prime_existing(self) -> None:
-        # Initial scan: events parsed here predate watcher start; they
-        # are "backlog." Handlers should skip LLM-call workers on these
-        # but still record structural data so the UI can render the
-        # full session content.
+        # Initial scan. Events parsed here predate watcher start, so
+        # they're "backlog" (handlers skip LLM-call workers on these
+        # while still recording structural data for UI rendering).
+        #
+        # Per-project gating: only seeded projects get their historical
+        # content parsed. Non-seeded non-empty files have their JSONL
+        # offsets advanced to EOF — that prevents the first real-time
+        # append from being read against a stale offset and firing a
+        # burst of "new" events on pre-existing content. Empty files
+        # fall through to a normal ``_process_file`` call that will
+        # early-return on size==offset==0; this preserves the
+        # ``self._files`` registration that downstream awatch processing
+        # expects on first encounter of a freshly-created file.
         for jsonl in self._root.rglob("*.jsonl"):
             if not self._path_allowed(jsonl):
                 continue
+            if self._is_seeded(jsonl):
+                await self._process_file(jsonl, is_backlog=True)
+            else:
+                try:
+                    size = jsonl.stat().st_size
+                except FileNotFoundError:
+                    continue
+                if size == 0:
+                    # Empty file: register FileState via _process_file
+                    # (which will early-return), no offset write needed.
+                    await self._process_file(jsonl, is_backlog=True)
+                else:
+                    await self._mark_offset_at_eof(jsonl)
+
+    def _is_seeded(self, jsonl_path: Path) -> bool:
+        """Check whether the project containing this JSONL has been
+        opted into deep-parse via the Seed mechanism.
+
+        Reads the first event line from the JSONL to extract its cwd
+        and compute the canonical project_hash. Falls back to the
+        sanitized-folder-name derivation when the file is empty or
+        the first line lacks a cwd. Reading first-line is necessary
+        because Claude Code's sanitized folder names don't always
+        round-trip cleanly to the original path — sessions in the
+        same project can share a cwd that doesn't match what the
+        sanitization heuristic produces. The cwd-derived hash is
+        what the ``/seed`` API and the UI use, so checking against
+        that ensures the seeded set actually matches user intent."""
+        try:
+            with open(jsonl_path, "rb") as f:
+                first = f.readline()
+        except OSError:
+            return False
+        if first:
+            ev = parse_line(first.decode("utf-8", errors="replace"))
+            if ev is not None and ev.cwd:
+                return project_hash(ev.cwd) in self._seeded_hashes
+        # Empty file or first line lacks cwd — best-effort fallback.
+        try:
+            rel = jsonl_path.relative_to(self._root)
+        except ValueError:
+            return False
+        if not rel.parts:
+            return False
+        sanitized = rel.parts[0]
+        candidate_hash = project_hash(_sanitize_to_path(sanitized))
+        return candidate_hash in self._seeded_hashes
+
+    async def _mark_offset_at_eof(self, path: Path) -> None:
+        """For non-seeded JSONLs at prime time: persist an offset equal
+        to the current file size so the awatch loop's first event
+        reads only post-startup appends — not pre-existing content
+        that would otherwise be processed as 'new' real-time events
+        and fire LLM-call workers on backlog material.
+
+        Empty files are skipped (offset 0 == file size 0 is a no-op
+        anyway, and writing it can interact awkwardly with watchfiles
+        timing on freshly-touched fixture files)."""
+        try:
+            size = path.stat().st_size
+        except FileNotFoundError:
+            return
+        if size == 0:
+            return
+        session_id = path.stem
+        try:
+            await self._ledger.set_offset(session_id, str(path), size)
+        except Exception:
+            log.exception(
+                "set_offset(EOF) failed for %s; non-seeded project may "
+                "burst-fire workers on first real-time append",
+                session_id,
+            )
+
+    async def seed_project(self, project_hash_value: str) -> int:
+        """Mark a project as seeded and parse all its existing JSONL
+        content. Returns the number of files processed.
+
+        Workers fire per the backlog/realtime distinction — rule-based
+        (constraints, scope) on every event, LLM-cost (drift, audit,
+        rubric, user_rubric, synthesis) skip backlog. So seeding a
+        project is cheap on the user's local LLM even for projects
+        with long history.
+
+        Idempotent: re-seeding an already-seeded project re-parses
+        from scratch (offset reset to 0). Useful if the user wants to
+        rebuild the ledger view of a project's history.
+        """
+        await self._ledger.mark_project_seeded(project_hash_value)
+        self._seeded_hashes.add(project_hash_value)
+
+        count = 0
+        for jsonl in self._root.rglob("*.jsonl"):
+            if not self._path_allowed(jsonl):
+                continue
+            # Resolve the JSONL's project via cwd-from-first-line
+            # (preferred, matches what /seed received from the UI)
+            # with sanitized-folder-name as fallback.
+            candidate_hash: str | None = None
+            try:
+                with open(jsonl, "rb") as f:
+                    first = f.readline()
+            except OSError:
+                first = b""
+            if first:
+                ev = parse_line(first.decode("utf-8", errors="replace"))
+                if ev is not None and ev.cwd:
+                    candidate_hash = project_hash(ev.cwd)
+            if candidate_hash is None:
+                try:
+                    rel = jsonl.relative_to(self._root)
+                except ValueError:
+                    continue
+                if not rel.parts:
+                    continue
+                candidate_hash = project_hash(_sanitize_to_path(rel.parts[0]))
+            if candidate_hash != project_hash_value:
+                continue
+            session_id = jsonl.stem
+            # Reset offset and forget any cached FileState so
+            # ``_process_file`` reads from byte 0 and re-parses.
+            await self._ledger.set_offset(session_id, str(jsonl), 0)
+            self._files.pop(jsonl, None)
             await self._process_file(jsonl, is_backlog=True)
+            count += 1
+        return count
 
     async def _process_file(self, path: Path, *, is_backlog: bool = False) -> None:
         fs = self._files.get(path)
