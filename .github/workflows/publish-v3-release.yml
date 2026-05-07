@@ -237,7 +237,7 @@ jobs:
 
   build-macos:
     name: build + sign macos
-    runs-on: macos-15
+    runs-on: macos-26
     environment: release
     permissions:
       contents: read
@@ -259,6 +259,18 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Diagnostic — runner arch + rustc host
+        # Surfaces both the OS-reported architecture and the toolchain's
+        # host triple so a future arch-mismatch failure points at the
+        # right side: runner-pool issue (Intel served on an arm-labeled
+        # image) vs toolchain-install issue (rustup picked x86_64 on an
+        # arm host via some Rosetta path).
+        run: |
+          echo "uname -m: $(uname -m)"
+          echo "arch:     $(arch)"
+          rustc -vV
+        shell: bash
 
       - name: Cache cargo build outputs
         uses: Swatinem/rust-cache@v2
