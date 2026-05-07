@@ -41,7 +41,15 @@ def _path_matches_filter(jsonl_path: Path, root: Path, entries: list[str]) -> bo
 
 log = logging.getLogger(__name__)
 
-EventHandler = Callable[[TranscriptEvent, "FileState"], Awaitable[None]]
+EventHandler = Callable[[TranscriptEvent, "FileState", bool], Awaitable[None]]
+"""Callback signature: ``(event, file_state, is_backlog) -> Awaitable[None]``.
+
+``is_backlog=True`` for events parsed from existing file content during
+``_prime_existing`` (the initial scan at watcher start). ``False`` for
+events that arrive via filesystem-change notifications after start.
+Handlers use this to skip costly LLM-call workers on backlog while
+still recording structural data (turns, tool calls) to the ledger
+and live-bus for display."""
 
 
 class FileState:
@@ -172,7 +180,9 @@ class TranscriptWatcher:
                         continue
                     if not self._path_allowed(p):
                         continue
-                    await self._process_file(p)
+                    # Real-time path: filesystem change after watcher
+                    # start. Events get full worker enqueue.
+                    await self._process_file(p, is_backlog=False)
         except RuntimeError as e:
             # watchfiles raises if the watched root disappears mid-run; treat
             # that as shutdown. Anything else is a real bug — log it so it
@@ -182,12 +192,16 @@ class TranscriptWatcher:
             log.exception("transcript watcher exited on unexpected RuntimeError: %s", e)
 
     async def _prime_existing(self) -> None:
+        # Initial scan: events parsed here predate watcher start; they
+        # are "backlog." Handlers should skip LLM-call workers on these
+        # but still record structural data so the UI can render the
+        # full session content.
         for jsonl in self._root.rglob("*.jsonl"):
             if not self._path_allowed(jsonl):
                 continue
-            await self._process_file(jsonl)
+            await self._process_file(jsonl, is_backlog=True)
 
-    async def _process_file(self, path: Path) -> None:
+    async def _process_file(self, path: Path, *, is_backlog: bool = False) -> None:
         fs = self._files.get(path)
         if fs is None:
             fs = FileState(path)
@@ -246,13 +260,15 @@ class TranscriptWatcher:
             ev = parse_line(line)
             if ev is None:
                 continue
-            await self._ingest(ev, fs)
+            await self._ingest(ev, fs, is_backlog=is_backlog)
 
         fs.offset = new_offset
         if fs.session_id:
             await self._ledger.set_offset(fs.session_id, str(path), fs.offset)
 
-    async def _ingest(self, ev: TranscriptEvent, fs: FileState) -> None:
+    async def _ingest(
+        self, ev: TranscriptEvent, fs: FileState, *, is_backlog: bool = False
+    ) -> None:
         session_id = ev.session_id or fs.session_id
         if session_id and fs.session_id is None:
             fs.session_id = session_id
@@ -339,7 +355,7 @@ class TranscriptWatcher:
 
         if self._on_event is not None:
             try:
-                await self._on_event(ev, fs)
+                await self._on_event(ev, fs, is_backlog)
             except Exception:
                 log.exception("on_event handler raised")
 

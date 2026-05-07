@@ -5,6 +5,38 @@ All notable changes to tailward are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Watcher backlog/realtime distinction; LLM-call workers skip
+  backlog events.** Events parsed during the watcher's startup
+  prime pass are now tagged ``is_backlog=True``; real-time events
+  arriving via filesystem-change notifications are tagged ``False``.
+  The ``on_event`` handler uses this to skip LLM-call workers
+  (drift, audit, rubric, user_rubric, synthesis) on backlog content,
+  while still firing rule-based workers (constraints, scope) and
+  recording structural data (ledger writes, live-bus turn markers)
+  so the UI renders full session content.
+
+  Motivation: for the v3 Tauri desktop app, every launch was firing
+  ~60s of LLM activity catching up on transcript history —
+  structurally bad UX for the per-launch app model. v2 long-running
+  daemons rarely hit this because the prime pass only fires once
+  per restart. This change benefits both contexts: v3 launches
+  cleanly with no startup LLM activity; v2 restart no longer
+  bombards the local LLM with backlog analysis.
+
+  Rule-based workers (constraints, scope) intentionally still fire
+  on backlog — they're effectively free (regex / arithmetic) and
+  produce useful audit signal even on historical content. The
+  classification: anything that costs an LLM call skips backlog;
+  anything that doesn't, runs.
+
+  Follow-up work: per-project Seed UX (manual deep-parse +
+  rule-based-worker firing on historical content via opt-in flag),
+  per-session manual analysis triggers (will land in a future
+  user-analytics panel surface, not bolted onto Reflection).
+
 ## [v2.10.0] — 2026-05-06
 
 ### Added

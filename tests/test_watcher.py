@@ -30,7 +30,7 @@ async def test_watcher_picks_up_existing_jsonl(tmp_path: Path) -> None:
         state = StateStore()
         events: list = []
 
-        async def capture(ev, fs):
+        async def capture(ev, fs, is_backlog=False):
             events.append(ev)
 
         watcher = TranscriptWatcher(state, ledger, on_event=capture, root=claude_root)
@@ -77,7 +77,7 @@ async def test_exclude_paths_skips_matching_project(tmp_path: Path) -> None:
         state = StateStore()
         seen: list[str] = []
 
-        async def capture(ev, fs):
+        async def capture(ev, fs, is_backlog=False):
             if fs.session_id:
                 seen.append(fs.session_id)
 
@@ -111,7 +111,7 @@ async def test_watch_paths_whitelists_only_listed(tmp_path: Path) -> None:
         state = StateStore()
         seen: list[str] = []
 
-        async def capture(ev, fs):
+        async def capture(ev, fs, is_backlog=False):
             if fs.session_id:
                 seen.append(fs.session_id)
 
@@ -214,7 +214,7 @@ async def test_watch_paths_accepts_desanitized_form(tmp_path: Path) -> None:
         state = StateStore()
         seen: list[str] = []
 
-        async def capture(ev, fs):
+        async def capture(ev, fs, is_backlog=False):
             if fs.session_id:
                 seen.append(fs.session_id)
 
@@ -231,5 +231,49 @@ async def test_watch_paths_accepts_desanitized_form(tmp_path: Path) -> None:
 
         assert "w-1" in seen
         assert "o-1" not in seen
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_prime_pass_tags_events_as_backlog(tmp_path: Path) -> None:
+    """Events parsed from JSONL content that existed at watcher start
+    must be tagged ``is_backlog=True``. Real-time events arriving after
+    start are tagged ``False``. Downstream LLM-call workers use this
+    distinction to skip the rapid-fire activity that otherwise fires
+    on every daemon startup catching up on transcript history.
+
+    Regression guard: if the prime path stops tagging backlog events,
+    every daemon launch would fire LLM analysis on every historical
+    turn — exactly the v3 launch-UX problem this distinction exists
+    to prevent.
+    """
+    claude_root = tmp_path / "claude"
+    _write_minimal_jsonl(claude_root / "C--example" / "session-a.jsonl")
+    _write_minimal_jsonl(claude_root / "C--example" / "session-b.jsonl")
+
+    ledger = Ledger()
+    await ledger.connect()
+    try:
+        state = StateStore()
+        captured: list[bool] = []
+
+        async def capture(ev, fs, is_backlog=False):
+            captured.append(is_backlog)
+
+        watcher = TranscriptWatcher(
+            state, ledger, on_event=capture, root=claude_root
+        )
+        await watcher.start()
+        await asyncio.sleep(0.5)
+        await watcher.stop()
+
+        assert captured, "watcher should have emitted events from prime"
+        # Every event from this run came from the prime pass — fixtures
+        # were written before watcher start. All must be tagged backlog.
+        assert all(captured), (
+            f"prime pass should tag all events is_backlog=True; "
+            f"got {sum(1 for x in captured if not x)} untagged"
+        )
     finally:
         await ledger.close()

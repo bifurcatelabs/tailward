@@ -93,7 +93,17 @@ def create_app() -> FastAPI:
 
         daemon.live.set_persister(_persist_live)
 
-        async def on_event(ev, fs):
+        async def on_event(ev, fs, is_backlog: bool = False):
+            # ``is_backlog=True`` for events parsed from existing JSONL
+            # content during the watcher's prime pass at startup.
+            # ``False`` for real-time events arriving via filesystem
+            # change notifications. LLM-call workers (drift, audit,
+            # rubric, user_rubric, synthesis) skip backlog events to
+            # prevent every daemon startup from firing tens of LLM
+            # calls catching up on history. Rule-based workers
+            # (constraints, scope) and structural-data writes (ledger,
+            # live-bus markers) still fire — those are effectively free
+            # and produce useful audit signal even on backlog content.
             # Exfiltration helper: scans any text that's about to land
             # in live_events.payload, emits an exfiltration_alert per
             # match, and returns the redacted form. Wrapping every
@@ -186,16 +196,24 @@ def create_app() -> FastAPI:
             # turns often carry strong first-person claims about external
             # state ("I just deleted X") that tailward should check against the
             # actual repo before that context shapes the next assistant turn.
-            if daemon.drift is not None and ev.kind == "assistant_message" and fs.session_id:
-                await daemon.drift.enqueue(ev, fs)
-            if (
-                daemon.audit is not None
-                and ev.kind in ("assistant_message", "user_message")
-                and fs.session_id
-            ):
-                await daemon.audit.enqueue(ev, fs)
+            # Both are LLM-cost; skipped on backlog.
+            if not is_backlog:
+                if daemon.drift is not None and ev.kind == "assistant_message" and fs.session_id:
+                    await daemon.drift.enqueue(ev, fs)
+                if (
+                    daemon.audit is not None
+                    and ev.kind in ("assistant_message", "user_message")
+                    and fs.session_id
+                ):
+                    await daemon.audit.enqueue(ev, fs)
 
-            # v1.1 failure-mode workers
+            # Rule-based and LLM-based workers under one project gate.
+            # Rule-based (constraints, scope) ALWAYS fire — they're pure
+            # regex/arithmetic, effectively free, and produce useful
+            # audit signal on backlog content. LLM-based (rubric,
+            # user_rubric, synthesis) skip backlog to prevent the
+            # rapid-fire LLM activity at daemon startup catching up on
+            # history.
             if fs.session_id and fs.project_hash:
                 if daemon.constraints is not None and ev.kind in (
                     "tool_use",
@@ -207,25 +225,26 @@ def create_app() -> FastAPI:
                     "assistant_message",
                 ):
                     await daemon.scope.enqueue(ev, fs)
-                if daemon.rubric is not None and ev.kind == "assistant_message":
-                    await daemon.rubric.enqueue(ev, fs)
-                if (
-                    getattr(daemon, "user_rubric", None) is not None
-                    and ev.kind == "user_message"
-                    and not ev.synthesized
-                    and _looks_like_human_prompt(ev)
-                ):
-                    await daemon.user_rubric.enqueue(ev, fs)
-                if (
-                    getattr(daemon, "synthesis", None) is not None
-                    and ev.kind in (
-                        "assistant_message",
-                        "user_message",
-                        "tool_use",
-                        "tool_result",
-                    )
-                ):
-                    await daemon.synthesis.enqueue(ev, fs)
+                if not is_backlog:
+                    if daemon.rubric is not None and ev.kind == "assistant_message":
+                        await daemon.rubric.enqueue(ev, fs)
+                    if (
+                        getattr(daemon, "user_rubric", None) is not None
+                        and ev.kind == "user_message"
+                        and not ev.synthesized
+                        and _looks_like_human_prompt(ev)
+                    ):
+                        await daemon.user_rubric.enqueue(ev, fs)
+                    if (
+                        getattr(daemon, "synthesis", None) is not None
+                        and ev.kind in (
+                            "assistant_message",
+                            "user_message",
+                            "tool_use",
+                            "tool_result",
+                        )
+                    ):
+                        await daemon.synthesis.enqueue(ev, fs)
 
             # Publish turn-level markers to the live bus so the web feed
             # sees activity even without worker findings. Fires at most
