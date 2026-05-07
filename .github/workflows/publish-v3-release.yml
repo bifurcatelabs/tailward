@@ -237,7 +237,7 @@ jobs:
 
   build-macos:
     name: build + sign macos
-    runs-on: macos-latest
+    runs-on: macos-15
     environment: release
     permissions:
       contents: read
