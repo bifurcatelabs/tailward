@@ -8,6 +8,8 @@
   let loading = $state(true);
   let error = $state(null);
   let projects = $state([]);
+  // project_hash -> 'idle' | 'seeding' | 'error'
+  let seedState = $state({});
 
   async function load() {
     loading = true;
@@ -25,6 +27,30 @@
   }
 
   $effect(() => { load(); });
+
+  /**
+   * Seed a project — opt it into deep-parse on startup. Backend
+   * marks the project seeded in the ``seeded_projects`` table and
+   * parses its existing JSONL content (with ``is_backlog=True`` so
+   * LLM workers skip per the load-respecting design). After
+   * completion, refresh the project list so the indicator reflects
+   * the new state.
+   */
+  async function seedProject(event, projectHash) {
+    event.preventDefault();
+    event.stopPropagation();
+    seedState = { ...seedState, [projectHash]: 'seeding' };
+    try {
+      const r = await fetch(`/api/projects/${projectHash}/seed`, {
+        method: 'POST',
+      });
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      seedState = { ...seedState, [projectHash]: 'idle' };
+      await load();
+    } catch (e) {
+      seedState = { ...seedState, [projectHash]: 'error' };
+    }
+  }
 
   function shortName(projectPath) {
     if (!projectPath) return '—';
@@ -76,6 +102,21 @@
             <span class="proj">{shortName(p.project_path)}</span>
             {#if p.session_mode}
               <span class="mode">{p.session_mode}</span>
+            {/if}
+            {#if p.seeded}
+              <span class="seeded" title="opted into deep-parse on daemon startup">seeded</span>
+            {:else}
+              <button
+                type="button"
+                class="seed-btn"
+                onclick={(e) => seedProject(e, p.project_hash)}
+                disabled={seedState[p.project_hash] === 'seeding'}
+                title="parse this project's historical session content (LLM workers skip on backlog)"
+              >
+                {seedState[p.project_hash] === 'seeding' ? 'seeding…' :
+                 seedState[p.project_hash] === 'error' ? 'seed failed' :
+                 'seed'}
+              </button>
             {/if}
           </div>
           <div class="path">{p.project_path}</div>
@@ -187,6 +228,40 @@
     background: rgba(232,153,104,0.10);
     color: var(--accent);
     border: 1px solid rgba(232,153,104,0.30);
+  }
+  .seeded {
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(123,180,140,0.10);
+    color: var(--ok, #7bb48c);
+    border: 1px solid rgba(123,180,140,0.30);
+    margin-left: auto;
+  }
+  .seed-btn {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: var(--mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    padding: 3px 9px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: border-color 120ms, color 120ms;
+  }
+  .seed-btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .seed-btn:disabled {
+    opacity: 0.5;
+    cursor: default;
   }
   .path {
     font-family: var(--mono);
