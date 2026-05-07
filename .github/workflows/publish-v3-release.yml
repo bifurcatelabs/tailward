@@ -77,7 +77,7 @@ jobs:
         # building tauri-cli from source.
         uses: taiki-e/install-action@v2
         with:
-          tool: tauri-cli@^2.0
+          tool: tauri-cli@2.11.0
 
       - name: Install Python deps + PyInstaller
         run: |
@@ -188,7 +188,7 @@ jobs:
       - name: Install Tauri CLI
         uses: taiki-e/install-action@v2
         with:
-          tool: tauri-cli@^2.0
+          tool: tauri-cli@2.11.0
 
       - name: Install Python deps + PyInstaller
         run: |
