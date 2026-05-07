@@ -14,10 +14,15 @@ name: publish v3 release
 # "Deployment branches and tags" rule restricts the actual gated
 # steps to v*.*.* (semver-only). Pre-release tags like
 # ``v3.0.0-rc1`` will trigger the workflow but block at the
-# Windows signing job until a maintainer relaxes the rule.
+# Windows + macOS signing jobs until a maintainer relaxes the rule.
 #
-# macOS is not currently supported. v3.0.0 ships Windows + Linux;
-# macOS lands when Apple-Silicon hardware is available.
+# macOS signs + notarizes via Apple Developer ID + notarytool,
+# driven by Tauri 2.x's built-in handling of the ``APPLE_*`` env
+# vars (cert imported into a temp keychain, app signed under
+# hardened runtime, submitted to Apple's notarytool, ticket
+# stapled into the .dmg). End-to-end install verification on a
+# real Mac is the only thing not covered by CI; arrange that
+# separately before announcing a release.
 
 on:
   push:
@@ -230,9 +235,101 @@ jobs:
             src-tauri/target/release/bundle/appimage/*.AppImage
             src-tauri/target/release/bundle/deb/*.deb
 
+  build-macos:
+    name: build + sign macos
+    runs-on: macos-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo build outputs
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install Tauri CLI
+        uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2.11.1
+
+      - name: Install Python deps + PyInstaller
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+          python -m pip install pyinstaller
+
+      - name: Build frontend (Svelte SPA)
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build PyInstaller daemon bundle
+        # macOS uses ``:`` separator for --add-data (vs ``;`` on Windows).
+        run: |
+          pyinstaller --onefile --name tailward-daemon --noconfirm \
+            --add-data "src/tailward/web/templates:tailward/web/templates" \
+            --add-data "src/tailward/web/static/dist:tailward/web/static/dist" \
+            src/tailward/daemon/__main__.py
+
+      - name: Place sidecar binary at Tauri's expected path
+        run: |
+          mkdir -p src-tauri/binaries
+          cp dist/tailward-daemon \
+            src-tauri/binaries/tailward-daemon-aarch64-apple-darwin
+
+      - name: Build Tauri app (release, signed + notarized on tag)
+        # When DRY_RUN=true the signing env vars are unset before
+        # ``cargo tauri build`` runs, so Tauri builds an unsigned
+        # .dmg (smoke-test path — no Apple notarization round-trip).
+        # When DRY_RUN!=true (tag push or non-dry dispatch), Tauri
+        # imports the cert into a temp keychain, signs the .app +
+        # bundled binaries with hardened runtime, submits to
+        # notarytool, waits for notarization, and staples the ticket
+        # into the .dmg.
+        working-directory: src-tauri
+        shell: bash
+        env:
+          DRY_RUN: ${{ inputs.dry_run }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ "$DRY_RUN" = "true" ]; then
+            unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
+          fi
+          cargo tauri build
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: tailward-macos
+          path: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+
   publish:
     name: create draft github release
-    needs: [build-windows, build-linux]
+    needs: [build-windows, build-linux, build-macos]
     # Skipped on dispatch with dry_run=true. Build artifacts still
     # land on the workflow run page (downloadable from there) — no
     # release polluting the Releases page on smoke-test runs.
