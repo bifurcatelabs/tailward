@@ -330,14 +330,15 @@ jobs:
           if [ "$DRY_RUN" = "true" ]; then
             unset APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID
           fi
-          cargo tauri build
+          rustup target add aarch64-apple-darwin
+          cargo tauri build --target aarch64-apple-darwin
 
       - name: Upload macOS artifacts
         uses: actions/upload-artifact@v7
         with:
           name: tailward-macos
           path: |
-            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
 
   publish:
     name: create draft github release
