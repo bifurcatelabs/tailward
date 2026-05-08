@@ -75,7 +75,8 @@ async def test_consolidator_writes_eight_mode_report(tmp_path: Path) -> None:
         # detector instance bound to the same daemon.
         detector = SessionCloseDetector(daemon)
         cs = SimpleNamespace(
-            session_id=session_id, project_hash=ph, project_path=str(proj)
+            session_id=session_id, project_hash=ph, project_path=str(proj),
+            is_backlog=False, last_seen_at=None,
         )
         await detector._consolidate(cs)  # noqa: SLF001
 
@@ -85,6 +86,75 @@ async def test_consolidator_writes_eight_mode_report(tmp_path: Path) -> None:
         for r in rows:
             assert 0.0 <= float(r["score"]) <= 5.0
             assert r["model_used"] == "test-consolidator"
+
+
+@pytest.mark.asyncio
+async def test_consolidator_skips_llm_on_backlog(tmp_path: Path) -> None:
+    """Backlog sessions (seeded historical, never observed live) honor
+    the no-LLM-on-backlog rule. Even with qwen wired up, the
+    consolidator skips the LLM call and lands a rule-based-only
+    session report. Live publishes carry the session's actual close
+    time as event_ts and skip broadcast so past-session views see
+    the report at the right point in time without flooding the live
+    feed.
+    """
+    proj = tmp_path / "close_backlog"
+    proj.mkdir()
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        # qwen is wired up — proves the gate is what's skipping the
+        # LLM call, not the absent-qwen branch.
+        modes = {
+            str(mid): {"score": 4.0, "evidence": "ev", "suggestion": "sug"}
+            for mid, _, _ in FAILURE_MODES
+        }
+        called = []
+
+        class _FakeQwenTracking:
+            payload = {"modes": modes}
+
+            async def complete_json(self, system: str, user: str, **kw) -> dict:
+                called.append(kw)
+                return self.payload
+
+            def resolve_model(self, kind: str) -> str:
+                return "test-consolidator"
+
+        daemon.qwen = _FakeQwenTracking()
+
+        session_id = "s-backlog"
+        ph = project_hash(str(proj))
+        await daemon.ledger.upsert_session(session_id, ph, str(proj), is_backlog=True)
+        # Seed a violation so the rule-based aggregator has input.
+        await daemon.ledger.record_constraint_violation(
+            session_id, ph,
+            tool_call_id="t1", rule_id="forbidden-bash:rmrf", rule_text="no rm -rf",
+            evidence="rm -rf /", severity="high",
+        )
+
+        sess_row = await daemon.ledger.get_session(session_id)
+        assert sess_row["is_backlog"] == 1
+
+        detector = SessionCloseDetector(daemon)
+        cs = SimpleNamespace(
+            session_id=session_id,
+            project_hash=ph,
+            project_path=str(proj),
+            is_backlog=True,
+            last_seen_at=sess_row["last_seen_at"],
+        )
+        await detector._consolidate(cs)  # noqa: SLF001
+
+        # LLM was not called.
+        assert called == []
+
+        # Report rows landed (rule-based fallback path).
+        rows = await daemon.ledger.session_report(session_id)
+        assert len(rows) == len(FAILURE_MODES)
+        # No LLM run, so model_used is None on every mode.
+        assert all(r["model_used"] is None for r in rows)
 
 
 @pytest.mark.asyncio
@@ -111,7 +181,8 @@ async def test_progress_aggregation_penalises_violations(tmp_path: Path) -> None
 
         detector = SessionCloseDetector(daemon)
         cs = SimpleNamespace(
-            session_id=session_id, project_hash=ph, project_path=str(proj)
+            session_id=session_id, project_hash=ph, project_path=str(proj),
+            is_backlog=False, last_seen_at=None,
         )
         await detector._consolidate(cs)  # noqa: SLF001
 

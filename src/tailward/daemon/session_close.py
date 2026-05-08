@@ -66,6 +66,12 @@ class _ClosedSession:
     session_id: str
     project_hash: str
     project_path: str
+    is_backlog: bool = False
+    # ISO last_seen_at carried through from the session_state row;
+    # used as the actual close-time stamp on backlog publishes so
+    # past-session views see the report at the right point in time
+    # rather than at consolidation-tick fire-time.
+    last_seen_at: str | None = None
 
 
 class SessionCloseDetector:
@@ -122,6 +128,8 @@ class SessionCloseDetector:
                 session_id=row["session_id"],
                 project_hash=row["project_hash"],
                 project_path=row["project_path"],
+                is_backlog=bool(row.get("is_backlog")),
+                last_seen_at=row.get("last_seen_at"),
             )
             try:
                 await self._consolidate(closed)
@@ -139,6 +147,22 @@ class SessionCloseDetector:
 
         progress_scores = self._aggregate_progress(violations, snapshots, rubric_rows)
 
+        # Backlog sessions (seeded historical content, never observed
+        # live) honor the no-LLM-on-backlog rule and stamp publishes
+        # with the session's actual close time + skip live broadcast.
+        # Past-session views still see the report; the live feed
+        # doesn't get flooded with stale "session closed" rows from
+        # six months ago.
+        close_ts: float | None = None
+        if cs.is_backlog and cs.last_seen_at:
+            parsed = _parse_iso(cs.last_seen_at)
+            if parsed is not None:
+                close_ts = parsed.timestamp()
+        publish_kw: dict[str, object] = {}
+        if cs.is_backlog:
+            publish_kw["broadcast"] = False
+            publish_kw["event_ts"] = close_ts
+
         live = getattr(self._daemon, "live", None)
         if live is not None:
             try:
@@ -147,13 +171,14 @@ class SessionCloseDetector:
                     cs.project_hash,
                     "report_progress",
                     {"scores": progress_scores, "stage": "aggregating"},
+                    **publish_kw,
                 )
             except Exception:
                 log.exception("live publish failed (report_progress)")
 
         model_used = None
         llm_scores: dict[int, dict] = {}
-        if self._daemon.qwen is not None:
+        if self._daemon.qwen is not None and not cs.is_backlog:
             try:
                 llm_scores = await self._call_consolidator(
                     cs, violations, snapshots, rubric_rows
@@ -197,17 +222,23 @@ class SessionCloseDetector:
                     cs.project_hash,
                     "report_ready",
                     {"session_id": cs.session_id},
+                    **publish_kw,
                 )
                 await live.publish(
                     cs.session_id,
                     cs.project_hash,
                     "session_closed",
                     {"session_id": cs.session_id},
+                    **publish_kw,
                 )
             except Exception:
                 log.exception("live publish failed (report_ready)")
 
-        if self._daemon.surface is not None:
+        # Surface the report card to the user's tray only for live
+        # sessions. Backlog consolidations are historical and would
+        # otherwise drop a stale "session consolidated" notification
+        # for every seeded session on the next idle tick.
+        if self._daemon.surface is not None and not cs.is_backlog:
             try:
                 await self._daemon.surface.surface(
                     cs.session_id,
