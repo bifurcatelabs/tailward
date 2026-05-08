@@ -400,12 +400,26 @@ class LiveStore {
       // by ``#arcRenderedIds``.
       this.arc = [];
       this.#arcRenderedIds.clear();
+      // Past-session detection: if any row has ``event_ts``, this is
+      // a seeded historical session being viewed in the past. In that
+      // case, suppress rows without ``event_ts`` (detector outputs,
+      // synthesis_captured, turn_metric — events that fired today
+      // when the daemon processed the seed, not part of the original
+      // session's timeline). Including them would visually pull the
+      // arc to today's fire-time and stretch a thin band across
+      // weeks of empty space.
+      // For genuinely live sessions, no row has event_ts yet (the
+      // session is happening now), so the filter is a no-op and
+      // every row appears.
+      const hasAnyEventTs = events.some(ev => ev.event_ts != null);
       for (const ev of events) {
         if (this.#arcRenderedIds.has(ev.id)) continue;
+        if (hasAnyEventTs && ev.event_ts == null) continue;
         this.#arcRenderedIds.add(ev.id);
         // Prefer source-event time so the arc reflects the original
         // session timeline; fall back to insert time for rows
-        // without a single source event.
+        // without a single source event (only reachable when
+        // hasAnyEventTs is false — i.e., a fully-live session).
         const t = toEpochSeconds(ev.event_ts ?? ev.created_at);
         this.arc.push({ id: ev.id, type: ev.event_type, t });
       }
