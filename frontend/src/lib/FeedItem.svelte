@@ -201,7 +201,7 @@
       title="copy event header + content to clipboard"
       aria-label="copy event"
     >{copied ? '✓' : '⧉'}</button>
-    <time>{clock}</time>
+    <time title={fmtIsoTs(event.createdAt)}>{clock}</time>
     {#if event.deltaText}
       <span class="delta">{event.deltaText}</span>
     {/if}
