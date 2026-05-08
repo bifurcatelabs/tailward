@@ -160,13 +160,22 @@ class LiveStore {
   #pollTimer = null;
   #esFailures = 0;
 
-  push(id, eventType, payload, createdAt) {
+  push(id, eventType, payload, createdAt, eventTs) {
     if (this.#renderedIds.has(id)) return;
     this.#renderedIds.add(id);
     if (id > this.#lastEventId) this.#lastEventId = id;
     if (!KNOWN_EVENT_TYPES.has(eventType)) return;
 
-    const tsSeconds = toEpochSeconds(createdAt);
+    // ``eventTs`` is the source JSONL event time when this row
+    // derived from a specific event; ``createdAt`` is insert time.
+    // Display + delta math prefer eventTs so past-session
+    // reconstruction renders with the original session's clock,
+    // and live-arrival deltas reflect actual session pacing rather
+    // than persistence pacing. Falls back to createdAt for rows
+    // without a single source event (synthesis_captured, detector
+    // outputs).
+    const displayTs = eventTs ?? createdAt;
+    const tsSeconds = toEpochSeconds(displayTs);
     let deltaText = '';
     if (
       this.#lastEventAt != null
@@ -187,6 +196,7 @@ class LiveStore {
       eventType,
       payload: payload || {},
       createdAt,
+      eventTs: eventTs ?? null,
       deltaText,
     });
     if (this.events.length > FEED_CAP) {
@@ -320,6 +330,7 @@ class LiveStore {
           eventType: ev.event_type,
           payload: ev.payload || {},
           createdAt: ev.created_at,
+          eventTs: ev.event_ts ?? null,
           deltaText: '',
         });
       }
@@ -392,7 +403,10 @@ class LiveStore {
       for (const ev of events) {
         if (this.#arcRenderedIds.has(ev.id)) continue;
         this.#arcRenderedIds.add(ev.id);
-        const t = toEpochSeconds(ev.created_at);
+        // Prefer source-event time so the arc reflects the original
+        // session timeline; fall back to insert time for rows
+        // without a single source event.
+        const t = toEpochSeconds(ev.event_ts ?? ev.created_at);
         this.arc.push({ id: ev.id, type: ev.event_type, t });
       }
     } catch (e) {
@@ -411,7 +425,7 @@ class LiveStore {
       if (r.ok) {
         const data = await r.json();
         for (const ev of data.events) {
-          this.push(ev.id, ev.event_type, ev.payload, ev.created_at);
+          this.push(ev.id, ev.event_type, ev.payload, ev.created_at, ev.event_ts);
         }
         if (data.next_since) this.#lastEventId = data.next_since;
       }
@@ -465,7 +479,7 @@ class LiveStore {
       this.#es.addEventListener(t, (evt) => {
         try {
           const data = JSON.parse(evt.data);
-          this.push(data.id, data.type, data.payload, data.created_at);
+          this.push(data.id, data.type, data.payload, data.created_at, data.event_ts);
         } catch (e) {
           console.warn('SSE parse', e);
         }
@@ -497,7 +511,7 @@ class LiveStore {
       this.conn = 'polling';
       const data = await r.json();
       for (const ev of data.events) {
-        this.push(ev.id, ev.event_type, ev.payload, ev.created_at);
+        this.push(ev.id, ev.event_type, ev.payload, ev.created_at, ev.event_ts);
       }
     } catch {
       this.conn = 'offline';

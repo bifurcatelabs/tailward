@@ -105,6 +105,9 @@ def _frame_from_row(row: dict) -> str:
         "type": row["event_type"],
         "payload": inner,
         "created_at": row["created_at"],
+        # Source-event time when present; clients prefer this over
+        # ``created_at`` for past-session reconstruction.
+        "event_ts": row["event_ts"],
     }
     return (
         f"id: {row['id']}\nevent: {row['event_type']}\n"
@@ -129,6 +132,7 @@ async def poll_events(request: Request, ph: str, session_id: str) -> PlainTextRe
                 "event_type": r["event_type"],
                 "payload": unwrap_stored_payload(r["payload"]),
                 "created_at": r["created_at"],
+                "event_ts": r["event_ts"],
             }
             for r in rows
         ],

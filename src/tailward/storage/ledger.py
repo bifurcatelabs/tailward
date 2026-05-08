@@ -591,14 +591,21 @@ class Ledger:
         return [dict(r) for r in rows]
 
     async def session_arc_triples(self, session_id: str) -> list[dict]:
-        """Lightweight per-event triples for the SessionTimeline arc.
+        """Lightweight per-event tuples for the SessionTimeline arc.
 
-        Returns ``[{id, event_type, created_at}, ...]`` for every event
-        in the session, ordered chronologically. The frontend renders
-        each as a single tick/cluster on the arc strip — payloads are
-        not needed, so the query strips them. Cheap enough to fetch
-        the full session's worth of triples on bootstrap (~50 bytes
-        per row × thousands of rows = a few hundred KB max).
+        Returns ``[{id, event_type, created_at, event_ts}, ...]`` for
+        every event in the session, ordered chronologically. The
+        frontend renders each as a single tick/cluster on the arc
+        strip — payloads are not needed, so the query strips them.
+        Cheap enough to fetch the full session's worth of rows on
+        bootstrap (~60 bytes per row × thousands of rows = a few
+        hundred KB max).
+
+        ``event_ts`` carries the source JSONL event's timestamp on
+        rows derived from a specific event; the frontend prefers it
+        over ``created_at`` so the arc reflects the original session
+        timeline rather than today's insert times when viewing a
+        seeded historical session.
 
         The richer feed-replay endpoint is paginated and tail-windowed
         by design (visible-prose payloads are large); this endpoint
@@ -606,7 +613,7 @@ class Ledger:
         whole session, not just the loaded feed window.
         """
         async with self.conn.execute(
-            """SELECT id, event_type, created_at
+            """SELECT id, event_type, created_at, event_ts
                FROM live_events
                WHERE session_id=?
                ORDER BY id""",

@@ -682,6 +682,14 @@ def mount_web(app: FastAPI) -> None:
                     "event_type": r["event_type"],
                     "payload": unwrap_stored_payload(r["payload"]),
                     "created_at": r["created_at"],
+                    # Source JSONL event time when this row derives from
+                    # a specific event; NULL for rows without a single
+                    # source (synthesis_captured, detector outputs).
+                    # Past-session reconstruction uses this in
+                    # preference to ``created_at`` so historical
+                    # sessions render with their original timeline,
+                    # not today's insert-time.
+                    "event_ts": r["event_ts"],
                 }
                 for r in rows
             ],
@@ -695,8 +703,10 @@ def mount_web(app: FastAPI) -> None:
         SessionTimeline fetches this on mount so the arc reflects every
         event recorded for the session, not just the bootstrap window
         the feed replay returns. Payloads are intentionally omitted —
-        the strip only needs ``(id, event_type, created_at)`` to render
-        ticks, clusters, and idle bands.
+        the strip only needs ``(id, event_type, created_at, event_ts)``
+        to render ticks, clusters, and idle bands at their actual
+        session times (source-event ts when present; insert-time
+        fallback for rows without a single source).
         """
         daemon = request.app.state.daemon
         rows = await daemon.ledger.session_arc_triples(session_id)
@@ -706,6 +716,7 @@ def mount_web(app: FastAPI) -> None:
                     "id": r["id"],
                     "event_type": r["event_type"],
                     "created_at": r["created_at"],
+                    "event_ts": r["event_ts"],
                 }
                 for r in rows
             ],

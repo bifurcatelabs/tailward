@@ -79,10 +79,17 @@
   let p = $derived(event.payload || {});
   let kind = $derived(event.eventType);
 
-  // Local-time clock derived from the event's createdAt, falling back
-  // to render-time if missing.
+  // Display timestamp prefers ``event.eventTs`` (source JSONL event
+  // time) when present so past-session reconstruction renders with
+  // the original session's clock. Falls back to ``event.createdAt``
+  // (insert-time) for rows without a single source event
+  // (synthesis_captured, detector outputs).
+  let displayTs = $derived(event.eventTs ?? event.createdAt);
+
+  // Local-time clock derived from displayTs, falling back to
+  // render-time if missing.
   let clock = $derived.by(() => {
-    const sec = toEpochSeconds(event.createdAt);
+    const sec = toEpochSeconds(displayTs);
     return sec ? fmtClock(new Date(sec * 1000)) : fmtClock();
   });
 
@@ -201,7 +208,7 @@
       title="copy event header + content to clipboard"
       aria-label="copy event"
     >{copied ? '✓' : '⧉'}</button>
-    <time title={fmtIsoTs(event.createdAt)}>{clock}</time>
+    <time title={fmtIsoTs(displayTs)}>{clock}</time>
     {#if event.deltaText}
       <span class="delta">{event.deltaText}</span>
     {/if}
