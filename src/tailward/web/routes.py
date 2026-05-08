@@ -417,16 +417,32 @@ def mount_web(app: FastAPI) -> None:
         has seen, with session count, last activity, intent.md presence,
         most-recent session id (for click-through), and the active
         session_mode label.
+
+        Unions ledger-tracked projects (active session_state rows) with
+        filesystem-discovered ones (any directory under
+        ``claude_projects_root()`` with a parseable JSONL). Without the
+        filesystem leg, fresh-launch users see an empty list because
+        ``session_state`` only carries projects the watcher has observed
+        live — and the Seed UI can only act on projects already listed.
         """
         from ..daemon.mode_profile import session_mode_for_project
-        from ..paths import intent_path, project_dir
+        from ..paths import (
+            claude_dir_name,
+            discover_claude_projects,
+            intent_path,
+            project_dir,
+        )
 
         daemon = request.app.state.daemon
         rows = await daemon.ledger.projects_summary()
+        seen: set[str] = set()
+        skip_dirs: set[str] = set()
         out = []
         for r in rows:
             ph = r["project_hash"]
             project_path = r["project_path"]
+            seen.add(ph)
+            skip_dirs.add(claude_dir_name(project_path))
             try:
                 intent_exists = intent_path(project_path).exists()
             except Exception:
@@ -454,6 +470,30 @@ def mount_web(app: FastAPI) -> None:
                 "latest_session_id": latest_sid,
                 "session_mode": mode,
                 "seeded": seeded,
+            })
+        discovered = discover_claude_projects(skip_dirs=skip_dirs)
+        for ph, project_path in sorted(discovered.items(), key=lambda kv: kv[1]):
+            if ph in seen:
+                continue
+            try:
+                intent_exists = intent_path(project_path).exists()
+            except Exception:
+                intent_exists = False
+            try:
+                pdir = project_dir(project_path).exists()
+            except Exception:
+                pdir = False
+            mode = session_mode_for_project(project_path) if intent_exists else None
+            out.append({
+                "project_hash": ph,
+                "project_path": project_path,
+                "session_count": 0,
+                "last_active_at": None,
+                "intent_exists": bool(intent_exists),
+                "project_dir_exists": bool(pdir),
+                "latest_session_id": None,
+                "session_mode": mode,
+                "seeded": False,
             })
         return JSONResponse({"projects": out})
 

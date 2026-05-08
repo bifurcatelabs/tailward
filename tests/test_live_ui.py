@@ -78,6 +78,98 @@ def test_v2_projects_endpoint_returns_list(tmp_path: Path) -> None:
         assert ph in hashes
 
 
+def test_v2_projects_includes_filesystem_discovered(tmp_path: Path) -> None:
+    """Projects with JSONL transcripts under ``claude_projects_root()``
+    appear in /v2/projects even when the watcher hasn't observed them
+    live and ``session_state`` has no row. Closes the fresh-launch hole
+    where non-seeded projects were invisible to the Seed UI.
+    """
+    import json
+    import os
+
+    fake_cwd = tmp_path / "fs-only-proj"
+    fake_cwd.mkdir()
+    expected_hash = project_hash(str(fake_cwd))
+
+    claude_root = Path(os.environ["CLAUDE_PROJECTS_ROOT"])
+    proj_dir = claude_root / "fs-only-proj-encoded"
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    jsonl = proj_dir / "session-x.jsonl"
+    # Real Claude Code transcripts prefix with metadata events
+    # (queue-operation, permission-mode) that lack ``cwd``; the field
+    # appears once the first user/assistant turn fires. Discovery has
+    # to scan past the prefix.
+    jsonl.write_text(
+        json.dumps({"type": "queue-operation", "operation": "enqueue"}) + "\n"
+        + json.dumps({"type": "permission-mode", "permissionMode": "acceptEdits"}) + "\n"
+        + json.dumps({"type": "user", "cwd": str(fake_cwd), "uuid": "u1"}) + "\n",
+        encoding="utf-8",
+    )
+
+    with TestClient(create_app()) as client:
+        r = client.get("/v2/projects")
+        assert r.status_code == 200
+        body = r.json()
+        rows = {p["project_hash"]: p for p in body["projects"]}
+        assert expected_hash in rows
+        row = rows[expected_hash]
+        assert row["project_path"] == str(fake_cwd)
+        assert row["session_count"] == 0
+        assert row["last_active_at"] is None
+        assert row["latest_session_id"] is None
+        assert row["seeded"] is False
+
+
+def test_v2_projects_dedupes_alt_cwd_encodings(tmp_path: Path) -> None:
+    """A Claude Code directory can hold sessions written with different
+    ``cwd`` encodings (Claude Code's encoding has shifted across
+    versions, and ``C:/foo/bar`` + ``C:\\foo-bar`` encode to the same
+    directory name). When the ledger already tracks the project under
+    one encoding, the filesystem leg must not surface a ghost row for
+    the alternate encoding from the same directory.
+    """
+    import json
+    import os
+
+    from tailward.paths import claude_dir_name
+
+    # Ledger row uses one cwd encoding; the JSONL on disk uses
+    # another — both encode to the same Claude Code directory name.
+    ledger_cwd = str(tmp_path / "ghost-target")
+    alt_cwd = str(tmp_path / "ghost-target-alt")
+    assert claude_dir_name(ledger_cwd) != claude_dir_name(alt_cwd)
+    # Force the dir name to match the ledger row's encoding so we're
+    # exercising the dedup, not the no-collision happy path.
+    dir_name = claude_dir_name(ledger_cwd)
+    ph = project_hash(ledger_cwd)
+    (tmp_path / "ghost-target").mkdir()
+    _seed(tmp_path / "ghost-target")  # creates intent.md for ledger_cwd
+
+    claude_root = Path(os.environ["CLAUDE_PROJECTS_ROOT"])
+    proj_dir = claude_root / dir_name
+    proj_dir.mkdir(parents=True, exist_ok=True)
+    (proj_dir / "session-a.jsonl").write_text(
+        json.dumps({"type": "user", "cwd": alt_cwd, "uuid": "u1"}) + "\n",
+        encoding="utf-8",
+    )
+
+    with TestClient(create_app()) as client:
+        daemon = client.app.state.daemon
+
+        async def _seed_session():
+            await daemon.ledger.upsert_session("s-dedup", ph, ledger_cwd)
+
+        _run(_seed_session())
+
+        r = client.get("/v2/projects")
+        body = r.json()
+        hashes = [p["project_hash"] for p in body["projects"]]
+        assert ph in hashes
+        # The alternate-encoding hash must not appear — the ledger row
+        # already represents this directory under a different cwd.
+        assert project_hash(alt_cwd) not in hashes
+
+
 def test_v2_project_detail_returns_rules(tmp_path: Path) -> None:
     """ProjectView reads from /v2/projects/<ph>; the response includes
     the parsed rules + active session_mode so the page can render

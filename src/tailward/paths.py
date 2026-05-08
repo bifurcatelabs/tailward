@@ -143,6 +143,91 @@ def project_dir(project_path: str | os.PathLike[str]) -> Path:
     return projects_dir() / project_hash(project_path)
 
 
+def claude_dir_name(project_path: str) -> str:
+    """Encode a project path to its Claude Code per-project directory name.
+
+    Claude Code stores transcripts in
+    ``~/.claude/projects/<encoded>/`` where ``<encoded>`` is the
+    project's filesystem path with separators (``:``, ``/``, ``\\``)
+    replaced by ``-``. The encoding is lossy: ``C:/foo/bar`` and
+    ``C:\\foo-bar`` both encode to ``C--foo-bar``. Used for dedup
+    when matching ledger rows against discovered directories.
+    """
+    s = project_path.replace(":", "-").replace("/", "-").replace("\\", "-")
+    return s
+
+
+def discover_claude_projects(
+    skip_dirs: set[str] | None = None,
+) -> dict[str, str]:
+    """Map Claude Code project directories under ``claude_projects_root()``
+    to ``{project_hash: project_path}``.
+
+    Scans JSONL events for the canonical ``cwd`` field — the same
+    authoritative signal the watcher's ``_is_seeded`` uses, since
+    Claude Code's sanitized folder names don't always round-trip
+    cleanly to the original path. Directories where no event in any
+    JSONL carries a ``cwd`` are omitted.
+
+    ``skip_dirs`` is a set of Claude Code per-project directory names
+    (typically derived from ledger rows via ``claude_dir_name``).
+    Matching directories are skipped — the ledger already represents
+    them under whichever cwd encoding it persisted, and a single
+    Claude Code directory can hold sessions written with different
+    encodings (Claude Code's cwd serialization has shifted across
+    versions). Surfacing a ghost row for the alternate encoding from
+    the same directory would be noise.
+    """
+    skip_dirs = skip_dirs or set()
+    root = claude_projects_root()
+    out: dict[str, str] = {}
+    if not root.exists():
+        return out
+    for entry in root.iterdir():
+        if not entry.is_dir():
+            continue
+        if entry.name in skip_dirs:
+            continue
+        for jsonl in entry.glob("*.jsonl"):
+            cwd = _first_cwd_in_jsonl(jsonl)
+            if cwd:
+                out.setdefault(project_hash(cwd), cwd)
+                break
+    return out
+
+
+def _first_cwd_in_jsonl(path: Path, max_lines: int = 200) -> str | None:
+    """Return the first ``cwd`` value found in a JSONL file.
+
+    Claude Code prefixes transcripts with metadata events
+    (``queue-operation``, ``permission-mode``) that lack ``cwd``;
+    the field appears starting with the first ``user`` / ``assistant``
+    event. Reads up to ``max_lines`` lines so a malformed file can't
+    stream us through gigabytes before yielding.
+    """
+    import json
+
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for i, line in enumerate(f):
+                if i >= max_lines:
+                    return None
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except ValueError:
+                    continue
+                if isinstance(data, dict):
+                    cwd = data.get("cwd")
+                    if cwd:
+                        return cwd
+    except OSError:
+        return None
+    return None
+
+
 def intent_path(project_path: str | os.PathLike[str]) -> Path:
     return project_dir(project_path) / "intent.md"
 
