@@ -109,6 +109,11 @@ class LiveEvent:
     payload: dict[str, Any]
     id: int = 0
     created_at: float = field(default_factory=time.time)
+    # Source JSONL event time when this row derives from a specific
+    # event (on_event publishes, rule-based worker outputs). NULL/None
+    # for rows without a single source event. Read by past-session
+    # views to reconstruct the original session timeline.
+    event_ts: float | None = None
 
     def to_json(self) -> str:
         return json.dumps(
@@ -119,6 +124,7 @@ class LiveEvent:
                 "type": self.type,
                 "payload": self.payload,
                 "created_at": self.created_at,
+                "event_ts": self.event_ts,
             },
             ensure_ascii=False,
             default=str,
@@ -163,7 +169,7 @@ class LiveBus:
         payload: dict[str, Any],
         *,
         broadcast: bool = True,
-        ts: float | None = None,
+        event_ts: float | None = None,
     ) -> LiveEvent:
         # ``broadcast=False`` persists the event but skips the
         # in-memory recent cache and the SSE subscriber fan-out.
@@ -171,9 +177,11 @@ class LiveBus:
         # JSONL replay populates the ``live_events`` table (so the
         # past-session view of a seeded project shows real turns)
         # without flooding the live feed with stale activity.
-        # ``ts`` overrides the event's ``created_at`` so the
-        # persisted row carries the original event's timestamp,
-        # not the insert time.
+        # ``event_ts`` carries the source JSONL event's timestamp on
+        # rows derived from a specific event. ``created_at`` stays
+        # insert-time so the live feed sorts by fire-time without
+        # reversal; past-session views read ``event_ts`` for
+        # historical reconstruction.
         if event_type not in EVENT_TYPES:
             raise ValueError(
                 f"unknown live event type {event_type!r}; "
@@ -184,9 +192,8 @@ class LiveBus:
             project_hash=project_hash,
             type=event_type,
             payload=payload,
+            event_ts=event_ts,
         )
-        if ts is not None:
-            ev.created_at = ts
 
         if self._persist is not None:
             try:

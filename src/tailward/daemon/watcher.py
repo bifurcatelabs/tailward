@@ -333,44 +333,52 @@ class TranscriptWatcher:
         Idempotent: re-seeding an already-seeded project re-parses
         from scratch (offset reset to 0). Useful if the user wants to
         rebuild the ledger view of a project's history.
-        """
-        await self._ledger.mark_project_seeded(project_hash_value)
-        self._seeded_hashes.add(project_hash_value)
 
-        count = 0
-        for jsonl in self._root.rglob("*.jsonl"):
-            if not self._path_allowed(jsonl):
-                continue
-            # Resolve the JSONL's project via cwd-from-first-line
-            # (preferred, matches what /seed received from the UI)
-            # with sanitized-folder-name as fallback.
-            candidate_hash: str | None = None
-            try:
-                with open(jsonl, "rb") as f:
-                    first = f.readline()
-            except OSError:
-                first = b""
-            if first:
-                ev = parse_line(first.decode("utf-8", errors="replace"))
-                if ev is not None and ev.cwd:
-                    candidate_hash = project_hash(ev.cwd)
-            if candidate_hash is None:
+        Wrapped in ``ledger.batch_commits()`` so the thousands of
+        per-event ledger writes commit once on exit instead of once
+        per call. Empirical: turns a 25-file / 34k-event re-seed
+        from ~4m20s of fsync-dominated wall-clock into seconds, with
+        much larger headroom on slower storage subsystems where the
+        per-fsync latency dominates.
+        """
+        async with self._ledger.batch_commits():
+            await self._ledger.mark_project_seeded(project_hash_value)
+            self._seeded_hashes.add(project_hash_value)
+
+            count = 0
+            for jsonl in self._root.rglob("*.jsonl"):
+                if not self._path_allowed(jsonl):
+                    continue
+                # Resolve the JSONL's project via cwd-from-first-line
+                # (preferred, matches what /seed received from the UI)
+                # with sanitized-folder-name as fallback.
+                candidate_hash: str | None = None
                 try:
-                    rel = jsonl.relative_to(self._root)
-                except ValueError:
+                    with open(jsonl, "rb") as f:
+                        first = f.readline()
+                except OSError:
+                    first = b""
+                if first:
+                    ev = parse_line(first.decode("utf-8", errors="replace"))
+                    if ev is not None and ev.cwd:
+                        candidate_hash = project_hash(ev.cwd)
+                if candidate_hash is None:
+                    try:
+                        rel = jsonl.relative_to(self._root)
+                    except ValueError:
+                        continue
+                    if not rel.parts:
+                        continue
+                    candidate_hash = project_hash(_sanitize_to_path(rel.parts[0]))
+                if candidate_hash != project_hash_value:
                     continue
-                if not rel.parts:
-                    continue
-                candidate_hash = project_hash(_sanitize_to_path(rel.parts[0]))
-            if candidate_hash != project_hash_value:
-                continue
-            session_id = jsonl.stem
-            # Reset offset and forget any cached FileState so
-            # ``_process_file`` reads from byte 0 and re-parses.
-            await self._ledger.set_offset(session_id, str(jsonl), 0)
-            self._files.pop(jsonl, None)
-            await self._process_file(jsonl, is_backlog=True)
-            count += 1
+                session_id = jsonl.stem
+                # Reset offset and forget any cached FileState so
+                # ``_process_file`` reads from byte 0 and re-parses.
+                await self._ledger.set_offset(session_id, str(jsonl), 0)
+                self._files.pop(jsonl, None)
+                await self._process_file(jsonl, is_backlog=True)
+                count += 1
         return count
 
     async def _process_file(self, path: Path, *, is_backlog: bool = False) -> None:

@@ -77,19 +77,23 @@ def create_app() -> FastAPI:
 
         async def _persist_live(ev) -> int:
             # Store only the inner payload; the envelope (session_id,
-            # project_hash, type, created_at, id) is reconstructed from the
-            # row's own columns when serving replays. ``ev.to_json()``
-            # bakes in ``ev.id=0`` here because the row id isn't known
-            # until after this insert, which broke SSE-replay dedup and
-            # the ack/dismiss buttons on the live page.
+            # project_hash, type, created_at, event_ts, id) is
+            # reconstructed from the row's own columns when serving
+            # replays. ``ev.to_json()`` bakes in ``ev.id=0`` here
+            # because the row id isn't known until after this insert,
+            # which broke SSE-replay dedup and the ack/dismiss
+            # buttons on the live page.
             #
-            # ``ev.created_at`` is a Unix epoch float; forward it as ISO
-            # so backlog-persisted rows carry the original event time.
+            # ``ev.event_ts`` (Unix epoch float) becomes the persisted
+            # ``event_ts`` column for source-event-time reconstruction
+            # in past-session views; ``created_at`` is set by the
+            # ledger as insert-time so the live feed remains
+            # monotonic by fire-time.
             import json as _json
 
-            ts_iso = (
-                datetime.fromtimestamp(ev.created_at, UTC).isoformat()
-                if ev.created_at
+            event_ts_iso = (
+                datetime.fromtimestamp(ev.event_ts, UTC).isoformat()
+                if ev.event_ts
                 else None
             )
             return await daemon.ledger.record_live_event(
@@ -97,7 +101,7 @@ def create_app() -> FastAPI:
                 ev.project_hash,
                 ev.type,
                 _json.dumps(ev.payload, ensure_ascii=False, default=str),
-                ts=ts_iso,
+                event_ts=event_ts_iso,
             )
 
         daemon.live.set_persister(_persist_live)
@@ -119,16 +123,18 @@ def create_app() -> FastAPI:
             # ``live_events`` (so the past-session view of a seeded
             # project shows real turns) but not fanned out to SSE
             # subscribers (so historical replay doesn't flood the
-            # live feed and lock the browser main thread). Persisted
-            # rows carry the JSONL event's original timestamp via
-            # ``ts``, not insert time, so the historical timeline
-            # reads accurately.
-            _ts_epoch: float | None = (
+            # live feed and lock the browser main thread).
+            # ``event_ts`` carries the JSONL event's original
+            # timestamp into the dedicated source-event column,
+            # leaving ``created_at`` as insert-time so the live
+            # feed sorts monotonically by fire-time without
+            # reversal.
+            _event_ts_epoch: float | None = (
                 ev.timestamp.timestamp() if ev.timestamp else None
             )
             _pub_kwargs: dict[str, Any] = {
                 "broadcast": not is_backlog,
-                "ts": _ts_epoch,
+                "event_ts": _event_ts_epoch,
             }
             # Exfiltration helper: scans any text that's about to land
             # in live_events.payload, emits an exfiltration_alert per

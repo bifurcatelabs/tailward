@@ -93,11 +93,13 @@ async def test_publish_with_broadcast_false_persists_but_skips_fanout() -> None:
 
 
 @pytest.mark.asyncio
-async def test_publish_with_ts_overrides_created_at() -> None:
-    """``ts`` overrides ``LiveEvent.created_at`` so backlog-persisted
-    rows carry the original JSONL event timestamp instead of insert
-    time. Without this, replayed historical events stamp at "now"
-    and the past-session view shows them as if they just happened.
+async def test_publish_with_event_ts_does_not_touch_created_at() -> None:
+    """``event_ts`` carries the source JSONL event's timestamp on
+    a dedicated column, leaving ``created_at`` as insert-time so
+    the live feed sorts monotonically by fire-time. Without the
+    separation (e.g. earlier overload of ``created_at``), the live
+    feed showed time-reversal across rows from different
+    timestamping policies.
     """
     bus = LiveBus()
     captured: list = []
@@ -108,21 +110,26 @@ async def test_publish_with_ts_overrides_created_at() -> None:
 
     bus.set_persister(fake_persist)
 
-    # Backlog path: ts kwarg pins created_at to the original event time.
+    # Backlog/derived-row path: event_ts pins source-event time on
+    # its own field; created_at stays insert-time.
     historical_ts = 1_700_000_000.0
+    before = time.time()
     await bus.publish(
-        "s1", "ph", "turn", {"turn_idx": 1}, ts=historical_ts
+        "s1", "ph", "turn", {"turn_idx": 1}, event_ts=historical_ts
     )
-    assert captured[0].created_at == historical_ts, (
-        "ts kwarg must override LiveEvent.created_at"
+    after = time.time()
+    assert captured[0].event_ts == historical_ts, (
+        "event_ts kwarg must populate LiveEvent.event_ts"
+    )
+    assert before <= captured[0].created_at <= after, (
+        "created_at must remain insert-time when event_ts is set "
+        "(no overloading of created_at)"
     )
 
-    # Default path (no ts): created_at is set to insert time.
-    before = time.time()
+    # Default path (no event_ts): created_at insert-time, event_ts None.
     await bus.publish("s1", "ph", "turn", {"turn_idx": 2})
-    after = time.time()
-    assert before <= captured[1].created_at <= after, (
-        "default created_at should be insert-time when ts unset"
+    assert captured[1].event_ts is None, (
+        "event_ts defaults to None when not provided"
     )
 
 

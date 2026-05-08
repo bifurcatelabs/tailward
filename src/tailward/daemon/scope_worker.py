@@ -80,15 +80,16 @@ class ScopeWorker:
     async def _process(self, ev: TranscriptEvent, fs, *, is_backlog: bool = False) -> None:
         if not fs.session_id or not fs.project_hash:
             return
-        # Persist with original event timestamp; suppress broadcast
-        # for backlog so historical replays don't appear as live
-        # snapshots in the feed.
-        _ts_epoch: float | None = (
+        # Carry the source event's timestamp on the persisted row's
+        # ``event_ts`` for past-session reconstruction; suppress
+        # broadcast for backlog so historical replays don't appear
+        # as live snapshots in the feed.
+        _event_ts_epoch: float | None = (
             ev.timestamp.timestamp() if ev.timestamp else None
         )
         _pub_kwargs: dict[str, object] = {
             "broadcast": not is_backlog,
-            "ts": _ts_epoch,
+            "event_ts": _event_ts_epoch,
         }
         scope = self._by_session.setdefault(fs.session_id, _SessionScope())
 

@@ -100,15 +100,16 @@ class ConstraintsWorker:
     async def _process(self, ev: TranscriptEvent, fs, *, is_backlog: bool = False) -> None:
         if not fs.project_path or not fs.session_id:
             return
-        # Persist findings with the original event timestamp; suppress
-        # broadcast for backlog so historical replay doesn't appear in
-        # the live feed.
-        _ts_epoch: float | None = (
+        # Carry the source event's timestamp on the persisted row's
+        # ``event_ts`` for past-session reconstruction; suppress
+        # broadcast for backlog so historical replay doesn't appear
+        # in the live feed.
+        _event_ts_epoch: float | None = (
             ev.timestamp.timestamp() if ev.timestamp else None
         )
         _pub_kwargs: dict[str, object] = {
             "broadcast": not is_backlog,
-            "ts": _ts_epoch,
+            "event_ts": _event_ts_epoch,
         }
         # Accept bare ``tool_use`` events and assistant messages that wrap
         # a tool_use content block. Real Claude Code transcripts only

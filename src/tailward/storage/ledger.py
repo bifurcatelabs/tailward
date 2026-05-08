@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -21,6 +22,11 @@ class Ledger:
     def __init__(self, db_path: Path | None = None) -> None:
         self._db_path = Path(db_path) if db_path else ledger_path()
         self._conn: aiosqlite.Connection | None = None
+        # Re-entrant counter for ``batch_commits``: write methods route
+        # through ``_commit()`` which no-ops while ``_batch_depth > 0``,
+        # so a seed pass that calls thousands of write methods commits
+        # exactly once on context exit instead of once per call.
+        self._batch_depth: int = 0
 
     async def connect(self) -> None:
         self._db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -54,6 +60,34 @@ class Ledger:
             raise RuntimeError("Ledger not connected")
         return self._conn
 
+    async def _commit(self) -> None:
+        """Centralised commit gate. Write methods call this instead of
+        ``self.conn.commit()`` directly so a ``batch_commits()`` scope
+        can suppress per-call fsyncs and commit once on exit."""
+        if self._batch_depth == 0:
+            await self.conn.commit()
+
+    @asynccontextmanager
+    async def batch_commits(self):
+        """Suspend per-write commits inside this scope; single commit
+        on exit. Re-entrant — nested batches share the outermost
+        commit. Used by ``seed_project``'s prime pass to turn O(N)
+        fsyncs into 1; safe for any batch operation that doesn't need
+        intermediate durability.
+
+        Crash semantics: if the process dies inside the batch, the
+        outstanding writes are rolled back. For seed (which is
+        re-runnable from byte-zero of the JSONL) that's the right
+        trade — the user can re-trigger seed and the ledger
+        reconverges."""
+        self._batch_depth += 1
+        try:
+            yield
+        finally:
+            self._batch_depth -= 1
+            if self._batch_depth == 0:
+                await self.conn.commit()
+
     # ------- processed_offset -------
 
     async def get_offset(self, session_id: str) -> int:
@@ -75,7 +109,7 @@ class Ledger:
             """,
             (session_id, jsonl_path, offset, _now_iso()),
         )
-        await self.conn.commit()
+        await self._commit()
 
     # ------- session_state -------
 
@@ -92,14 +126,14 @@ class Ledger:
             """,
             (session_id, project_hash, project_path, now, now),
         )
-        await self.conn.commit()
+        await self._commit()
 
     async def bump_turns(self, session_id: str) -> int:
         await self.conn.execute(
             "UPDATE session_state SET turns_seen = turns_seen + 1, last_seen_at=? WHERE session_id=?",
             (_now_iso(), session_id),
         )
-        await self.conn.commit()
+        await self._commit()
         async with self.conn.execute(
             "SELECT turns_seen FROM session_state WHERE session_id=?", (session_id,)
         ) as cur:
@@ -129,7 +163,7 @@ class Ledger:
                action_taken, detail, ran_at) VALUES(?, ?, ?, ?, ?, ?, ?)""",
             (session_id, project_hash, event_type, severity, action_taken, detail, _now_iso()),
         )
-        await self.conn.commit()
+        await self._commit()
 
     async def recent_drift(self, project_hash: str, limit: int = 50) -> list[dict]:
         async with self.conn.execute(
@@ -155,7 +189,7 @@ class Ledger:
                status, evidence, ran_at) VALUES(?, ?, ?, ?, ?, ?)""",
             (session_id, project_hash, claim_text, status, evidence, _now_iso()),
         )
-        await self.conn.commit()
+        await self._commit()
 
     async def recent_claims(self, project_hash: str, limit: int = 50) -> list[dict]:
         async with self.conn.execute(
@@ -181,7 +215,7 @@ class Ledger:
                VALUES(?, ?, ?, ?, ?, ?)""",
             (session_id, project_hash, kind, severity, text, _now_iso()),
         )
-        await self.conn.commit()
+        await self._commit()
         return int(cur.lastrowid or 0)
 
     # ------- constraint_violations (v1.1) -------
@@ -207,7 +241,7 @@ class Ledger:
                 evidence, severity, _now_iso(),
             ),
         )
-        await self.conn.commit()
+        await self._commit()
         return int(cur.lastrowid or 0)
 
     async def recent_violations(
@@ -237,7 +271,7 @@ class Ledger:
             "UPDATE constraint_violations SET status=? WHERE id=?",
             (status, violation_id),
         )
-        await self.conn.commit()
+        await self._commit()
         return (cur.rowcount or 0) > 0
 
     # ------- scope_snapshots (v1.1) -------
@@ -267,7 +301,7 @@ class Ledger:
                 baseline, session_mode, _now_iso(),
             ),
         )
-        await self.conn.commit()
+        await self._commit()
         return int(cur.lastrowid or 0)
 
     async def scope_snapshots_for_session(self, session_id: str) -> list[dict]:
@@ -326,7 +360,7 @@ class Ledger:
                 session_mode, subject, _now_iso(),
             ),
         )
-        await self.conn.commit()
+        await self._commit()
         return int(cur.lastrowid or 0)
 
     async def rubric_scores_for_session(self, session_id: str) -> list[dict]:
@@ -348,7 +382,7 @@ class Ledger:
                ) VALUES(?, ?, ?, ?)""",
             (rubric_score_id, verdict, note, _now_iso()),
         )
-        await self.conn.commit()
+        await self._commit()
 
     # ------- session_reports (v1.1) -------
 
@@ -381,7 +415,7 @@ class Ledger:
                 evidence_json, suggestion, model_used, _now_iso(),
             ),
         )
-        await self.conn.commit()
+        await self._commit()
 
     async def session_report(self, session_id: str) -> list[dict]:
         async with self.conn.execute(
@@ -417,7 +451,7 @@ class Ledger:
                  closed_at=excluded.closed_at""",
             (session_id, project_hash, _now_iso(), status),
         )
-        await self.conn.commit()
+        await self._commit()
 
     async def update_close_status(
         self, session_id: str, status: str, error: str | None = None
@@ -427,7 +461,7 @@ class Ledger:
                WHERE session_id=?""",
             (status, error, session_id),
         )
-        await self.conn.commit()
+        await self._commit()
 
     async def session_close_status(self, session_id: str) -> str | None:
         async with self.conn.execute(
@@ -505,7 +539,7 @@ class Ledger:
                 session_id,
             ),
         )
-        await self.conn.commit()
+        await self._commit()
 
     # ------- live_events (v1.1) -------
 
@@ -516,20 +550,25 @@ class Ledger:
         event_type: str,
         payload: str,
         *,
-        ts: str | None = None,
+        event_ts: str | None = None,
     ) -> int:
-        # ``ts`` lets callers persist an event with the original
-        # JSONL-event timestamp instead of insert-time. The watcher's
-        # backlog/seed path passes the parsed event's timestamp so the
-        # historical past-session view renders with accurate clock
-        # ordering rather than treating every replay as "just now."
+        # ``created_at`` is always insert-time so the live feed sorts
+        # monotonically by fire-time. ``event_ts`` carries the source
+        # JSONL event's original timestamp for rows derived from a
+        # specific event (on_event publishes, rule-based worker
+        # outputs); NULL for rows without a single source (periodic
+        # synthesis captures, etc.). Past-session views sort by
+        # COALESCE(event_ts, created_at) to reconstruct the original
+        # session timeline.
         cur = await self.conn.execute(
             """INSERT INTO live_events(
-                 session_id, project_hash, event_type, payload, created_at
-               ) VALUES(?, ?, ?, ?, ?)""",
-            (session_id, project_hash, event_type, payload, ts or _now_iso()),
+                 session_id, project_hash, event_type, payload,
+                 created_at, event_ts
+               ) VALUES(?, ?, ?, ?, ?, ?)""",
+            (session_id, project_hash, event_type, payload,
+             _now_iso(), event_ts),
         )
-        await self.conn.commit()
+        await self._commit()
         return int(cur.lastrowid or 0)
 
     async def live_events_for_session(
@@ -653,7 +692,7 @@ class Ledger:
                 first_block_at, last_block_at, session_mode, _now_iso(),
             ),
         )
-        await self.conn.commit()
+        await self._commit()
         return int(cur.lastrowid or 0)
 
     async def turn_metrics_for_session(
@@ -718,7 +757,7 @@ class Ledger:
                 error, _now_iso(),
             ),
         )
-        await self.conn.commit()
+        await self._commit()
         return int(cur.lastrowid or 0)
 
     async def llm_call_metrics_recent(
@@ -785,7 +824,7 @@ class Ledger:
                ) VALUES(?, ?, ?, ?, ?, ?, ?)""",
             (target, url, status, latency_ms, detail, error, _now_iso()),
         )
-        await self.conn.commit()
+        await self._commit()
         return int(cur.lastrowid or 0)
 
     async def recent_probe_results(
@@ -1279,7 +1318,7 @@ class Ledger:
             """,
             (project_hash, _now_iso()),
         )
-        await self.conn.commit()
+        await self._commit()
 
     async def seeded_project_hashes(self) -> set[str]:
         """All currently-seeded project hashes. Returned as a set so
