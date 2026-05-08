@@ -33,6 +33,15 @@ ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     # view's self-rubric panel reads subject='user'; the existing
     # session view's rubric rail reads subject='assistant'.
     ("rubric_scores", "subject", "TEXT NOT NULL DEFAULT 'assistant'"),
+    # ``event_ts`` carries the source JSONL event's original timestamp
+    # for rows derived from a specific event (on_event publishes,
+    # constraints/scope worker outputs). NULL for rows without a
+    # single source event (synthesis_captured, drift verdicts firing
+    # on a window). ``created_at`` continues to be insert-time, so
+    # the live feed sorts monotonically by fire-time; past-session
+    # views sort by COALESCE(event_ts, created_at) to reconstruct
+    # the original session timeline.
+    ("live_events", "event_ts", "TEXT"),
 ]
 
 
