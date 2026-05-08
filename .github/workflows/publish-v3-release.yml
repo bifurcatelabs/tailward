@@ -261,11 +261,13 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Diagnostic — runner arch + rustc host
-        # Surfaces both the OS-reported architecture and the toolchain's
-        # host triple so a future arch-mismatch failure points at the
-        # right side: runner-pool issue (Intel served on an arm-labeled
-        # image) vs toolchain-install issue (rustup picked x86_64 on an
-        # arm host via some Rosetta path).
+        # TODO: drop this step before cutting v3.0.0. Kept for now to
+        # surface arch info on each dry-run while the macOS path
+        # stabilizes. Surfaces both the OS-reported architecture and
+        # the toolchain's host triple so a future arch-mismatch
+        # failure points at the right side: runner-pool issue (Intel
+        # served on an arm-labeled image) vs toolchain-install issue
+        # (rustup picked x86_64 on an arm host via some Rosetta path).
         run: |
           echo "uname -m: $(uname -m)"
           echo "arch:     $(arch)"
