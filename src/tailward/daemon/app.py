@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -424,16 +425,37 @@ def create_app() -> FastAPI:
             # feed. See ``tailward.schema.exfiltration``.
             if fs.session_id and fs.project_hash and ev.tool_name:
                 mode_at_call = ev.permission_mode or fs.last_permission_mode
-                input_preview, leaks = await _check_leaks(
-                    _shorten_tool_input(ev.tool_input),
-                    "tool_call",
-                    tool=ev.tool_name,
-                )
+                # Redact each string field of tool_input independently so
+                # the full version (used by the UI's expand-on-click view)
+                # carries the same redaction the preview gets, and so
+                # secrets in fields the preview's cherry-pick doesn't
+                # surface (e.g. the ``new_string`` arg of an Edit call)
+                # are scanned too. Single-pass: each field gets exactly
+                # one _check_leaks call, no double-publish on alerts.
+                redacted_input: dict[str, Any] = {}
+                leaks: list[str] = []
+                for k, v in (ev.tool_input or {}).items():
+                    if isinstance(v, str) and v:
+                        r, ls = await _check_leaks(
+                            v, "tool_call", tool=ev.tool_name, field=k
+                        )
+                        redacted_input[k] = r
+                        leaks.extend(ls)
+                    else:
+                        redacted_input[k] = v
+                input_preview = _shorten_tool_input(redacted_input)
+                input_full = _full_tool_input(redacted_input)
                 tc_payload: dict[str, Any] = {
                     "tool": ev.tool_name,
                     "input_preview": input_preview,
                     "permission_mode": mode_at_call,
                 }
+                # Only attach the full form when it carries information
+                # the preview doesn't (multiple args, or any single arg
+                # longer than the preview cap). Otherwise the expand
+                # affordance would just re-show the same one line.
+                if input_full and input_full != input_preview:
+                    tc_payload["input_full"] = input_full
                 if leaks:
                     tc_payload["secrets_redacted"] = leaks
                 await daemon.live.publish(
@@ -1167,16 +1189,44 @@ def _looks_like_human_prompt(ev) -> bool:
 
 
 def _shorten_tool_input(tool_input: dict[str, Any] | None) -> str:
-    """Compact preview of tool args for the live feed (no full file bodies)."""
+    """Preview of tool args for the live feed scrolling view.
+
+    Caps the chosen field at 360 chars — long enough that Bash
+    commands and Grep patterns typically convey intent at a glance,
+    short enough that the row stays scannable. The expand-on-click
+    full view is for when the user needs the rest.
+    """
     if not tool_input:
         return ""
     pieces: list[str] = []
     for key in ("file_path", "path", "command", "pattern", "query", "url"):
         val = tool_input.get(key)
         if isinstance(val, str) and val:
-            pieces.append(f"{key}={val[:120]}")
+            pieces.append(f"{key}={val[:360]}")
             break
     if not pieces:
         keys = ", ".join(sorted(tool_input.keys())[:4])
         pieces.append(f"keys=[{keys}]")
     return " ".join(pieces)
+
+
+def _full_tool_input(tool_input: dict[str, Any] | None, max_bytes: int = 4096) -> str:
+    """JSON-serialized tool args for the expand-on-click view.
+
+    Stored as JSON because that's what the per-row copy button hands
+    off to the clipboard — the user gets a programmatically parseable
+    form on paste. The frontend post-processes this for display
+    (unescaping embedded newlines so multi-line bash heredocs render
+    legibly) while keeping the raw JSON for copy.
+
+    Capped at ``max_bytes`` so a Write call with a megabyte of file
+    content can't bloat ``live_events.payload``. Truncation is marked
+    explicitly so the UI can render a "[truncated]" affordance rather
+    than implying the full input ended where the cap fell.
+    """
+    if not tool_input:
+        return ""
+    text = json.dumps(tool_input, ensure_ascii=False, indent=2, default=str)
+    if len(text) <= max_bytes:
+        return text
+    return text[:max_bytes] + "\n…[truncated]"

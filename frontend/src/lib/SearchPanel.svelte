@@ -187,7 +187,7 @@
       case 'compact_summary':
         return p.text_preview || r.snippet;
       case 'tool_call':
-        return `${p.tool ?? '?'}\n${p.input_preview ?? ''}`;
+        return `${p.tool ?? '?'}\n${p.input_full ?? p.input_preview ?? ''}`;
       case 'claim':
         return `${p.text ?? ''}${p.evidence ? '\n\n' + p.evidence : ''}`;
       case 'away_summary':

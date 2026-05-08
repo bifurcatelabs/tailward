@@ -79,6 +79,32 @@
   let p = $derived(event.payload || {});
   let kind = $derived(event.eventType);
 
+  // Human-readable view of input_full for the disclosure widget.
+  // The server stores input_full as JSON (with indent=2) so the
+  // copy button can hand off a parseable form. JSON-encoded strings
+  // render embedded "\n" as literal — unreadable for bash heredocs.
+  // Parse + re-render each field as ``key:\n<value>`` with real
+  // newlines for display only. Falls back to the raw JSON if parse
+  // fails (e.g. on a truncated payload).
+  let inputFullDisplay = $derived.by(() => {
+    if (!p.input_full) return '';
+    try {
+      const parsed = JSON.parse(p.input_full);
+      if (!parsed || typeof parsed !== 'object') return p.input_full;
+      const parts = [];
+      for (const [k, v] of Object.entries(parsed)) {
+        if (typeof v === 'string') {
+          parts.push(v.includes('\n') ? `${k}:\n${v}` : `${k}: ${v}`);
+        } else {
+          parts.push(`${k}:\n${JSON.stringify(v, null, 2)}`);
+        }
+      }
+      return parts.join('\n\n');
+    } catch {
+      return p.input_full;
+    }
+  });
+
   // Display timestamp prefers ``event.eventTs`` (source JSONL event
   // time) when present so past-session reconstruction renders with
   // the original session's clock. Falls back to ``event.createdAt``
@@ -133,7 +159,7 @@
       case 'compact_summary':
         return p.text_preview ?? '';
       case 'tool_call':
-        return `${p.tool ?? '?'}\n${p.input_preview ?? ''}`;
+        return `${p.tool ?? '?'}\n${p.input_full ?? p.input_preview ?? ''}`;
       case 'claim':
         return `${p.text ?? ''}${p.evidence ? '\n\n' + p.evidence : ''}`;
       case 'away_summary':
@@ -262,12 +288,25 @@
         >{p.text_preview}</button>
       {/if}
     {:else if kind === 'tool_call'}
-      <div class="row">
+      <button
+        type="button"
+        class="row tool-row"
+        class:expandable={!!p.input_full}
+        class:expanded
+        onclick={p.input_full ? toggleExpanded : undefined}
+        disabled={!p.input_full}
+      >
         <strong>{p.tool}</strong>
         {#if p.input_preview}
           <span class="muted mono">{p.input_preview}</span>
         {/if}
-      </div>
+        {#if p.input_full}
+          <span class="expand-hint" aria-hidden="true">{expanded ? '▾' : '▸'}</span>
+        {/if}
+      </button>
+      {#if expanded && p.input_full}
+        <pre class="tool-full">{inputFullDisplay}</pre>
+      {/if}
     {:else if kind === 'constraint_violation'}
       <div class="row">
         <strong>{p.rule_text || p.rule_id}</strong>
@@ -762,6 +801,39 @@
 
   .body { font-size: 13px; color: var(--text); }
   .row { display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; }
+  .tool-row {
+    background: transparent;
+    border: 0;
+    padding: 0;
+    margin: 0;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    width: 100%;
+    cursor: default;
+  }
+  .tool-row.expandable { cursor: pointer; }
+  .tool-row.expandable:hover .expand-hint { color: var(--text); }
+  .expand-hint {
+    margin-left: auto;
+    color: var(--muted-deep);
+    font-size: 11px;
+    transition: color 120ms;
+  }
+  .tool-full {
+    margin: 6px 0 0 0;
+    padding: 8px 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-soft);
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 24em;
+    overflow: auto;
+  }
   .muted { color: var(--muted); }
   .muted-deep { color: var(--muted-deep); }
   .small { font-size: 11px; }
