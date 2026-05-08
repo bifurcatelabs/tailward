@@ -464,7 +464,9 @@ class TranscriptWatcher:
             fs.project_hash = project_hash(fs.project_path)
 
         if session_id and fs.project_hash and fs.project_path:
-            await self._ledger.upsert_session(session_id, fs.project_hash, fs.project_path)
+            await self._ledger.upsert_session(
+                session_id, fs.project_hash, fs.project_path, is_backlog=is_backlog
+            )
             st = self._state.get_or_create(
                 session_id, fs.project_path, fs.project_hash, str(fs.path)
             )

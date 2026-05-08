@@ -114,17 +114,35 @@ class Ledger:
     # ------- session_state -------
 
     async def upsert_session(
-        self, session_id: str, project_hash: str, project_path: str
+        self,
+        session_id: str,
+        project_hash: str,
+        project_path: str,
+        *,
+        is_backlog: bool = False,
     ) -> None:
+        # ``is_backlog`` flows from the watcher's seed/prime path. On
+        # conflict, is_backlog updates False-wins: a realtime call
+        # de-flags a previously-seeded session, but a backlog call
+        # never re-flags a session that's been observed live. Lets
+        # SessionCloseDetector decide whether to fire LLM
+        # consolidation on idle-tick close.
         now = _now_iso()
         await self.conn.execute(
             """
-            INSERT INTO session_state(session_id, project_hash, project_path, started_at, last_seen_at)
-            VALUES(?, ?, ?, ?, ?)
+            INSERT INTO session_state(
+                session_id, project_hash, project_path,
+                started_at, last_seen_at, is_backlog
+            )
+            VALUES(?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
-                last_seen_at=excluded.last_seen_at
+                last_seen_at=excluded.last_seen_at,
+                is_backlog=CASE
+                    WHEN excluded.is_backlog = 0 THEN 0
+                    ELSE is_backlog
+                END
             """,
-            (session_id, project_hash, project_path, now, now),
+            (session_id, project_hash, project_path, now, now, 1 if is_backlog else 0),
         )
         await self._commit()
 

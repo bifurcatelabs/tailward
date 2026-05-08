@@ -42,6 +42,16 @@ ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     # views sort by COALESCE(event_ts, created_at) to reconstruct
     # the original session timeline.
     ("live_events", "event_ts", "TEXT"),
+    # ``is_backlog`` flags session_state rows that originated from
+    # backlog parsing (seed pass, prime startup) and were never
+    # observed live. SessionCloseDetector reads this on idle-tick
+    # consolidation to honor the no-LLM-on-backlog rule (per
+    # ``project_llm_inference_load_principles.md``) and to stamp
+    # publishes with the session's actual close time instead of
+    # publish-time. ``upsert_session`` flips the flag False-wins
+    # via ON CONFLICT, so a session that's seeded then observed
+    # live correctly de-flags as live.
+    ("session_state", "is_backlog", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 

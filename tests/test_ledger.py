@@ -18,6 +18,44 @@ async def test_offset_round_trip() -> None:
 
 
 @pytest.mark.asyncio
+async def test_upsert_session_is_backlog_false_wins() -> None:
+    """A session row's ``is_backlog`` flag flips False-wins on conflict.
+
+    Backlog upsert flags a fresh row True; a later realtime upsert
+    on the same session_id de-flags to False (live observation
+    overrides historical seed). The reverse — backlog upsert on a
+    live-observed row — must NOT re-flag to True, since the session
+    is genuinely active and the detector should fire LLM
+    consolidation when it eventually closes.
+    """
+    ledger = Ledger()
+    await ledger.connect()
+    try:
+        # Pure-backlog session: stays True.
+        await ledger.upsert_session("s-bk", "ph", "/p", is_backlog=True)
+        row = await ledger.get_session("s-bk")
+        assert row is not None
+        assert row["is_backlog"] == 1
+
+        # Backlog → realtime: de-flags to False.
+        await ledger.upsert_session("s-bk", "ph", "/p", is_backlog=False)
+        row = await ledger.get_session("s-bk")
+        assert row["is_backlog"] == 0
+
+        # Realtime → backlog: stays False (live observation wins).
+        await ledger.upsert_session("s-bk", "ph", "/p", is_backlog=True)
+        row = await ledger.get_session("s-bk")
+        assert row["is_backlog"] == 0
+
+        # Default (no kwarg) is realtime.
+        await ledger.upsert_session("s-rt", "ph", "/p")
+        row = await ledger.get_session("s-rt")
+        assert row["is_backlog"] == 0
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
 async def test_record_claim_and_drift() -> None:
     ledger = Ledger()
     await ledger.connect()
