@@ -42,60 +42,14 @@ def _kind_profile(
     display_kind: str | None = None,
 ) -> dict[str, Any]:
     cfg = get_config()
-    # Per-kind sampler resolution mirrors LocalLLMClient — keeping the
-    # logic in lockstep so the displayed values are what'll actually
-    # be sent on the next call.
-    temperature = {
-        "synth": cfg.local_llm_temperature_synth,
-        "drift": cfg.local_llm_temperature_drift,
-        "query": cfg.local_llm_temperature_query,
-        "rubric": cfg.local_llm_temperature_rubric,
-        "consolidator": cfg.local_llm_temperature_consolidator,
-    }[kind]
-    if temperature is None:
-        temperature = cfg.local_llm_temperature
-    presence = {
-        "synth": cfg.local_llm_presence_penalty_synth,
-        "drift": cfg.local_llm_presence_penalty_drift,
-        "query": cfg.local_llm_presence_penalty_query,
-        "rubric": cfg.local_llm_presence_penalty_rubric,
-        "consolidator": cfg.local_llm_presence_penalty_consolidator,
-    }[kind]
-    if presence is None:
-        presence = cfg.local_llm_presence_penalty
-    max_tokens = {
-        "synth": cfg.local_llm_max_tokens_synth,
-        "drift": cfg.local_llm_max_tokens_drift,
-        "query": cfg.local_llm_max_tokens_query,
-        "rubric": cfg.local_llm_max_tokens_rubric,
-        "consolidator": cfg.local_llm_max_tokens_consolidator,
-    }[kind]
-    enable_thinking = {
-        "synth": cfg.local_llm_enable_thinking_synth,
-        "drift": cfg.local_llm_enable_thinking_drift,
-        "query": cfg.local_llm_enable_thinking_query,
-        "rubric": cfg.local_llm_enable_thinking_rubric,
-        "consolidator": cfg.local_llm_enable_thinking_consolidator,
-    }[kind]
-    model_override = {
-        "synth": cfg.local_llm_model_synth,
-        "drift": cfg.local_llm_model_drift,
-        "query": cfg.local_llm_model_query,
-        "rubric": cfg.local_llm_model_rubric,
-        "consolidator": cfg.local_llm_model_consolidator,
-    }[kind]
+    # Sampler + max_tokens are global as of the post-rename schema
+    # slim — what differs per kind is the prompt, which is the part
+    # that earns user attention on the Settings transparency panel.
     return {
         "kind": display_kind or kind,
-        "model": model_override or cfg.local_llm_model,
-        "model_overridden": bool(model_override),
-        "max_tokens": max_tokens,
-        "temperature": temperature,
-        "presence_penalty": presence,
-        "top_p": cfg.local_llm_top_p,
-        "top_k": cfg.local_llm_top_k,
-        "min_p": cfg.local_llm_min_p,
-        "repetition_penalty": cfg.local_llm_repetition_penalty,
-        "enable_thinking": enable_thinking,
+        "model": cfg.local_llm_model,
+        "max_tokens": cfg.local_llm_max_tokens,
+        "temperature": cfg.local_llm_temperature,
         "system_prompt": system,
         "user_prompt_template": user_template,
     }

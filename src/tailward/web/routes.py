@@ -211,12 +211,11 @@ def mount_web(app: FastAPI) -> None:
     async def llm_metrics_summary(request: Request) -> JSONResponse:
         """Per-call-kind aggregates of LLM call instrumentation.
 
-        Answers the open question of whether ``local_llm_max_tokens_rubric``
-        / ``_consolidator`` are silently truncating mid-think. Read
-        the ``n_length`` count and the ratio of ``avg_completion`` to
-        ``configured_max_tokens`` per kind; high ``n_length`` with
-        ``avg_completion`` near ``configured_max_tokens`` is the smoking
-        gun.
+        Answers the open question of whether ``local_llm_max_tokens``
+        is silently truncating mid-think. Read the ``n_length`` count
+        and the ratio of ``avg_completion`` to ``configured_max_tokens``
+        per kind; high ``n_length`` with ``avg_completion`` near the
+        configured cap is the smoking gun.
         """
         daemon = request.app.state.daemon
         rows = await daemon.ledger.llm_call_metrics_summary()

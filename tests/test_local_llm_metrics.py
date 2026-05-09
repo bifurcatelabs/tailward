@@ -119,7 +119,10 @@ async def test_complete_records_metric_on_success(tmp_path) -> None:
     assert row["finish_reason"] == "stop"
     assert row["completion_tokens"] == 200
     assert row["reasoning_tokens"] == 900
-    assert row["enable_thinking"] in (0, 1)
+    # enable_thinking is always recorded as None now — tailward no
+    # longer drives that flag, the model server does. Schema column
+    # stays for historical rows that may have a value.
+    assert row["enable_thinking"] is None
     assert row["max_tokens"] is not None
     assert row["error"] is None
     await ledger.close()
@@ -164,11 +167,11 @@ async def test_complete_records_metric_on_length_truncation(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_per_kind_temperature_and_presence_flow_to_api(tmp_path) -> None:
-    """Per-call-kind sampler overrides reach the underlying chat-completion
-    call. Regression for the Qwen3 profile split: rubric uses the
-    precise-coding profile (temp=0.6, presence=0.0); other thinking-on
-    kinds use the general profile (temp=1.0, presence=1.5)."""
+async def test_global_temperature_flows_to_api(tmp_path) -> None:
+    """The single global temperature reaches every call regardless of
+    kind. Per-call-kind sampler differentiation was retired in the
+    schema slim — what differs per kind is the prompt, not the sampler.
+    """
     db = tmp_path / "ledger.db"
     ledger = Ledger(db_path=db)
     await ledger.connect()
@@ -189,17 +192,15 @@ async def test_per_kind_temperature_and_presence_flow_to_api(tmp_path) -> None:
 
     await client.complete("sys", "user", kind="rubric")
     assert captured["temperature"] == pytest.approx(0.6)
-    assert captured["presence_penalty"] == pytest.approx(0.0)
+    assert "presence_penalty" not in captured
 
     captured.clear()
     await client.complete("sys", "user", kind="synth")
-    assert captured["temperature"] == pytest.approx(1.0)
-    assert captured["presence_penalty"] == pytest.approx(1.5)
+    assert captured["temperature"] == pytest.approx(0.6)
 
     captured.clear()
     await client.complete("sys", "user", kind="drift")
-    assert captured["temperature"] == pytest.approx(1.0)
-    assert captured["presence_penalty"] == pytest.approx(1.5)
+    assert captured["temperature"] == pytest.approx(0.6)
 
     await ledger.close()
 

@@ -52,61 +52,13 @@ class LocalLLMClient:
         self._ledger = ledger
         self._loop = loop
 
-    def _max_tokens_for(self, kind: CallKind) -> int:
-        cfg = self._cfg
-        return {
-            "synth": cfg.local_llm_max_tokens_synth,
-            "drift": cfg.local_llm_max_tokens_drift,
-            "query": cfg.local_llm_max_tokens_query,
-            "rubric": cfg.local_llm_max_tokens_rubric,
-            "consolidator": cfg.local_llm_max_tokens_consolidator,
-        }[kind]
-
-    def _thinking_for(self, kind: CallKind) -> bool:
-        cfg = self._cfg
-        return {
-            "synth": cfg.local_llm_enable_thinking_synth,
-            "drift": cfg.local_llm_enable_thinking_drift,
-            "query": cfg.local_llm_enable_thinking_query,
-            "rubric": cfg.local_llm_enable_thinking_rubric,
-            "consolidator": cfg.local_llm_enable_thinking_consolidator,
-        }[kind]
-
-    def _model_for(self, kind: CallKind) -> str:
-        cfg = self._cfg
-        override = {
-            "synth": cfg.local_llm_model_synth,
-            "drift": cfg.local_llm_model_drift,
-            "query": cfg.local_llm_model_query,
-            "rubric": cfg.local_llm_model_rubric,
-            "consolidator": cfg.local_llm_model_consolidator,
-        }[kind]
-        return override or cfg.local_llm_model
-
-    def _temperature_for(self, kind: CallKind) -> float:
-        cfg = self._cfg
-        override = {
-            "synth": cfg.local_llm_temperature_synth,
-            "drift": cfg.local_llm_temperature_drift,
-            "query": cfg.local_llm_temperature_query,
-            "rubric": cfg.local_llm_temperature_rubric,
-            "consolidator": cfg.local_llm_temperature_consolidator,
-        }[kind]
-        return cfg.local_llm_temperature if override is None else override
-
-    def _presence_penalty_for(self, kind: CallKind) -> float:
-        cfg = self._cfg
-        override = {
-            "synth": cfg.local_llm_presence_penalty_synth,
-            "drift": cfg.local_llm_presence_penalty_drift,
-            "query": cfg.local_llm_presence_penalty_query,
-            "rubric": cfg.local_llm_presence_penalty_rubric,
-            "consolidator": cfg.local_llm_presence_penalty_consolidator,
-        }[kind]
-        return cfg.local_llm_presence_penalty if override is None else override
-
     def resolve_model(self, kind: CallKind) -> str:
-        return self._model_for(kind)
+        # ``kind`` is preserved on the public method for caller
+        # compatibility and metric attribution, even though the model
+        # is now a single global setting (the per-kind override knobs
+        # were retired). If you need to route different kinds to
+        # different model quants again, that's the place to add it back.
+        return self._cfg.local_llm_model
 
     async def complete(
         self,
@@ -139,31 +91,16 @@ class LocalLLMClient:
         kind: CallKind,
     ) -> str:
         cfg = self._cfg
-        # Caller-passed temperature is the strongest override; otherwise
-        # the per-kind setting (which itself falls back to the global
-        # ``local_llm_temperature`` if the kind override is ``None``).
-        temp = self._temperature_for(kind) if temperature is None else temperature
-        mt = self._max_tokens_for(kind) if max_tokens is None else max_tokens
-        thinking = self._thinking_for(kind)
-        model = self._model_for(kind)
-        presence_penalty = self._presence_penalty_for(kind)
-
-        extra_body: dict[str, Any] = {
-            "top_k": cfg.local_llm_top_k,
-            "min_p": cfg.local_llm_min_p,
-            "repetition_penalty": cfg.local_llm_repetition_penalty,
-            "chat_template_kwargs": {
-                "enable_thinking": thinking,
-            },
-        }
+        # Caller-passed values override config; otherwise the single
+        # global setting applies to every call.
+        temp = cfg.local_llm_temperature if temperature is None else temperature
+        mt = cfg.local_llm_max_tokens if max_tokens is None else max_tokens
+        model = cfg.local_llm_model
 
         kwargs: dict[str, Any] = dict(
             model=model,
             temperature=temp,
-            top_p=cfg.local_llm_top_p,
-            presence_penalty=presence_penalty,
             max_tokens=mt,
-            extra_body=extra_body,
             messages=[
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -174,12 +111,15 @@ class LocalLLMClient:
 
         # Metric scaffold — every code path below funnels back through
         # ``_record_metric`` so the row lands whether the call succeeds,
-        # raises, or hits the length-truncation branch.
+        # raises, or hits the length-truncation branch. ``enable_thinking``
+        # stays in the metric schema (column already exists) but is
+        # always None now: tailward no longer drives that flag, the
+        # serving stack does.
         metric: dict[str, Any] = {
             "call_kind": kind,
             "model": model,
             "max_tokens": mt,
-            "enable_thinking": thinking,
+            "enable_thinking": None,
             "prompt_tokens": None,
             "completion_tokens": None,
             "reasoning_tokens": None,
@@ -206,18 +146,18 @@ class LocalLLMClient:
 
         content = choice.message.content or ""
 
-        # Thinking models may run out of budget inside the reasoning
-        # preamble and return empty content with finish_reason="length". Make
-        # that failure mode loud and actionable. Metric is recorded *before*
-        # we raise so the truncation event is captured for the dashboard.
+        # Thinking-mode models can exhaust the budget inside the
+        # reasoning preamble and return empty content with
+        # finish_reason="length". Surface loudly. Metric is recorded
+        # before raising so the truncation lands in the dashboard.
         if not content and choice.finish_reason == "length":
             metric["error"] = "empty content with finish_reason=length"
             self._record_metric(metric)
             raise RuntimeError(
                 "Local LLM returned empty content with finish_reason=length; "
-                f"the {'thinking preamble' if thinking else 'output'} consumed the whole budget. "
-                f"Raise local_llm_max_tokens_{kind} (currently {mt})"
-                + (f" or set local_llm_enable_thinking_{kind}=false." if thinking else ".")
+                f"the output budget ({mt}) ran out, likely inside a thinking "
+                "preamble. Raise local_llm_max_tokens or disable thinking "
+                "mode at the model server."
             )
 
         self._record_metric(metric)

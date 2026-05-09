@@ -35,76 +35,30 @@ def is_loopback_bind(host: str) -> bool:
 class Config:
     # Local OpenAI-compatible LLM endpoint.
     local_llm_endpoint: str = "http://127.0.0.1:8080/v1"
-    local_llm_model: str = "qwen2.5-8b-instruct"
+    # Model name your serving stack expects. Empty = pick a model.
+    # Recent dense models that work well on consumer-class hardware:
+    # Qwen3.6-27B (Q6_K for accuracy, Q4 for speed), Gemma-4-31B-Instruct.
+    # Whatever you pick has to match what your local server is serving.
+    local_llm_model: str = ""
     local_llm_api_key: str = "not-needed"
-
-    # Per-call-kind model overrides (empty = fall back to local_llm_model).
-    # Useful when the same endpoint serves multiple quants or sizes: e.g.
-    # route drift at a higher-quality quant than synth if rubric
-    # classification degrades under heavy quantization.
-    local_llm_model_synth: str = ""
-    local_llm_model_drift: str = ""
-    local_llm_model_query: str = ""
-    local_llm_model_rubric: str = ""
-    local_llm_model_consolidator: str = ""
-
-    # Sampling (defaults match Qwen3 thinking-mode profile).
-    local_llm_temperature: float = 0.6
-    local_llm_top_p: float = 0.95
-    local_llm_top_k: int = 20
-    local_llm_min_p: float = 0.0
-    local_llm_presence_penalty: float = 0.0
-    local_llm_repetition_penalty: float = 1.0
-
-    # Per-call-kind sampler overrides. Qwen3's model card publishes
-    # distinct profiles per task shape:
-    #   * thinking + general:        temp=1.0, presence_penalty=1.5
-    #   * thinking + precise coding: temp=0.6, presence_penalty=0.0
-    #   * non-thinking:              temp=1.0, presence_penalty=1.5
-    # These per-kind defaults match those profiles. ``None`` (or unset in
-    # config.toml) falls back to the global ``local_llm_temperature`` /
-    # ``local_llm_presence_penalty`` above. Other thinking models tend to
-    # behave similarly enough that the same defaults are a reasonable
-    # starting point; tune per endpoint as needed.
-    local_llm_temperature_synth: float | None = 1.0          # generative + thinking
-    local_llm_temperature_drift: float | None = 1.0          # classification
-    local_llm_temperature_query: float | None = 1.0          # classification
-    local_llm_temperature_rubric: float | None = 0.6         # judging — stability over diversity
-    local_llm_temperature_consolidator: float | None = 1.0   # generative + thinking
-    local_llm_presence_penalty_synth: float | None = 1.5
-    local_llm_presence_penalty_drift: float | None = 1.5
-    local_llm_presence_penalty_query: float | None = 1.5
-    local_llm_presence_penalty_rubric: float | None = 0.0
-    local_llm_presence_penalty_consolidator: float | None = 1.5
 
     # Context window of the served model (used to size transcript slices).
     local_llm_context_tokens: int = 32768
 
-    # Per-call-kind output budgets. Thinking models need generous headroom:
-    # the budget covers the entire ``<think>`` preamble *plus* the visible
-    # output, and thinking-class models routinely burn 1500-3000 tokens
-    # inside thinking before producing the first output token.
-    #
-    # ``rubric`` was 2500 until v0.2 instrumentation (commit 9e40c5a) showed
-    # 33% of rubric calls hitting ``finish_reason='length'`` with the model
-    # truncating mid-think and returning empty content. Bumped to 6000 to
-    # match the drift/query budgets users typically configure.
-    local_llm_max_tokens_synth: int = 6000         # Phase 1 synthesis
-    local_llm_max_tokens_drift: int = 1500         # per-turn drift verdict (no thinking by default)
-    local_llm_max_tokens_query: int = 1500         # query_intent answer (no thinking by default)
-    local_llm_max_tokens_rubric: int = 6000        # per-sample 4-dimension rubric, thinking on
-    local_llm_max_tokens_consolidator: int = 8000  # end-of-session 8-mode report card, thinking on
+    # Single global temperature applied to every call. Sampler control
+    # used to be per-call-kind, mirroring profiles published in a
+    # particular model card; that granularity wasn't earning its keep
+    # across endpoints and made the schema noisier than the actual
+    # behavioral axis (which is determined upstream by model + serving
+    # stack, not by this client).
+    local_llm_temperature: float = 0.6
 
-    # Per-call-kind thinking-mode toggle. Synth benefits from deep
-    # reasoning; drift/query are fast-path structured tasks where thinking
-    # just burns tokens. Routed via
-    # ``extra_body.chat_template_kwargs.enable_thinking`` and silently
-    # ignored by endpoints that don't support it.
-    local_llm_enable_thinking_synth: bool = True
-    local_llm_enable_thinking_drift: bool = False
-    local_llm_enable_thinking_query: bool = False
-    local_llm_enable_thinking_rubric: bool = True
-    local_llm_enable_thinking_consolidator: bool = True
+    # Output budget. Thinking models need generous headroom — the budget
+    # covers any reasoning preamble plus the visible output. Default
+    # sized for thinking-class models on a 32k-context server. Used to
+    # be split per call kind; collapsed to a single knob since the
+    # per-kind values were converging in practice anyway.
+    local_llm_max_tokens: int = 8000
 
     # Daemon HTTP (hook IPC + web UI) on localhost.
     http_host: str = "127.0.0.1"
@@ -135,7 +89,7 @@ class Config:
     phase2_turns_default: int = 8
     drift_threshold: float = 0.35  # pattern-score above which LLM check runs
     per_turn_budget_seconds: float = 3.0
-    per_turn_hard_cap_seconds: float = 30.0  # thinking-mode Qwen calls can run 3-10s
+    per_turn_hard_cap_seconds: float = 30.0  # thinking-mode LLM calls can run 3-10s
 
     # Claim verification.
     claim_grep_budget: int = 200  # max files scanned per claim

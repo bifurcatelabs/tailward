@@ -115,7 +115,7 @@
     </div>
 
     <p class="footer">
-      decision rule: bump <code>local_llm_max_tokens_&lt;kind&gt;</code> if
+      decision rule: bump <code>local_llm_max_tokens</code> if
       <code>finish=length</code> &gt; 0 or if avg completion sits past 75% of
       cap with thinking enabled. the table is the inspection surface for the
       open token-budget calibration TODO.
