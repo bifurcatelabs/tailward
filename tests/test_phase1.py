@@ -69,8 +69,8 @@ def test_payload_to_intent_fills_sections() -> None:
     assert out.front.session_mode == "build"
 
 
-class _FakeQwen:
-    """Drop-in stand-in for QwenClient with a canned JSON response."""
+class _FakeLocalLLM:
+    """Drop-in stand-in for LocalLLMClient with a canned JSON response."""
 
     def __init__(self, payload: dict) -> None:
         self._payload = payload
@@ -103,22 +103,22 @@ def test_render_prior_intent_handles_empty_intent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_comprehensive_synth_passes_prior_intent_to_qwen(
+async def test_comprehensive_synth_passes_prior_intent_to_llm(
     tmp_path: Path,
 ) -> None:
     """The comprehensive synth must include the prior intent's sections in
-    the user prompt so Qwen can merge new transcript activity with the
-    accumulated rules/threads instead of replacing them.
+    the user prompt so the local LLM can merge new transcript activity
+    with the accumulated rules/threads instead of replacing them.
 
     Regression test for the synthesis-clobber bug observed 2026-05-04 —
-    Qwen never saw the prior intent's Active Rules, so its fresh-from-
-    transcript synthesis silently overwrote them on every comprehensive
-    regeneration. Fix: pass intent.sections to Qwen alongside the
-    transcript.
+    the synth call never saw the prior intent's Active Rules, so its
+    fresh-from-transcript output silently overwrote them on every
+    comprehensive regeneration. Fix: pass intent.sections to the synth
+    call alongside the transcript.
     """
     captured: list[tuple[str, str]] = []
 
-    class _CapturingQwen:
+    class _CapturingLocalLLM:
         async def complete_json(self, system, user, **kw):
             captured.append((system, user))
             return {
@@ -149,15 +149,15 @@ async def test_comprehensive_synth_passes_prior_intent_to_qwen(
         Path(__file__).parent / "fixtures" / "transcripts" / "sample_build.jsonl"
     )
 
-    await synthesize_async(_CapturingQwen(), transcript, intent)
+    await synthesize_async(_CapturingLocalLLM(), transcript, intent)
 
     assert len(captured) == 1
     system, user = captured[0]
     # SYSTEM prompt instructs merge semantics
     assert "merg" in system.lower()
     assert "preserve" in system.lower() or "accumulate" in system.lower()
-    # User prompt actually contains the prior rules + goal so Qwen can
-    # merge them into its output rather than re-deriving from scratch.
+    # User prompt actually contains the prior rules + goal so the synth
+    # can merge them into its output rather than re-deriving from scratch.
     assert "PRIOR INTENT" in user
     assert "RECENT TRANSCRIPT" in user
     assert "distinctive prior rule alpha" in user
@@ -170,7 +170,7 @@ def test_synthesize_writes_valid_intent(tmp_path: Path) -> None:
         Path(__file__).parent / "fixtures" / "transcripts" / "sample_build.jsonl"
     )
     intent = empty_intent("/tmp/fake", "fake")
-    fake = _FakeQwen(
+    fake = _FakeLocalLLM(
         {
             "receiving_posture": "open, no-preamble",
             "active_goal": "refactor the transcript parser to use pydantic",

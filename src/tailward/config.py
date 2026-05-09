@@ -33,75 +33,78 @@ def is_loopback_bind(host: str) -> bool:
 
 @dataclass
 class Config:
-    # Qwen / llama.cpp OpenAI-compatible endpoint.
-    qwen_endpoint: str = "http://127.0.0.1:8080/v1"
-    qwen_model: str = "qwen2.5-8b-instruct"
-    qwen_api_key: str = "not-needed"
+    # Local OpenAI-compatible LLM endpoint.
+    local_llm_endpoint: str = "http://127.0.0.1:8080/v1"
+    local_llm_model: str = "qwen2.5-8b-instruct"
+    local_llm_api_key: str = "not-needed"
 
-    # Per-call-kind model overrides (empty = fall back to qwen_model). Useful
-    # when the same endpoint serves multiple quants or sizes: e.g. route
-    # drift at a higher-quality quant than synth if rubric classification
-    # degrades under heavy quantization.
-    qwen_model_synth: str = ""
-    qwen_model_drift: str = ""
-    qwen_model_query: str = ""
-    qwen_model_rubric: str = ""
-    qwen_model_consolidator: str = ""
+    # Per-call-kind model overrides (empty = fall back to local_llm_model).
+    # Useful when the same endpoint serves multiple quants or sizes: e.g.
+    # route drift at a higher-quality quant than synth if rubric
+    # classification degrades under heavy quantization.
+    local_llm_model_synth: str = ""
+    local_llm_model_drift: str = ""
+    local_llm_model_query: str = ""
+    local_llm_model_rubric: str = ""
+    local_llm_model_consolidator: str = ""
 
-    # Sampling (Qwen3 thinking-mode defaults).
-    qwen_temperature: float = 0.6
-    qwen_top_p: float = 0.95
-    qwen_top_k: int = 20
-    qwen_min_p: float = 0.0
-    qwen_presence_penalty: float = 0.0
-    qwen_repetition_penalty: float = 1.0
+    # Sampling (defaults match Qwen3 thinking-mode profile).
+    local_llm_temperature: float = 0.6
+    local_llm_top_p: float = 0.95
+    local_llm_top_k: int = 20
+    local_llm_min_p: float = 0.0
+    local_llm_presence_penalty: float = 0.0
+    local_llm_repetition_penalty: float = 1.0
 
-    # Per-call-kind sampler overrides. Qwen3 publishes distinct profiles
-    # per task shape (per the model card):
+    # Per-call-kind sampler overrides. Qwen3's model card publishes
+    # distinct profiles per task shape:
     #   * thinking + general:        temp=1.0, presence_penalty=1.5
     #   * thinking + precise coding: temp=0.6, presence_penalty=0.0
     #   * non-thinking:              temp=1.0, presence_penalty=1.5
     # These per-kind defaults match those profiles. ``None`` (or unset in
-    # config.toml) falls back to the global ``qwen_temperature`` /
-    # ``qwen_presence_penalty`` above — backward compatible for users
-    # who set globals before this differentiation existed.
-    qwen_temperature_synth: float | None = 1.0          # generative + thinking
-    qwen_temperature_drift: float | None = 1.0          # classification
-    qwen_temperature_query: float | None = 1.0          # classification
-    qwen_temperature_rubric: float | None = 0.6         # judging — stability over diversity
-    qwen_temperature_consolidator: float | None = 1.0   # generative + thinking
-    qwen_presence_penalty_synth: float | None = 1.5
-    qwen_presence_penalty_drift: float | None = 1.5
-    qwen_presence_penalty_query: float | None = 1.5
-    qwen_presence_penalty_rubric: float | None = 0.0
-    qwen_presence_penalty_consolidator: float | None = 1.5
+    # config.toml) falls back to the global ``local_llm_temperature`` /
+    # ``local_llm_presence_penalty`` above. Other thinking models tend to
+    # behave similarly enough that the same defaults are a reasonable
+    # starting point; tune per endpoint as needed.
+    local_llm_temperature_synth: float | None = 1.0          # generative + thinking
+    local_llm_temperature_drift: float | None = 1.0          # classification
+    local_llm_temperature_query: float | None = 1.0          # classification
+    local_llm_temperature_rubric: float | None = 0.6         # judging — stability over diversity
+    local_llm_temperature_consolidator: float | None = 1.0   # generative + thinking
+    local_llm_presence_penalty_synth: float | None = 1.5
+    local_llm_presence_penalty_drift: float | None = 1.5
+    local_llm_presence_penalty_query: float | None = 1.5
+    local_llm_presence_penalty_rubric: float | None = 0.0
+    local_llm_presence_penalty_consolidator: float | None = 1.5
 
     # Context window of the served model (used to size transcript slices).
-    qwen_context_tokens: int = 32768
+    local_llm_context_tokens: int = 32768
 
-    # Per-call-type output budgets. Thinking models need generous headroom
-    # — the budget covers the entire ``<think>`` preamble *plus* the visible
-    # output, and Qwen3-class models routinely burn 1500-3000 tokens inside
-    # thinking before producing the first output token.
+    # Per-call-kind output budgets. Thinking models need generous headroom:
+    # the budget covers the entire ``<think>`` preamble *plus* the visible
+    # output, and thinking-class models routinely burn 1500-3000 tokens
+    # inside thinking before producing the first output token.
     #
     # ``rubric`` was 2500 until v0.2 instrumentation (commit 9e40c5a) showed
     # 33% of rubric calls hitting ``finish_reason='length'`` with the model
     # truncating mid-think and returning empty content. Bumped to 6000 to
     # match the drift/query budgets users typically configure.
-    qwen_max_tokens_synth: int = 6000         # Phase 1 synthesis
-    qwen_max_tokens_drift: int = 1500         # per-turn drift verdict (no thinking by default)
-    qwen_max_tokens_query: int = 1500         # query_intent answer (no thinking by default)
-    qwen_max_tokens_rubric: int = 6000        # per-sample 4-dimension rubric, thinking on
-    qwen_max_tokens_consolidator: int = 8000  # end-of-session 8-mode report card, thinking on
+    local_llm_max_tokens_synth: int = 6000         # Phase 1 synthesis
+    local_llm_max_tokens_drift: int = 1500         # per-turn drift verdict (no thinking by default)
+    local_llm_max_tokens_query: int = 1500         # query_intent answer (no thinking by default)
+    local_llm_max_tokens_rubric: int = 6000        # per-sample 4-dimension rubric, thinking on
+    local_llm_max_tokens_consolidator: int = 8000  # end-of-session 8-mode report card, thinking on
 
-    # Qwen3 thinking mode, per call-type. Synth benefits from deep reasoning;
-    # drift/query are fast-path structured tasks where thinking just burns
-    # tokens. Routed via ``extra_body.chat_template_kwargs.enable_thinking``.
-    qwen_enable_thinking_synth: bool = True
-    qwen_enable_thinking_drift: bool = False
-    qwen_enable_thinking_query: bool = False
-    qwen_enable_thinking_rubric: bool = True
-    qwen_enable_thinking_consolidator: bool = True
+    # Per-call-kind thinking-mode toggle. Synth benefits from deep
+    # reasoning; drift/query are fast-path structured tasks where thinking
+    # just burns tokens. Routed via
+    # ``extra_body.chat_template_kwargs.enable_thinking`` and silently
+    # ignored by endpoints that don't support it.
+    local_llm_enable_thinking_synth: bool = True
+    local_llm_enable_thinking_drift: bool = False
+    local_llm_enable_thinking_query: bool = False
+    local_llm_enable_thinking_rubric: bool = True
+    local_llm_enable_thinking_consolidator: bool = True
 
     # Daemon HTTP (hook IPC + web UI) on localhost.
     http_host: str = "127.0.0.1"
@@ -141,7 +144,7 @@ class Config:
     hook_timeout_ms: int = 400
 
     # Failure-mode audit layer (v1.1).
-    # Rubric sampling: Qwen-judged rubric every N assistant turns, plus
+    # Rubric sampling: LLM-judged rubric every N assistant turns, plus
     # triggered runs on scope creep and first-person completion claims.
     rubric_turn_interval: int = 5
     rubric_min_text_chars: int = 80     # skip trivially short turns

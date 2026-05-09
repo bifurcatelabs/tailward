@@ -30,7 +30,7 @@ export const FILTER_GROUPS = [
   {
     key: 'rubric', label: 'rubric',
     types: ['rubric_in_flight', 'rubric_sample', 'rubric_done'],
-    description: 'Qwen-judged scoring runs — in-flight indicator, per-dimension score samples, and the done marker. Includes both assistant-side and self (user-side) rubric',
+    description: 'LLM-judged scoring runs — in-flight indicator, per-dimension score samples, and the done marker. Includes both assistant-side and self (user-side) rubric',
   },
   {
     key: 'synthesis', label: 'synthesis',

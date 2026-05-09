@@ -13,7 +13,7 @@ from tailward.daemon.session_close import FAILURE_MODES, SessionCloseDetector
 from tailward.paths import project_hash
 
 
-class _FakeQwen:
+class _FakeLocalLLM:
     def __init__(self, payload: dict) -> None:
         self.payload = payload
 
@@ -31,7 +31,7 @@ async def test_consolidator_writes_eight_mode_report(tmp_path: Path) -> None:
 
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
-        # Build a canned Qwen response covering all 8 mode ids.
+        # Build a canned LLM response covering all 8 mode ids.
         modes = {
             str(mid): {
                 "score": 4.0,
@@ -40,7 +40,7 @@ async def test_consolidator_writes_eight_mode_report(tmp_path: Path) -> None:
             }
             for mid, _, _ in FAILURE_MODES
         }
-        daemon.qwen = _FakeQwen({"modes": modes})
+        daemon.local_llm = _FakeLocalLLM({"modes": modes})
 
         session_id = "s-close"
         ph = project_hash(str(proj))
@@ -91,8 +91,8 @@ async def test_consolidator_writes_eight_mode_report(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_consolidator_skips_llm_on_backlog(tmp_path: Path) -> None:
     """Backlog sessions (seeded historical, never observed live) honor
-    the no-LLM-on-backlog rule. Even with qwen wired up, the
-    consolidator skips the LLM call and lands a rule-based-only
+    the no-LLM-on-backlog rule. Even with the LLM client wired up,
+    the consolidator skips the LLM call and lands a rule-based-only
     session report. Live publishes carry the session's actual close
     time as event_ts and skip broadcast so past-session views see
     the report at the right point in time without flooding the live
@@ -104,15 +104,15 @@ async def test_consolidator_skips_llm_on_backlog(tmp_path: Path) -> None:
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
 
-        # qwen is wired up — proves the gate is what's skipping the
-        # LLM call, not the absent-qwen branch.
+        # LLM client is wired up — proves the gate is what's skipping
+        # the LLM call, not the absent-client branch.
         modes = {
             str(mid): {"score": 4.0, "evidence": "ev", "suggestion": "sug"}
             for mid, _, _ in FAILURE_MODES
         }
         called = []
 
-        class _FakeQwenTracking:
+        class _FakeLocalLLMTracking:
             payload = {"modes": modes}
 
             async def complete_json(self, system: str, user: str, **kw) -> dict:
@@ -122,7 +122,7 @@ async def test_consolidator_skips_llm_on_backlog(tmp_path: Path) -> None:
             def resolve_model(self, kind: str) -> str:
                 return "test-consolidator"
 
-        daemon.qwen = _FakeQwenTracking()
+        daemon.local_llm = _FakeLocalLLMTracking()
 
         session_id = "s-backlog"
         ph = project_hash(str(proj))
@@ -165,9 +165,9 @@ async def test_progress_aggregation_penalises_violations(tmp_path: Path) -> None
 
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
-        daemon.qwen = None  # Force pure-progress path.
+        daemon.local_llm = None  # Force pure-progress path.
 
-        session_id = "s-noqwen"
+        session_id = "s-no-llm"
         ph = project_hash(str(proj))
         await daemon.ledger.upsert_session(session_id, ph, str(proj))
 

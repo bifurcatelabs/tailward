@@ -5,7 +5,7 @@ with ``last_seen_at`` older than ``session_idle_seconds`` is marked closed
 and queued for consolidation. The consolidator reads that session's
 ``constraint_violations`` / ``scope_snapshots`` / ``rubric_scores`` rows,
 plus the final assistant-text window, and produces an 8-dimension report
-card via one Qwen call.
+card via one local LLM call.
 
 Results land in ``session_reports`` and fire a single
 ``report_ready`` live event for the UI's right rail.
@@ -178,12 +178,12 @@ class SessionCloseDetector:
 
         model_used = None
         llm_scores: dict[int, dict] = {}
-        if self._daemon.qwen is not None and not cs.is_backlog:
+        if self._daemon.local_llm is not None and not cs.is_backlog:
             try:
                 llm_scores = await self._call_consolidator(
                     cs, violations, snapshots, rubric_rows
                 )
-                model_used = self._daemon.qwen.resolve_model("consolidator")
+                model_used = self._daemon.local_llm.resolve_model("consolidator")
             except Exception as e:
                 log.warning("consolidator LLM call failed: %s", e)
                 llm_scores = {}
@@ -337,7 +337,7 @@ class SessionCloseDetector:
             rubric_json=r_summary,
         )
 
-        payload = await self._daemon.qwen.complete_json(
+        payload = await self._daemon.local_llm.complete_json(
             PROMPT_SYSTEM, user, kind="consolidator"
         )
         modes = payload.get("modes") or {}

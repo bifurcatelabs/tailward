@@ -1,4 +1,4 @@
-"""Rubric worker: cadence + trigger + Qwen JSON parsing."""
+"""Rubric worker: cadence + trigger + LLM JSON parsing."""
 
 from __future__ import annotations
 
@@ -15,7 +15,7 @@ from tailward.paths import project_hash
 from tailward.schema.events import TranscriptEvent
 
 
-class _FakeQwen:
+class _FakeLocalLLM:
     model = "test-model"
 
     def __init__(self, payload: dict) -> None:
@@ -57,8 +57,8 @@ async def test_rubric_fires_on_cadence_and_records_all_dimensions(tmp_path: Path
             name: {"score": 4, "evidence": f"ev-{name}", "suggestion": "keep going"}
             for name, _ in DIMENSIONS
         }
-        daemon.qwen = _FakeQwen(payload)
-        daemon.rubric._daemon.qwen = daemon.qwen  # noqa: SLF001
+        daemon.local_llm = _FakeLocalLLM(payload)
+        daemon.rubric._daemon.local_llm = daemon.local_llm  # noqa: SLF001
 
         fs = SimpleNamespace(
             session_id="s-rubric",
@@ -109,8 +109,8 @@ async def test_rubric_triggers_on_completion_claim(tmp_path: Path) -> None:
             name: {"score": 2, "evidence": "brief", "suggestion": ""}
             for name, _ in DIMENSIONS
         }
-        daemon.qwen = _FakeQwen(payload)
-        daemon.rubric._daemon.qwen = daemon.qwen  # noqa: SLF001
+        daemon.local_llm = _FakeLocalLLM(payload)
+        daemon.rubric._daemon.local_llm = daemon.local_llm  # noqa: SLF001
 
         fs = SimpleNamespace(
             session_id="s-claim",

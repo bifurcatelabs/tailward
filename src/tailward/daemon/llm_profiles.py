@@ -20,13 +20,13 @@ from typing import Any
 from ..config import get_config
 from . import drift as drift_mod
 from . import rubric_worker, session_close
-from .qwen import CallKind
+from .local_llm import CallKind
 
 # Synth lives in tailward.phase1, imported lazily so this module can be
 # imported even before phase1's transcript-denoiser deps are loaded.
 # The MCP server module + its ``query`` prompt was retired in v2.0.0;
 # the ``query`` CallKind remains as the generic fallback in
-# qwen.QwenClient.complete() but has no surfaced prompt template.
+# LocalLLMClient.complete() but has no surfaced prompt template.
 
 
 def _synth_user_template() -> str:
@@ -42,59 +42,59 @@ def _kind_profile(
     display_kind: str | None = None,
 ) -> dict[str, Any]:
     cfg = get_config()
-    # Per-kind sampler resolution mirrors qwen.QwenClient — keeping the
+    # Per-kind sampler resolution mirrors LocalLLMClient — keeping the
     # logic in lockstep so the displayed values are what'll actually
     # be sent on the next call.
     temperature = {
-        "synth": cfg.qwen_temperature_synth,
-        "drift": cfg.qwen_temperature_drift,
-        "query": cfg.qwen_temperature_query,
-        "rubric": cfg.qwen_temperature_rubric,
-        "consolidator": cfg.qwen_temperature_consolidator,
+        "synth": cfg.local_llm_temperature_synth,
+        "drift": cfg.local_llm_temperature_drift,
+        "query": cfg.local_llm_temperature_query,
+        "rubric": cfg.local_llm_temperature_rubric,
+        "consolidator": cfg.local_llm_temperature_consolidator,
     }[kind]
     if temperature is None:
-        temperature = cfg.qwen_temperature
+        temperature = cfg.local_llm_temperature
     presence = {
-        "synth": cfg.qwen_presence_penalty_synth,
-        "drift": cfg.qwen_presence_penalty_drift,
-        "query": cfg.qwen_presence_penalty_query,
-        "rubric": cfg.qwen_presence_penalty_rubric,
-        "consolidator": cfg.qwen_presence_penalty_consolidator,
+        "synth": cfg.local_llm_presence_penalty_synth,
+        "drift": cfg.local_llm_presence_penalty_drift,
+        "query": cfg.local_llm_presence_penalty_query,
+        "rubric": cfg.local_llm_presence_penalty_rubric,
+        "consolidator": cfg.local_llm_presence_penalty_consolidator,
     }[kind]
     if presence is None:
-        presence = cfg.qwen_presence_penalty
+        presence = cfg.local_llm_presence_penalty
     max_tokens = {
-        "synth": cfg.qwen_max_tokens_synth,
-        "drift": cfg.qwen_max_tokens_drift,
-        "query": cfg.qwen_max_tokens_query,
-        "rubric": cfg.qwen_max_tokens_rubric,
-        "consolidator": cfg.qwen_max_tokens_consolidator,
+        "synth": cfg.local_llm_max_tokens_synth,
+        "drift": cfg.local_llm_max_tokens_drift,
+        "query": cfg.local_llm_max_tokens_query,
+        "rubric": cfg.local_llm_max_tokens_rubric,
+        "consolidator": cfg.local_llm_max_tokens_consolidator,
     }[kind]
     enable_thinking = {
-        "synth": cfg.qwen_enable_thinking_synth,
-        "drift": cfg.qwen_enable_thinking_drift,
-        "query": cfg.qwen_enable_thinking_query,
-        "rubric": cfg.qwen_enable_thinking_rubric,
-        "consolidator": cfg.qwen_enable_thinking_consolidator,
+        "synth": cfg.local_llm_enable_thinking_synth,
+        "drift": cfg.local_llm_enable_thinking_drift,
+        "query": cfg.local_llm_enable_thinking_query,
+        "rubric": cfg.local_llm_enable_thinking_rubric,
+        "consolidator": cfg.local_llm_enable_thinking_consolidator,
     }[kind]
     model_override = {
-        "synth": cfg.qwen_model_synth,
-        "drift": cfg.qwen_model_drift,
-        "query": cfg.qwen_model_query,
-        "rubric": cfg.qwen_model_rubric,
-        "consolidator": cfg.qwen_model_consolidator,
+        "synth": cfg.local_llm_model_synth,
+        "drift": cfg.local_llm_model_drift,
+        "query": cfg.local_llm_model_query,
+        "rubric": cfg.local_llm_model_rubric,
+        "consolidator": cfg.local_llm_model_consolidator,
     }[kind]
     return {
         "kind": display_kind or kind,
-        "model": model_override or cfg.qwen_model,
+        "model": model_override or cfg.local_llm_model,
         "model_overridden": bool(model_override),
         "max_tokens": max_tokens,
         "temperature": temperature,
         "presence_penalty": presence,
-        "top_p": cfg.qwen_top_p,
-        "top_k": cfg.qwen_top_k,
-        "min_p": cfg.qwen_min_p,
-        "repetition_penalty": cfg.qwen_repetition_penalty,
+        "top_p": cfg.local_llm_top_p,
+        "top_k": cfg.local_llm_top_k,
+        "min_p": cfg.local_llm_min_p,
+        "repetition_penalty": cfg.local_llm_repetition_penalty,
         "enable_thinking": enable_thinking,
         "system_prompt": system,
         "user_prompt_template": user_template,
@@ -147,8 +147,8 @@ def endpoint_summary() -> dict[str, Any]:
     api-key-presence). The literal API key value is never returned."""
     cfg = get_config()
     return {
-        "endpoint": cfg.qwen_endpoint,
-        "default_model": cfg.qwen_model,
-        "context_tokens": cfg.qwen_context_tokens,
-        "api_key_set": bool(cfg.qwen_api_key) and cfg.qwen_api_key != "not-needed",
+        "endpoint": cfg.local_llm_endpoint,
+        "default_model": cfg.local_llm_model,
+        "context_tokens": cfg.local_llm_context_tokens,
+        "api_key_set": bool(cfg.local_llm_api_key) and cfg.local_llm_api_key != "not-needed",
     }

@@ -749,7 +749,7 @@
     border: 1px solid rgba(95,195,167,0.25);
   }
   /* Visible "still working" dot for rubric_in_flight events. The
-     point is fail-loudly: a Qwen call is up, this might take 3-10s,
+     point is fail-loudly: an LLM call is up, this might take 3-10s,
      don't think the daemon's wedged. */
   .inflight-dot {
     width: 8px;

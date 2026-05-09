@@ -21,8 +21,8 @@ truth — bootstrap-correct across daemon restarts, no in-memory window
 to keep in sync. The denoised text is truncated from the back to fit
 ``synthesis_max_input_tokens`` so the most recent activity always wins.
 
-The synthesizer is the local LLM ("qwen") — same engine ``phase1.py``
-already uses for end-of-session synthesis. Each snapshot writes a
+The synthesizer is the local LLM — same engine ``phase1.py`` already
+uses for end-of-session synthesis. Each snapshot writes a
 sidecar metadata file (model + sampler kind + input chars + cap +
 event count) so A/B testing across models / prompts / sampler params
 is first-class.
@@ -296,7 +296,7 @@ class SynthesisWorker:
             await self._fire_incremental(state)
 
     async def _fire_incremental(self, state: _SessionState) -> None:
-        if self._daemon.qwen is None:
+        if self._daemon.local_llm is None:
             log.debug("synthesis skipped: no local LLM configured")
             return
         async with self._lock:
@@ -322,7 +322,7 @@ class SynthesisWorker:
         turn while fullness stays high; re-arms in ``_process`` when
         fullness drops back below the threshold (compaction reset).
         """
-        if self._daemon.qwen is None:
+        if self._daemon.local_llm is None:
             log.debug("comprehensive synthesis skipped: no local LLM configured")
             return
         if not state.project_path:
@@ -370,7 +370,7 @@ class SynthesisWorker:
 
         try:
             updated = await phase1.synthesize_async(
-                self._daemon.qwen, Path(jsonl_path), intent
+                self._daemon.local_llm, Path(jsonl_path), intent
             )
         except Exception as e:
             log.warning("comprehensive synthesis failed: %s", e)
@@ -440,7 +440,7 @@ class SynthesisWorker:
         threshold. Reuses the same writer + livebus event as periodic.
 
         Raises:
-            NoLocalLLM: when the daemon has no qwen client configured.
+            NoLocalLLM: when the daemon has no local LLM client configured.
             SynthesisInFlight: when another synth is already running
                 for this session (typically a periodic in flight).
 
@@ -461,7 +461,7 @@ class SynthesisWorker:
         if state.project_path is None:
             state.project_path = project_path
 
-        if self._daemon.qwen is None:
+        if self._daemon.local_llm is None:
             raise NoLocalLLM()
         async with self._lock:
             if state.in_flight:
@@ -594,7 +594,7 @@ class SynthesisWorker:
         backoff: periodic calls skip silently; on-demand calls raise
         ``SynthesisSuppressed``.
         """
-        if self._daemon.qwen is None:
+        if self._daemon.local_llm is None:
             log.debug("synthesis skipped: no local LLM configured")
             return None
 
@@ -634,7 +634,7 @@ class SynthesisWorker:
         else:
             user = "No content captured yet in this session."
         try:
-            output = await self._daemon.qwen.complete(
+            output = await self._daemon.local_llm.complete(
                 SYSTEM_INCREMENTAL, user, kind="synth"
             )
         except Exception as e:
@@ -730,7 +730,7 @@ class SynthesisWorker:
         atomic_write_text(snap_path, front + body + "\n")
 
         model = (
-            self._daemon.qwen.resolve_model("synth") if self._daemon.qwen else None
+            self._daemon.local_llm.resolve_model("synth") if self._daemon.local_llm else None
         )
         meta = {
             "trigger": trigger,

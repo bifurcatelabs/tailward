@@ -1,4 +1,4 @@
-"""Qwen / llama.cpp OpenAI-compatible client, serialized through a queue.
+"""Local OpenAI-compatible LLM client, serialized through a queue.
 
 Non-standard sampler params (``top_k``, ``min_p``, ``repetition_penalty``)
 are passed via ``extra_body`` so they route through proxies like LiteLLM to
@@ -6,9 +6,8 @@ the underlying llama.cpp / vLLM backend.
 
 Every call emits a ``llm_call_metrics`` ledger row (call kind, configured
 budget, finish_reason, prompt / completion / reasoning token counts,
-wall-clock duration). The data answers the open question of whether
-``qwen_max_tokens_rubric=2500`` is silently truncating the rubric mid-think
-without forcing us to rely on feel.
+wall-clock duration) so silent truncation is visible without forcing
+operators to rely on feel.
 """
 
 from __future__ import annotations
@@ -31,13 +30,15 @@ log = logging.getLogger(__name__)
 CallKind = Literal["synth", "drift", "query", "rubric", "consolidator"]
 
 
-class QwenClient:
+class LocalLLMClient:
     """Single queue in front of a local OpenAI-compatible endpoint."""
 
     def __init__(self) -> None:
         cfg = get_config()
         self._cfg = cfg
-        self._client = OpenAI(base_url=cfg.qwen_endpoint, api_key=cfg.qwen_api_key)
+        self._client = OpenAI(
+            base_url=cfg.local_llm_endpoint, api_key=cfg.local_llm_api_key
+        )
         self._sem = asyncio.Semaphore(1)
         self._ledger: Ledger | None = None
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -54,55 +55,55 @@ class QwenClient:
     def _max_tokens_for(self, kind: CallKind) -> int:
         cfg = self._cfg
         return {
-            "synth": cfg.qwen_max_tokens_synth,
-            "drift": cfg.qwen_max_tokens_drift,
-            "query": cfg.qwen_max_tokens_query,
-            "rubric": cfg.qwen_max_tokens_rubric,
-            "consolidator": cfg.qwen_max_tokens_consolidator,
+            "synth": cfg.local_llm_max_tokens_synth,
+            "drift": cfg.local_llm_max_tokens_drift,
+            "query": cfg.local_llm_max_tokens_query,
+            "rubric": cfg.local_llm_max_tokens_rubric,
+            "consolidator": cfg.local_llm_max_tokens_consolidator,
         }[kind]
 
     def _thinking_for(self, kind: CallKind) -> bool:
         cfg = self._cfg
         return {
-            "synth": cfg.qwen_enable_thinking_synth,
-            "drift": cfg.qwen_enable_thinking_drift,
-            "query": cfg.qwen_enable_thinking_query,
-            "rubric": cfg.qwen_enable_thinking_rubric,
-            "consolidator": cfg.qwen_enable_thinking_consolidator,
+            "synth": cfg.local_llm_enable_thinking_synth,
+            "drift": cfg.local_llm_enable_thinking_drift,
+            "query": cfg.local_llm_enable_thinking_query,
+            "rubric": cfg.local_llm_enable_thinking_rubric,
+            "consolidator": cfg.local_llm_enable_thinking_consolidator,
         }[kind]
 
     def _model_for(self, kind: CallKind) -> str:
         cfg = self._cfg
         override = {
-            "synth": cfg.qwen_model_synth,
-            "drift": cfg.qwen_model_drift,
-            "query": cfg.qwen_model_query,
-            "rubric": cfg.qwen_model_rubric,
-            "consolidator": cfg.qwen_model_consolidator,
+            "synth": cfg.local_llm_model_synth,
+            "drift": cfg.local_llm_model_drift,
+            "query": cfg.local_llm_model_query,
+            "rubric": cfg.local_llm_model_rubric,
+            "consolidator": cfg.local_llm_model_consolidator,
         }[kind]
-        return override or cfg.qwen_model
+        return override or cfg.local_llm_model
 
     def _temperature_for(self, kind: CallKind) -> float:
         cfg = self._cfg
         override = {
-            "synth": cfg.qwen_temperature_synth,
-            "drift": cfg.qwen_temperature_drift,
-            "query": cfg.qwen_temperature_query,
-            "rubric": cfg.qwen_temperature_rubric,
-            "consolidator": cfg.qwen_temperature_consolidator,
+            "synth": cfg.local_llm_temperature_synth,
+            "drift": cfg.local_llm_temperature_drift,
+            "query": cfg.local_llm_temperature_query,
+            "rubric": cfg.local_llm_temperature_rubric,
+            "consolidator": cfg.local_llm_temperature_consolidator,
         }[kind]
-        return cfg.qwen_temperature if override is None else override
+        return cfg.local_llm_temperature if override is None else override
 
     def _presence_penalty_for(self, kind: CallKind) -> float:
         cfg = self._cfg
         override = {
-            "synth": cfg.qwen_presence_penalty_synth,
-            "drift": cfg.qwen_presence_penalty_drift,
-            "query": cfg.qwen_presence_penalty_query,
-            "rubric": cfg.qwen_presence_penalty_rubric,
-            "consolidator": cfg.qwen_presence_penalty_consolidator,
+            "synth": cfg.local_llm_presence_penalty_synth,
+            "drift": cfg.local_llm_presence_penalty_drift,
+            "query": cfg.local_llm_presence_penalty_query,
+            "rubric": cfg.local_llm_presence_penalty_rubric,
+            "consolidator": cfg.local_llm_presence_penalty_consolidator,
         }[kind]
-        return cfg.qwen_presence_penalty if override is None else override
+        return cfg.local_llm_presence_penalty if override is None else override
 
     def resolve_model(self, kind: CallKind) -> str:
         return self._model_for(kind)
@@ -140,7 +141,7 @@ class QwenClient:
         cfg = self._cfg
         # Caller-passed temperature is the strongest override; otherwise
         # the per-kind setting (which itself falls back to the global
-        # ``qwen_temperature`` if the kind override is ``None``).
+        # ``local_llm_temperature`` if the kind override is ``None``).
         temp = self._temperature_for(kind) if temperature is None else temperature
         mt = self._max_tokens_for(kind) if max_tokens is None else max_tokens
         thinking = self._thinking_for(kind)
@@ -148,9 +149,9 @@ class QwenClient:
         presence_penalty = self._presence_penalty_for(kind)
 
         extra_body: dict[str, Any] = {
-            "top_k": cfg.qwen_top_k,
-            "min_p": cfg.qwen_min_p,
-            "repetition_penalty": cfg.qwen_repetition_penalty,
+            "top_k": cfg.local_llm_top_k,
+            "min_p": cfg.local_llm_min_p,
+            "repetition_penalty": cfg.local_llm_repetition_penalty,
             "chat_template_kwargs": {
                 "enable_thinking": thinking,
             },
@@ -159,7 +160,7 @@ class QwenClient:
         kwargs: dict[str, Any] = dict(
             model=model,
             temperature=temp,
-            top_p=cfg.qwen_top_p,
+            top_p=cfg.local_llm_top_p,
             presence_penalty=presence_penalty,
             max_tokens=mt,
             extra_body=extra_body,
@@ -205,7 +206,7 @@ class QwenClient:
 
         content = choice.message.content or ""
 
-        # Qwen3 thinking models may run out of budget inside the reasoning
+        # Thinking models may run out of budget inside the reasoning
         # preamble and return empty content with finish_reason="length". Make
         # that failure mode loud and actionable. Metric is recorded *before*
         # we raise so the truncation event is captured for the dashboard.
@@ -213,10 +214,10 @@ class QwenClient:
             metric["error"] = "empty content with finish_reason=length"
             self._record_metric(metric)
             raise RuntimeError(
-                "Qwen returned empty content with finish_reason=length; "
+                "Local LLM returned empty content with finish_reason=length; "
                 f"the {'thinking preamble' if thinking else 'output'} consumed the whole budget. "
-                f"Raise qwen_max_tokens_{kind} (currently {mt})"
-                + (f" or set qwen_enable_thinking_{kind}=false." if thinking else ".")
+                f"Raise local_llm_max_tokens_{kind} (currently {mt})"
+                + (f" or set local_llm_enable_thinking_{kind}=false." if thinking else ".")
             )
 
         self._record_metric(metric)

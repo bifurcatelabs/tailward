@@ -1,6 +1,6 @@
 """Local LLM endpoint probe worker (v0.2 platform).
 
-Periodically pings the configured ``qwen_endpoint`` with a cheap
+Periodically pings the configured ``local_llm_endpoint`` with a cheap
 ``GET /v1/models`` request, records latency + status to the
 ``probe_results`` table, and surfaces the result on the LiveBus-less
 poll path the Platform view consumes via ``GET /probes/recent``.
@@ -82,7 +82,7 @@ class ProbeWorker:
                 continue
 
     async def _probe_local_llm(self, cfg) -> None:
-        """One probe iteration: GET <qwen_endpoint>/models.
+        """One probe iteration: GET <local_llm_endpoint>/models.
 
         OpenAI-compatible servers (llama.cpp, Ollama, vLLM, LM Studio)
         all answer this. The response payload is small; we record the
@@ -91,13 +91,13 @@ class ProbeWorker:
         """
         if self._client is None:
             return
-        endpoint = (cfg.qwen_endpoint or "").rstrip("/")
+        endpoint = (cfg.local_llm_endpoint or "").rstrip("/")
         if not endpoint:
             return
         url = f"{endpoint}/models"
         headers = {}
-        if cfg.qwen_api_key:
-            headers["Authorization"] = f"Bearer {cfg.qwen_api_key}"
+        if cfg.local_llm_api_key:
+            headers["Authorization"] = f"Bearer {cfg.local_llm_api_key}"
 
         start = time.monotonic()
         status = "error"

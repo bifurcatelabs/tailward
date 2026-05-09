@@ -120,7 +120,7 @@ def handoff(
     ),
     no_edit: bool = typer.Option(False, "--no-edit", help="Skip $EDITOR review."),
     auto: bool = typer.Option(
-        False, "--auto/--manual", help="Auto-synthesize via Qwen (M5). Default: manual template."
+        False, "--auto/--manual", help="Auto-synthesize via the local LLM. Default: manual template."
     ),
     project: Path = typer.Option(
         None, "--project", help="Project path (defaults to cwd)."
@@ -148,11 +148,11 @@ def handoff(
 
     if auto:
         try:
-            from .daemon.qwen import QwenClient
+            from .daemon.local_llm import LocalLLMClient
             from .phase1 import synthesize
 
-            qwen = QwenClient()
-            synthesize(qwen, transcript, intent)
+            local_llm = LocalLLMClient()
+            synthesize(local_llm, transcript, intent)
         except Exception as e:
             typer.echo(
                 f"auto-synthesis failed ({e}); writing partial intent with incomplete=true",

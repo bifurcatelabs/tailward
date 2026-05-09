@@ -2,7 +2,7 @@
   import { humanize } from './format.js';
 
   // Reads /llm-metrics/summary and surfaces the truncation-risk
-  // signal the qwen instrumentation was put in place to answer:
+  // signal the llm-call instrumentation was put in place to answer:
   // is rubric (or any other call kind) silently hitting its budget?
   //
   // Per call_kind we render: configured max_tokens, avg + max
@@ -115,7 +115,7 @@
     </div>
 
     <p class="footer">
-      decision rule: bump <code>qwen_max_tokens_&lt;kind&gt;</code> if
+      decision rule: bump <code>local_llm_max_tokens_&lt;kind&gt;</code> if
       <code>finish=length</code> &gt; 0 or if avg completion sits past 75% of
       cap with thinking enabled. the table is the inspection surface for the
       open token-budget calibration TODO.

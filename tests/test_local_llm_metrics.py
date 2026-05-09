@@ -1,4 +1,4 @@
-"""LLM-call instrumentation: every Qwen call lands a row in
+"""LLM-call instrumentation: every local-LLM call lands a row in
 ``llm_call_metrics`` capturing call_kind, configured budget,
 finish_reason, and the usage breakdown — so we can answer "is the
 rubric truncating mid-think" with data, not feel.
@@ -12,7 +12,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from tailward.daemon.qwen import QwenClient, _populate_usage
+from tailward.daemon.local_llm import LocalLLMClient, _populate_usage
 from tailward.storage.ledger import Ledger
 
 
@@ -90,7 +90,7 @@ async def test_complete_records_metric_on_success(tmp_path) -> None:
     ledger = Ledger(db_path=db)
     await ledger.connect()
 
-    client = QwenClient()
+    client = LocalLLMClient()
     client.attach_recorder(ledger, asyncio.get_running_loop())
     client._client = SimpleNamespace(
         chat=SimpleNamespace(
@@ -134,7 +134,7 @@ async def test_complete_records_metric_on_length_truncation(tmp_path) -> None:
     ledger = Ledger(db_path=db)
     await ledger.connect()
 
-    client = QwenClient()
+    client = LocalLLMClient()
     client.attach_recorder(ledger, asyncio.get_running_loop())
     client._client = SimpleNamespace(
         chat=SimpleNamespace(
@@ -179,7 +179,7 @@ async def test_per_kind_temperature_and_presence_flow_to_api(tmp_path) -> None:
         captured.update(kwargs)
         return _fake_response(content='{"ok":true}')
 
-    client = QwenClient()
+    client = LocalLLMClient()
     client.attach_recorder(ledger, asyncio.get_running_loop())
     client._client = SimpleNamespace(
         chat=SimpleNamespace(
@@ -213,7 +213,7 @@ async def test_complete_records_metric_on_http_failure(tmp_path) -> None:
     ledger = Ledger(db_path=db)
     await ledger.connect()
 
-    client = QwenClient()
+    client = LocalLLMClient()
     client.attach_recorder(ledger, asyncio.get_running_loop())
 
     def _boom(**_):

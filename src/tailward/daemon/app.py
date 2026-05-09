@@ -50,7 +50,7 @@ class Daemon:
         self.drift = None
         self.audit = None
         self.surface = None
-        self.qwen = None
+        self.local_llm = None
         # v1.1 failure-mode audit layer workers.
         self.constraints = None
         self.scope = None
@@ -575,17 +575,17 @@ def create_app() -> FastAPI:
 
         # Lazy init of M5+ workers if their deps are importable.
         try:
-            from .qwen import QwenClient
-            daemon.qwen = QwenClient()
-            # Bridge in the metrics recorder. The QwenClient runs LLM
+            from .local_llm import LocalLLMClient
+            daemon.local_llm = LocalLLMClient()
+            # Bridge in the metrics recorder. The LocalLLMClient runs LLM
             # calls from a worker thread (via ``asyncio.to_thread``);
             # the recorder needs a reference to this event loop to
             # post the aiosqlite write back from that thread.
-            daemon.qwen.attach_recorder(
+            daemon.local_llm.attach_recorder(
                 daemon.ledger, asyncio.get_running_loop()
             )
         except Exception as e:
-            log.warning("qwen client unavailable: %s", e)
+            log.warning("local LLM client unavailable: %s", e)
 
         try:
             from .drift import DriftWorker

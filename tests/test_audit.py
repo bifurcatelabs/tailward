@@ -41,7 +41,7 @@ def test_extract_claims_ignores_bare_quantifiers() -> None:
 
 
 def test_extract_claims_catches_existence_negation() -> None:
-    claims = extract_claims("The QwenClient class is gone from the codebase.")
+    claims = extract_claims("The LocalLLMClient class is gone from the codebase.")
     assert claims
     assert any("gone" in c.text.lower() for c in claims)
 
@@ -117,7 +117,7 @@ def test_extract_skips_quoted_meta_text() -> None:
 
     blockquote = (
         "Earlier I noted:\n"
-        "> I deleted the QwenClient class\n"
+        "> I deleted the LocalLLMClient class\n"
         "Worth revisiting later."
     )
     assert extract_claims(blockquote) == []
@@ -229,13 +229,13 @@ def test_extract_filters_plain_english_identifiers() -> None:
     repo contradicted itself. Only code-shaped tokens (CamelCase,
     snake_case, CONSTANT, or contains-digit) should survive."""
     claims = extract_claims(
-        "I removed all QwenClient and foo_bar references; the widget is gone."
+        "I removed all LocalLLMClient and foo_bar references; the widget is gone."
     )
     assert claims
     # Flatten all candidate lists from every claim pattern that matched.
     cands = {c.lower() for cl in claims for c in cl.candidates}
     # Code-shaped tokens kept:
-    assert "qwenclient" in cands or "foo_bar" in cands
+    assert "localllmclient" in cands or "foo_bar" in cands
     # Plain English words dropped:
     for junk in ("gone", "widget", "references", "removed"):
         assert junk not in cands, f"{junk!r} leaked into audit candidates"

@@ -12,7 +12,7 @@ through to the ledger and LiveBus:
 4. The scope worker records a ``scope_snapshots`` row on the assistant
    turn that follows the tool calls.
 
-Runs fully offline; Qwen is nulled out.
+Runs fully offline; the local LLM client is nulled out.
 """
 
 from __future__ import annotations
@@ -224,7 +224,7 @@ def test_exploration_mode_disables_scope_creep_and_tags_session_mode(
 
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
-        daemon.qwen = None
+        daemon.local_llm = None
         _append_jsonl(exploration_jsonl, events)
 
         def _snapshots() -> list[dict]:
@@ -272,7 +272,7 @@ def test_passive_pipeline_smoke(
 
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
-        daemon.qwen = None  # force offline / heuristic paths
+        daemon.local_llm = None  # force offline / heuristic paths
 
         _append_jsonl(
             jsonl_path,
@@ -432,7 +432,7 @@ def test_logical_turn_coalescing_and_usage_capture(
 
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
-        daemon.qwen = None
+        daemon.local_llm = None
         _append_jsonl(coalesce_jsonl, events)
 
         # Wait for the watcher to drain the jsonl.
@@ -559,7 +559,7 @@ def test_probe_worker_records_unreachable_endpoint_as_error(
     home.joinpath("config.toml").write_text(
         cfg_text + (
             '\n'
-            'qwen_endpoint = "http://127.0.0.1:1/v1"\n'
+            'local_llm_endpoint = "http://127.0.0.1:1/v1"\n'
             'probe_interval_seconds = 0.1\n'
             'probe_timeout_seconds = 0.5\n'
         ),
@@ -642,7 +642,7 @@ def test_turn_metrics_derived_from_timestamps_and_usage(
 
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
-        daemon.qwen = None
+        daemon.local_llm = None
         _append_jsonl(metric_jsonl, events)
 
         def _metrics() -> list[dict]:
@@ -727,7 +727,7 @@ def test_session_state_survives_daemon_restart(
     # First boot: drive the session, let progress persist.
     with TestClient(create_app()) as client:
         daemon = client.app.state.daemon
-        daemon.qwen = None
+        daemon.local_llm = None
         _append_jsonl(restart_jsonl, events)
 
         assert _wait_until(

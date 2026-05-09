@@ -211,7 +211,7 @@ def mount_web(app: FastAPI) -> None:
     async def llm_metrics_summary(request: Request) -> JSONResponse:
         """Per-call-kind aggregates of LLM call instrumentation.
 
-        Answers the open question of whether ``qwen_max_tokens_rubric``
+        Answers the open question of whether ``local_llm_max_tokens_rubric``
         / ``_consolidator`` are silently truncating mid-think. Read
         the ``n_length`` count and the ratio of ``avg_completion`` to
         ``configured_max_tokens`` per kind; high ``n_length`` with
@@ -891,8 +891,8 @@ def mount_web(app: FastAPI) -> None:
             # original chain isn't useful for the client.
             raise HTTPException(
                 503,
-                detail="no local LLM configured — synthesis needs a "
-                "qwen-compatible endpoint; configure one in settings",
+                detail="no local LLM configured — synthesis needs an "
+                "OpenAI-compatible endpoint; configure one in settings",
             ) from None
         except sw.SynthesisInFlight:
             raise HTTPException(

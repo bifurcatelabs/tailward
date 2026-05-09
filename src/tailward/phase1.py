@@ -1,4 +1,4 @@
-"""Phase 1 auto-synthesis: transcript -> captured-intent via Qwen."""
+"""Phase 1 auto-synthesis: transcript -> captured-intent via the local LLM."""
 
 from __future__ import annotations
 
@@ -54,14 +54,14 @@ def _max_chars() -> int:
 
     cfg = get_config()
     # output + system prompt + prior intent block
-    reserved = cfg.qwen_max_tokens_synth + 1500 + 800
-    usable_tokens = max(2048, cfg.qwen_context_tokens - reserved)
+    reserved = cfg.local_llm_max_tokens_synth + 1500 + 800
+    usable_tokens = max(2048, cfg.local_llm_context_tokens - reserved)
     # ~3.2 chars/token is a conservative English estimate.
     return int(usable_tokens * 3.2)
 
 
 def _render_prior_intent(intent: Intent) -> str:
-    """Render the current intent.sections as markdown for Qwen's input.
+    """Render the current intent.sections as markdown for the synth user prompt.
 
     Skips empty sections to keep the prompt tight. Frontmatter is
     intentionally omitted — ``session_mode`` is a JSON output key, so
@@ -82,9 +82,9 @@ def _render_prior_intent(intent: Intent) -> str:
 def _build_user_prompt(intent: Intent, denoised: str) -> str:
     """Compose the dual-context user prompt: prior intent + recent transcript.
 
-    Qwen's job is to merge — preserve prior state, integrate new activity.
-    The delimiters mirror the SYSTEM prompt so the model can ground its
-    merge logic on clearly-named sections.
+    The synthesizer's job is to merge — preserve prior state, integrate
+    new activity. The delimiters mirror the SYSTEM prompt so the model
+    can ground its merge logic on clearly-named sections.
     """
     return (
         "## PRIOR INTENT\n\n"
@@ -181,13 +181,14 @@ def _payload_to_intent(payload: dict, intent: Intent) -> Intent:
     return intent
 
 
-async def _run_synth(qwen, user_prompt: str, intent: Intent) -> dict:
-    """Inner async core: call Qwen, validate, retry once if needed.
-    Mutates ``intent.front.incomplete`` on persistent validation failure
-    so save points carry the warning. Returns the best payload it got.
+async def _run_synth(local_llm, user_prompt: str, intent: Intent) -> dict:
+    """Inner async core: call the local LLM, validate, retry once if
+    needed. Mutates ``intent.front.incomplete`` on persistent validation
+    failure so save points carry the warning. Returns the best payload
+    it got.
     """
     try:
-        payload = await qwen.complete_json(SYSTEM, user_prompt, kind="synth")
+        payload = await local_llm.complete_json(SYSTEM, user_prompt, kind="synth")
     except Exception as e:
         log.warning("phase 1 first-pass failed: %s", e)
         payload = {}
@@ -202,7 +203,7 @@ async def _run_synth(qwen, user_prompt: str, intent: Intent) -> dict:
         + ". Return corrected JSON only, strictly matching the schema. Keep values concise."
     )
     try:
-        payload2 = await qwen.complete_json(SYSTEM, retry_prompt, kind="synth")
+        payload2 = await local_llm.complete_json(SYSTEM, retry_prompt, kind="synth")
     except Exception as e:
         log.warning("phase 1 retry failed: %s", e)
         intent.front.incomplete = True
@@ -218,43 +219,44 @@ async def _run_synth(qwen, user_prompt: str, intent: Intent) -> dict:
     return payload2
 
 
-async def synthesize_async(qwen, transcript: Path, intent: Intent) -> Intent:
+async def synthesize_async(local_llm, transcript: Path, intent: Intent) -> Intent:
     """Async-native variant of :func:`synthesize`. Use from inside a
     running event loop (e.g. the synthesis worker's comprehensive
     trigger) where ``asyncio.run`` would error.
 
-    Passes the prior intent's sections to Qwen alongside the recent
-    transcript so the synthesis is a merge, not a replacement —
+    Passes the prior intent's sections to the local LLM alongside the
+    recent transcript so the synthesis is a merge, not a replacement —
     preserves accumulated rules/threads/commitments across
     regenerations.
     """
     text = Path(transcript).read_text(encoding="utf-8", errors="replace")
     denoised = _denoise(text)
     user_prompt = _build_user_prompt(intent, denoised)
-    payload = await _run_synth(qwen, user_prompt, intent)
+    payload = await _run_synth(local_llm, user_prompt, intent)
     return _payload_to_intent(payload, intent)
 
 
-def synthesize(qwen, transcript: Path, intent: Intent) -> Intent:
-    """Sync wrapper: load transcript, call Qwen, validate + retry once, fill intent.
+def synthesize(local_llm, transcript: Path, intent: Intent) -> Intent:
+    """Sync wrapper: load transcript, call the local LLM, validate +
+    retry once, fill intent.
 
     Used by the CLI ``tailward handoff`` path. Internal callers from
     inside an event loop (the ``synthesis_worker`` comprehensive
     trigger) should use :func:`synthesize_async` instead. Same merge
     semantics: prior intent state is included in the user prompt so
-    Qwen refines rather than replaces.
+    the synthesizer refines rather than replaces.
     """
     text = Path(transcript).read_text(encoding="utf-8", errors="replace")
     denoised = _denoise(text)
     user_prompt = _build_user_prompt(intent, denoised)
 
     try:
-        payload = asyncio.run(_run_synth(qwen, user_prompt, intent))
+        payload = asyncio.run(_run_synth(local_llm, user_prompt, intent))
     except RuntimeError:
         # If there's an existing event loop (unlikely from CLI), fall back.
         loop = asyncio.new_event_loop()
         try:
-            payload = loop.run_until_complete(_run_synth(qwen, user_prompt, intent))
+            payload = loop.run_until_complete(_run_synth(local_llm, user_prompt, intent))
         finally:
             loop.close()
 

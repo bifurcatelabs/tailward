@@ -2,7 +2,7 @@
 
 Pattern-first, LLM-escalated. Heuristic scores keyword overlap between the
 last assistant turn and the captured-intent active_goal + open_threads. If
-the score falls below a threshold we ask Qwen to classify severity and
+the score falls below a threshold we ask the local LLM to classify severity and
 produce a verdict; high-severity verdicts surface to the user via the
 live UI and OS toast (when enabled).
 """
@@ -212,7 +212,7 @@ class DriftWorker:
             return DriftVerdict("low", pattern_score, "on-goal per heuristic", None)
 
         # Escalate to LLM.
-        if self._daemon.qwen is None:
+        if self._daemon.local_llm is None:
             severity = "med" if pattern_score < 0.1 or mismatch else "low"
             corrective = (
                 "Recent turn looked off-goal by heuristic; restate the Active Goal and stay in the named scope."
@@ -229,7 +229,7 @@ class DriftWorker:
             assistant_text=ev.text[:4000],
         )
         try:
-            payload = await self._daemon.qwen.complete_json(
+            payload = await self._daemon.local_llm.complete_json(
                 PROMPT_SYSTEM, user, kind="drift"
             )
             severity = payload.get("severity", "low")

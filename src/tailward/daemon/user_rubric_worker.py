@@ -1,4 +1,4 @@
-"""User-side rubric — Qwen-judged self-rubric for the user's own turns.
+"""User-side rubric — local LLM self-rubric for the user's own turns.
 
 The assistant-side :class:`~tailward.daemon.rubric_worker.RubricWorker`
 scores the agent's behavior on coding-trustworthiness dimensions.
@@ -11,7 +11,7 @@ rubric):
     turns (Claude Code ``/compact``, ``isCompactSummary=true``) are
     excluded — they aren't the user.
 
-Each run asks Qwen for a structured JSON score across four user-side
+Each run asks the local LLM for a structured JSON score across four user-side
 dimensions (intent_clarity, context_coverage, verification_engagement,
 mode_coherence). Per-dimension rows write to ``rubric_scores`` with
 ``subject='user'`` and individually publish a ``rubric_sample`` live
@@ -187,7 +187,7 @@ class UserRubricWorker:
     async def _run_user_rubric(
         self, fs, user_turn_count: int, window: list[str]
     ) -> None:
-        if self._daemon.qwen is None:
+        if self._daemon.local_llm is None:
             return
         async with self._lock:
             state = self._by_session.setdefault(
@@ -215,7 +215,7 @@ class UserRubricWorker:
                 log.exception("live publish failed (user rubric_in_flight)")
 
         try:
-            payload = await self._call_qwen(window, fs.project_path)
+            payload = await self._call_llm(window, fs.project_path)
             await self._record(fs, user_turn_count, payload)
             if live is not None:
                 await live.publish(
@@ -249,7 +249,7 @@ class UserRubricWorker:
             async with self._lock:
                 state.in_flight = False
 
-    async def _call_qwen(
+    async def _call_llm(
         self, window: list[str], project_path: str | None
     ) -> dict:
         from .mode_profile import session_mode_for_project
@@ -267,13 +267,13 @@ class UserRubricWorker:
         system = _build_system_prompt(active)
         # Reuse the rubric call kind so cost / sampler / max_tokens
         # accounting is unified — same call shape, different prompt.
-        return await self._daemon.qwen.complete_json(system, user, kind="rubric")
+        return await self._daemon.local_llm.complete_json(system, user, kind="rubric")
 
     async def _record(self, fs, user_turn_count: int, payload: dict) -> None:
         from .mode_profile import session_mode_for_project
         model_used = (
-            self._daemon.qwen.resolve_model("rubric")
-            if self._daemon.qwen else None
+            self._daemon.local_llm.resolve_model("rubric")
+            if self._daemon.local_llm else None
         )
         live = getattr(self._daemon, "live", None)
         mode_label = session_mode_for_project(fs.project_path)

@@ -1,4 +1,4 @@
-"""Sampled in-session Qwen rubric across 4 LLM-judged dimensions.
+"""Sampled in-session local LLM rubric across 4 LLM-judged dimensions.
 
 Triggers:
   * Every ``rubric_turn_interval`` assistant turns.
@@ -7,7 +7,7 @@ Triggers:
   * First-person completion claims detected by the audit regex
     (:data:`tailward.daemon.audit.CLAIM_PATTERNS`).
 
-Each run asks Qwen for a structured JSON score across four dimensions
+Each run asks the local LLM for a structured JSON score across four dimensions
 (invariants awareness, uncertainty honesty, maintainability, provenance).
 Per-dimension rows are written to the ledger and individually published to
 :class:`~tailward.daemon.livebus.LiveBus` so the UI's rubric rail fills in
@@ -174,7 +174,7 @@ class RubricWorker:
     async def _run_rubric(
         self, fs, turn_idx: int, window: list[str], triggers: list[str]
     ) -> None:
-        if self._daemon.qwen is None:
+        if self._daemon.local_llm is None:
             return
         from .mode_profile import active_profile_for_project
         profile = active_profile_for_project(fs.project_path)
@@ -204,7 +204,7 @@ class RubricWorker:
                 log.exception("live publish failed (rubric_in_flight)")
 
         try:
-            payload = await self._call_qwen(window, project_path=fs.project_path)
+            payload = await self._call_llm(window, project_path=fs.project_path)
             await self._record(fs, turn_idx, payload, triggers)
             if live is not None:
                 await live.publish(
@@ -229,7 +229,7 @@ class RubricWorker:
             async with self._lock:
                 state.in_flight = False
 
-    async def _call_qwen(self, window: list[str], project_path: str | None = None) -> dict:
+    async def _call_llm(self, window: list[str], project_path: str | None = None) -> dict:
         from .mode_profile import active_profile_for_project
         profile = active_profile_for_project(project_path)
         active = profile.rubric_dimensions
@@ -248,7 +248,7 @@ class RubricWorker:
             assistant_text=recent[:6000],
         )
         system = _build_system_prompt(tuple(name for name, _ in active_dims))
-        return await self._daemon.qwen.complete_json(system, user, kind="rubric")
+        return await self._daemon.local_llm.complete_json(system, user, kind="rubric")
 
     async def _record(
         self, fs, turn_idx: int, payload: dict, triggers: list[str]
@@ -258,7 +258,7 @@ class RubricWorker:
             session_mode_for_project,
         )
         trigger = ",".join(triggers) or None
-        model_used = self._daemon.qwen.resolve_model("rubric") if self._daemon.qwen else None
+        model_used = self._daemon.local_llm.resolve_model("rubric") if self._daemon.local_llm else None
         live = getattr(self._daemon, "live", None)
         profile = active_profile_for_project(fs.project_path)
         mode_label = session_mode_for_project(fs.project_path)
