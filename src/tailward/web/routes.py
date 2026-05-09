@@ -195,10 +195,10 @@ def mount_web(app: FastAPI) -> None:
         """Per-call-kind config + verbatim prompts.
 
         Surfaces what tailward itself is sending to the local LLM —
-        model, sampler params, max_tokens, thinking on/off, plus the
-        unredacted system prompt and user-prompt template for each of
-        synth / drift / query / rubric / consolidator. Read by the
-        Platform view's transparency panel.
+        model, max_tokens, temperature, plus the unredacted system
+        prompt and user-prompt template for each of synth / drift /
+        query / rubric / consolidator. Read by the Settings view's
+        transparency panel.
         """
         from ..daemon.llm_profiles import all_profiles, endpoint_summary
 
@@ -206,6 +206,97 @@ def mount_web(app: FastAPI) -> None:
             "endpoint": endpoint_summary(),
             "profiles": all_profiles(),
         })
+
+    @app.post("/v2/config/local-llm")
+    async def update_local_llm_config(request: Request) -> JSONResponse:
+        """Write the editable local-LLM settings to config.toml and
+        rebuild the in-memory client so changes take effect without a
+        daemon restart. Only the load-bearing user-facing fields are
+        editable from the UI — power-user settings stay TOML-only.
+
+        The TOML is rewritten from the merged config in canonical form,
+        which preserves all known fields but drops any unknown keys
+        (e.g. obsolete keys from prior schema versions). Inline comments
+        in config.toml are not preserved by the round-trip; users who
+        want comments should edit by hand.
+        """
+        import tomllib
+
+        from .. import config as cfg_mod
+        from ..config import _coerce, get_config
+        from ..paths import atomic_write_text, config_path
+
+        body = await request.json()
+        if not isinstance(body, dict):
+            raise HTTPException(400, "body must be a JSON object")
+
+        # Editable surface. Other config keys (watch_paths,
+        # rubric_turn_interval, hook_timeout_ms, etc.) stay TOML-only.
+        editable: dict[str, type | tuple[type, ...]] = {
+            "local_llm_endpoint": str,
+            "local_llm_model": str,
+            "local_llm_api_key": str,
+            "local_llm_context_tokens": int,
+            "local_llm_temperature": (int, float),
+            "local_llm_max_tokens": int,
+        }
+        updates: dict[str, object] = {}
+        for k, expected in editable.items():
+            if k not in body:
+                continue
+            v = body[k]
+            if not isinstance(v, expected) or isinstance(v, bool):
+                raise HTTPException(400, f"{k} must be {expected!r}")
+            updates[k] = v
+
+        if not updates:
+            raise HTTPException(400, "no editable fields in body")
+
+        # Value-level validation.
+        if "local_llm_endpoint" in updates:
+            ep = str(updates["local_llm_endpoint"]).strip()
+            if not ep.startswith(("http://", "https://")):
+                raise HTTPException(
+                    400, "local_llm_endpoint must start with http:// or https://"
+                )
+            updates["local_llm_endpoint"] = ep
+        for k in ("local_llm_context_tokens", "local_llm_max_tokens"):
+            if k in updates and updates[k] <= 0:
+                raise HTTPException(400, f"{k} must be > 0")
+        if "local_llm_temperature" in updates:
+            t = float(updates["local_llm_temperature"])
+            if not 0.0 <= t <= 2.0:
+                raise HTTPException(400, "local_llm_temperature must be in [0.0, 2.0]")
+            updates["local_llm_temperature"] = t
+
+        # Read existing TOML, merge, write back via the dataclass's
+        # canonical to_toml (drops obsolete unknown keys).
+        path = config_path()
+        existing: dict = {}
+        if path.exists():
+            with open(path, "rb") as f:
+                existing = tomllib.load(f)
+        merged = {**existing, **updates}
+        new_cfg = _coerce(merged)
+        atomic_write_text(path, new_cfg.to_toml())
+
+        # Refresh in-memory config + rebuild the LLM client so endpoint
+        # / model changes take effect for the next call.
+        cfg_mod._cached = None
+        get_config(reload=True)
+
+        daemon = request.app.state.daemon
+        if daemon.local_llm is not None:
+            from ..daemon.local_llm import LocalLLMClient
+            old = daemon.local_llm
+            daemon.local_llm = LocalLLMClient()
+            daemon.local_llm.attach_recorder(daemon.ledger)
+            try:
+                await old._client.close()
+            except Exception:
+                pass
+
+        return JSONResponse({"ok": True, "applied": list(updates.keys())})
 
     @app.get("/llm-metrics/summary")
     async def llm_metrics_summary(request: Request) -> JSONResponse:

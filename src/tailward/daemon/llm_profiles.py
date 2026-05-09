@@ -97,12 +97,16 @@ def all_profiles() -> list[dict[str, Any]]:
 
 
 def endpoint_summary() -> dict[str, Any]:
-    """Endpoint-level config for the panel header (URL, context window,
-    api-key-presence). The literal API key value is never returned."""
+    """Editable global config: URL, model, context window, sampler /
+    output budget, and api-key-presence. The literal API key value is
+    never returned (UI shows "set, hidden" or "not set"); writes to
+    the api_key field go through the POST endpoint."""
     cfg = get_config()
     return {
         "endpoint": cfg.local_llm_endpoint,
         "default_model": cfg.local_llm_model,
         "context_tokens": cfg.local_llm_context_tokens,
+        "temperature": cfg.local_llm_temperature,
+        "max_tokens": cfg.local_llm_max_tokens,
         "api_key_set": bool(cfg.local_llm_api_key) and cfg.local_llm_api_key != "not-needed",
     }

@@ -170,6 +170,58 @@ def test_v2_projects_dedupes_alt_cwd_encodings(tmp_path: Path) -> None:
         assert project_hash(alt_cwd) not in hashes
 
 
+def test_post_local_llm_config_writes_and_reloads(tmp_path: Path) -> None:
+    """Settings UI POST: writes config.toml + rebuilds the in-memory
+    LLM client so endpoint / model changes take effect on the next
+    call without a daemon restart. The endpoint summary reflects the
+    new values immediately."""
+    with TestClient(create_app()) as client:
+        # Pre-update sanity: the endpoint defaults are loopback / empty.
+        before = client.get("/llm-profiles").json()["endpoint"]
+        assert before["endpoint"] == "http://127.0.0.1:8080/v1"
+
+        r = client.post("/v2/config/local-llm", json={
+            "local_llm_endpoint": "http://10.0.0.5:9000/v1",
+            "local_llm_model": "test-model-7B",
+            "local_llm_temperature": 0.4,
+            "local_llm_max_tokens": 12000,
+        })
+        assert r.status_code == 200
+        body = r.json()
+        assert body["ok"] is True
+        assert "local_llm_endpoint" in body["applied"]
+
+        # Endpoint summary now reflects the persisted values.
+        after = client.get("/llm-profiles").json()["endpoint"]
+        assert after["endpoint"] == "http://10.0.0.5:9000/v1"
+        assert after["default_model"] == "test-model-7B"
+        assert after["temperature"] == 0.4
+        assert after["max_tokens"] == 12000
+
+
+def test_post_local_llm_config_rejects_bad_endpoint(tmp_path: Path) -> None:
+    """Endpoint URL has to start with http:// or https:// — anything
+    else is a config-shape error the user should see immediately,
+    not a runtime failure on the next LLM call."""
+    with TestClient(create_app()) as client:
+        r = client.post("/v2/config/local-llm", json={
+            "local_llm_endpoint": "ftp://nope/v1",
+        })
+        assert r.status_code == 400
+        assert "http" in r.text.lower()
+
+
+def test_post_local_llm_config_rejects_unknown_field(tmp_path: Path) -> None:
+    """Power-user fields stay TOML-only. Posting them returns 400
+    (no editable fields in body) so the surface area of the POST
+    endpoint stays explicitly minimal."""
+    with TestClient(create_app()) as client:
+        r = client.post("/v2/config/local-llm", json={
+            "rubric_turn_interval": 10,
+        })
+        assert r.status_code == 400
+
+
 def test_v2_project_detail_returns_rules(tmp_path: Path) -> None:
     """ProjectView reads from /v2/projects/<ph>; the response includes
     the parsed rules + active session_mode so the page can render
