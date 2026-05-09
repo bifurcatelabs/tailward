@@ -577,13 +577,10 @@ def create_app() -> FastAPI:
         try:
             from .local_llm import LocalLLMClient
             daemon.local_llm = LocalLLMClient()
-            # Bridge in the metrics recorder. The LocalLLMClient runs LLM
-            # calls from a worker thread (via ``asyncio.to_thread``);
-            # the recorder needs a reference to this event loop to
-            # post the aiosqlite write back from that thread.
-            daemon.local_llm.attach_recorder(
-                daemon.ledger, asyncio.get_running_loop()
-            )
+            # Wire the metric recorder. The client awaits the HTTP
+            # call directly on the event loop now (no thread bridge),
+            # so the recorder doesn't need a loop handle anymore.
+            daemon.local_llm.attach_recorder(daemon.ledger)
         except Exception as e:
             log.warning("local LLM client unavailable: %s", e)
 
@@ -747,9 +744,10 @@ def create_app() -> FastAPI:
                 except TimeoutError:
                     log.warning(
                         "shutdown: %s.stop() exceeded 5s budget; "
-                        "abandoning. Likely an in-flight LLM call "
-                        "holding the worker open; underlying thread "
-                        "may continue until the call returns.",
+                        "abandoning. Cooperative cancel reaches the "
+                        "LLM client's HTTP call directly now, so this "
+                        "branch should be reserved for workers blocked "
+                        "on something other than the LLM.",
                         name,
                     )
                 except Exception as e:
@@ -765,37 +763,30 @@ def create_app() -> FastAPI:
             await daemon.ledger.close()
             log.info("tailward daemon stopped")
 
-            # Gate the os._exit so it only fires in the actual daemon
-            # process. In-process FastAPI usage (TestClient, in-tree
-            # ASGI hosting, future programmatic embedding) must NOT
-            # kill the host. ``__main__.py`` sets this flag explicitly;
-            # everything else leaves it unset.
+            # Safety net for executor threads we don't own.
             #
-            # Bypassing asyncio's post-lifespan loop teardown is the
-            # whole point of os._exit here.
+            # Gated so it only fires in the actual daemon process —
+            # in-process FastAPI usage (TestClient, in-tree ASGI
+            # hosting, future programmatic embedding) must NOT kill
+            # the host. ``__main__.py`` sets this flag explicitly;
+            # everything else leaves it unset.
             #
             # ``asyncio.run()`` (which uvicorn's ``Server.run()`` uses)
             # calls ``loop.shutdown_default_executor()`` in its finally
-            # block, which blocks until ALL ThreadPoolExecutor worker
-            # threads finish — including ones running uncancellable
-            # sync work via ``asyncio.to_thread`` (e.g., a blocking
-            # OpenAI sync call to a slow LLM endpoint). Cancelling the
-            # awaiting coroutine doesn't interrupt the underlying
-            # thread, so without this exit the process can linger
-            # tens of seconds after our graceful teardown completes.
+            # block, which blocks until every ThreadPoolExecutor worker
+            # thread finishes. With AsyncOpenAI driving the LLM client,
+            # there's no longer a ``to_thread``-wrapped sync HTTP call
+            # holding a thread open — cooperative cancel reaches the
+            # socket directly via httpx. So in normal operation this
+            # exit is a no-op past the data-integrity work above
+            # (worker stops + ledger close).
             #
-            # All data-integrity work (worker stops with 5s budget +
-            # ledger close, both above) has finished by this point.
-            # What we skip is uvicorn's "Application shutdown complete"
-            # log and asyncio's loop/executor teardown — none of which
-            # is load-bearing. Tested via
-            # ``tests/test_daemon_shutdown.py``.
-            #
-            # Proper future fix (tracked separately): replace
-            # ``to_thread`` + sync LLM client with a native async
-            # client (httpx) so cancellation propagates to the socket.
-            # Once that lands, this becomes the safety net, not the
-            # load-bearing exit path.
+            # We keep it as a safety net for anything else that might
+            # have parked work on the default executor — third-party
+            # libraries calling ``run_in_executor``, future workers
+            # not yet refactored, or some hung native-code call. The
+            # process should not linger tens of seconds after a clean
+            # graceful teardown for any of those reasons either.
             if getattr(app.state, "exit_on_lifespan_close", False):
                 os._exit(0)
 

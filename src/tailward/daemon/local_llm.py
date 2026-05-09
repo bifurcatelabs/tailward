@@ -1,8 +1,11 @@
 """Local OpenAI-compatible LLM client, serialized through a queue.
 
-Non-standard sampler params (``top_k``, ``min_p``, ``repetition_penalty``)
-are passed via ``extra_body`` so they route through proxies like LiteLLM to
-the underlying llama.cpp / vLLM backend.
+The HTTP call runs natively on the asyncio event loop via
+``AsyncOpenAI`` (which uses httpx under the hood). Cooperative
+cancellation propagates: when the daemon shuts down and a worker's
+task is cancelled, the in-flight request's socket is torn down
+cleanly within milliseconds — no thread-pool worker held open by
+a sync HTTP call we can't interrupt.
 
 Every call emits a ``llm_call_metrics`` ledger row (call kind, configured
 budget, finish_reason, prompt / completion / reasoning token counts,
@@ -18,7 +21,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any, Literal
 
-from openai import OpenAI
+from openai import AsyncOpenAI
 
 from ..config import get_config
 
@@ -36,21 +39,18 @@ class LocalLLMClient:
     def __init__(self) -> None:
         cfg = get_config()
         self._cfg = cfg
-        self._client = OpenAI(
+        self._client = AsyncOpenAI(
             base_url=cfg.local_llm_endpoint, api_key=cfg.local_llm_api_key
         )
         self._sem = asyncio.Semaphore(1)
         self._ledger: Ledger | None = None
-        self._loop: asyncio.AbstractEventLoop | None = None
 
-    def attach_recorder(
-        self, ledger: Ledger, loop: asyncio.AbstractEventLoop
-    ) -> None:
+    def attach_recorder(self, ledger: Ledger) -> None:
         """Wire the metric recorder. Called from the daemon lifespan
-        once both the ledger is connected and the event loop is the
-        one ``_complete_sync`` will bridge metrics back into."""
+        once the ledger is connected. The thread-to-loop bridge that
+        used to be required here went away with the move to AsyncOpenAI
+        — metric writes now happen on the same loop as the LLM call."""
         self._ledger = ledger
-        self._loop = loop
 
     def resolve_model(self, kind: CallKind) -> str:
         # ``kind`` is preserved on the public method for caller
@@ -71,110 +71,96 @@ class LocalLLMClient:
         json_mode: bool = False,
     ) -> str:
         async with self._sem:
-            return await asyncio.to_thread(
-                self._complete_sync,
-                system,
-                user,
-                temperature,
-                max_tokens,
-                json_mode,
-                kind,
+            cfg = self._cfg
+            # Caller-passed values override config; otherwise the single
+            # global setting applies to every call.
+            temp = cfg.local_llm_temperature if temperature is None else temperature
+            mt = cfg.local_llm_max_tokens if max_tokens is None else max_tokens
+            model = cfg.local_llm_model
+
+            kwargs: dict[str, Any] = dict(
+                model=model,
+                temperature=temp,
+                max_tokens=mt,
+                messages=[
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
             )
+            if json_mode:
+                kwargs["response_format"] = {"type": "json_object"}
 
-    def _complete_sync(
-        self,
-        system: str,
-        user: str,
-        temperature: float | None,
-        max_tokens: int | None,
-        json_mode: bool,
-        kind: CallKind,
-    ) -> str:
-        cfg = self._cfg
-        # Caller-passed values override config; otherwise the single
-        # global setting applies to every call.
-        temp = cfg.local_llm_temperature if temperature is None else temperature
-        mt = cfg.local_llm_max_tokens if max_tokens is None else max_tokens
-        model = cfg.local_llm_model
+            # Metric scaffold — every code path below funnels back through
+            # ``_record_metric`` so the row lands whether the call succeeds,
+            # raises, or hits the length-truncation branch. ``enable_thinking``
+            # stays in the metric schema (column already exists) but is
+            # always None now: tailward no longer drives that flag, the
+            # serving stack does.
+            metric: dict[str, Any] = {
+                "call_kind": kind,
+                "model": model,
+                "max_tokens": mt,
+                "enable_thinking": None,
+                "prompt_tokens": None,
+                "completion_tokens": None,
+                "reasoning_tokens": None,
+                "total_tokens": None,
+                "finish_reason": None,
+                "duration_ms": None,
+                "usage_json": None,
+                "error": None,
+            }
+            started = time.monotonic()
 
-        kwargs: dict[str, Any] = dict(
-            model=model,
-            temperature=temp,
-            max_tokens=mt,
-            messages=[
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
-        )
-        if json_mode:
-            kwargs["response_format"] = {"type": "json_object"}
+            try:
+                resp = await self._client.chat.completions.create(**kwargs)
+            except asyncio.CancelledError:
+                # Cooperative cancel propagated from the caller's task;
+                # httpx tears down the socket. Record the cancel so the
+                # metric row exists, then re-raise so the cancel
+                # semantics aren't swallowed.
+                metric["duration_ms"] = int((time.monotonic() - started) * 1000)
+                metric["error"] = "CancelledError"
+                await self._record_metric(metric)
+                raise
+            except Exception as e:
+                metric["duration_ms"] = int((time.monotonic() - started) * 1000)
+                metric["error"] = f"{type(e).__name__}: {e}"[:500]
+                await self._record_metric(metric)
+                raise
 
-        # Metric scaffold — every code path below funnels back through
-        # ``_record_metric`` so the row lands whether the call succeeds,
-        # raises, or hits the length-truncation branch. ``enable_thinking``
-        # stays in the metric schema (column already exists) but is
-        # always None now: tailward no longer drives that flag, the
-        # serving stack does.
-        metric: dict[str, Any] = {
-            "call_kind": kind,
-            "model": model,
-            "max_tokens": mt,
-            "enable_thinking": None,
-            "prompt_tokens": None,
-            "completion_tokens": None,
-            "reasoning_tokens": None,
-            "total_tokens": None,
-            "finish_reason": None,
-            "duration_ms": None,
-            "usage_json": None,
-            "error": None,
-        }
-        started = time.monotonic()
-
-        try:
-            resp = self._client.chat.completions.create(**kwargs)
-        except Exception as e:
             metric["duration_ms"] = int((time.monotonic() - started) * 1000)
-            metric["error"] = f"{type(e).__name__}: {e}"[:500]
-            self._record_metric(metric)
-            raise
+            choice = resp.choices[0]
+            metric["finish_reason"] = choice.finish_reason
+            _populate_usage(metric, getattr(resp, "usage", None))
 
-        metric["duration_ms"] = int((time.monotonic() - started) * 1000)
-        choice = resp.choices[0]
-        metric["finish_reason"] = choice.finish_reason
-        _populate_usage(metric, getattr(resp, "usage", None))
+            content = choice.message.content or ""
 
-        content = choice.message.content or ""
+            # Thinking-mode models can exhaust the budget inside the
+            # reasoning preamble and return empty content with
+            # finish_reason="length". Surface loudly. Metric is recorded
+            # before raising so the truncation lands in the dashboard.
+            if not content and choice.finish_reason == "length":
+                metric["error"] = "empty content with finish_reason=length"
+                await self._record_metric(metric)
+                raise RuntimeError(
+                    "Local LLM returned empty content with finish_reason=length; "
+                    f"the output budget ({mt}) ran out, likely inside a thinking "
+                    "preamble. Raise local_llm_max_tokens or disable thinking "
+                    "mode at the model server."
+                )
 
-        # Thinking-mode models can exhaust the budget inside the
-        # reasoning preamble and return empty content with
-        # finish_reason="length". Surface loudly. Metric is recorded
-        # before raising so the truncation lands in the dashboard.
-        if not content and choice.finish_reason == "length":
-            metric["error"] = "empty content with finish_reason=length"
-            self._record_metric(metric)
-            raise RuntimeError(
-                "Local LLM returned empty content with finish_reason=length; "
-                f"the output budget ({mt}) ran out, likely inside a thinking "
-                "preamble. Raise local_llm_max_tokens or disable thinking "
-                "mode at the model server."
-            )
+            await self._record_metric(metric)
+            return content
 
-        self._record_metric(metric)
-        return content
-
-    def _record_metric(self, metric: dict[str, Any]) -> None:
-        """Bridge the synchronous metric capture (running in a worker
-        thread via ``asyncio.to_thread``) back into the daemon's event
-        loop for the actual aiosqlite write. Fire-and-forget; we don't
-        want metric persistence to block or fail the LLM call."""
-        if self._ledger is None or self._loop is None:
+    async def _record_metric(self, metric: dict[str, Any]) -> None:
+        """Persist a metric row. Awaited inline (the write is a tiny
+        aiosqlite INSERT, microseconds). Wrapped so a metric-write
+        failure can't mask an in-flight LLM error."""
+        if self._ledger is None:
             return
         try:
-            asyncio.run_coroutine_threadsafe(
-                self._ledger.record_llm_call_metric(**metric),
-                self._loop,
-            )
+            await self._ledger.record_llm_call_metric(**metric)
         except Exception:
             log.exception("llm_call_metrics record failed for kind=%s", metric.get("call_kind"))
 
