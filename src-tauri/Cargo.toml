@@ -13,13 +13,13 @@ name = "tailward_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
-tauri-build = { version = "2.6.0" }
+tauri-build = { version = "2.6.0", features = [] }
 
 [dependencies]
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 log = "0.4"
-tauri = { version = "2.11.1" }
+tauri = { version = "2.11.1", features = ["tray-icon"] }
 tauri-plugin-log = "2"
 tauri-plugin-shell = "2"
 # Prevents a second invocation of tailward.exe from spawning a duplicate
@@ -29,6 +29,11 @@ tauri-plugin-shell = "2"
 # would race two instances at the bundled-daemon spawn step and the
 # second one's :7878 bind would fail.
 tauri-plugin-single-instance = "2"
+# Persists window position + size + maximized/minimized state across
+# launches so a user who resizes once gets it remembered. Default
+# storage is ~/.local/share/<bundle>/window-state.json (or platform
+# equivalent); no extra wiring needed beyond plugin init.
+tauri-plugin-window-state = "2"
 # Used for the daemon health-check probe in setup() — minimal feature set
 # since we only ever hit plain-HTTP loopback. ``rustls-tls`` is pulled in
 # only because reqwest's default builder requires *some* TLS backend

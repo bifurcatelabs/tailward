@@ -1,7 +1,11 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use tauri::{Manager, RunEvent};
+use tauri::{
+  Manager, RunEvent, WindowEvent,
+  menu::{Menu, MenuItem},
+  tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+};
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
@@ -38,12 +42,75 @@ pub fn run() {
     // INSIDE the existing instance — so we can safely focus its window.
     .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
       if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
         let _ = window.unminimize();
         let _ = window.set_focus();
       }
     }))
     .plugin(tauri_plugin_shell::init())
+    // Persist window position + size across launches. Saves to a
+    // platform-appropriate path on app exit, restores on next start.
+    .plugin(tauri_plugin_window_state::Builder::default().build())
+    .on_window_event(|window, event| {
+      // Close button hides the window instead of quitting. Real
+      // shutdown happens via the tray menu's Quit item or ⌘Q / Alt+F4.
+      // This is the standard "background app with menu-bar / tray
+      // presence" UX on both Mac and Windows.
+      if let WindowEvent::CloseRequested { api, .. } = event {
+        let _ = window.hide();
+        api.prevent_close();
+      }
+    })
     .setup(|app| {
+      // System tray (Windows notification area / macOS menu bar).
+      // Click toggles main-window visibility; right-click drops a menu
+      // with Show / Quit. Quit is the only path that actually exits
+      // and triggers RunEvent::ExitRequested → daemon shutdown.
+      let show_item = MenuItem::with_id(app, "show", "Show tailward", true, None::<&str>)?;
+      let quit_item = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+      let menu = Menu::with_items(app, &[&show_item, &quit_item])?;
+
+      let _tray = TrayIconBuilder::with_id("main-tray")
+        .icon(app.default_window_icon().unwrap().clone())
+        .tooltip("tailward")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+          "show" => {
+            if let Some(window) = app.get_webview_window("main") {
+              let _ = window.show();
+              let _ = window.unminimize();
+              let _ = window.set_focus();
+            }
+          }
+          "quit" => {
+            app.exit(0);
+          }
+          _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+          // Left-click toggles visibility. The standard pattern: if
+          // the window is hidden, show + focus; if visible, hide.
+          if let TrayIconEvent::Click {
+            button: MouseButton::Left,
+            button_state: MouseButtonState::Up,
+            ..
+          } = event
+          {
+            let app = tray.app_handle();
+            if let Some(window) = app.get_webview_window("main") {
+              let visible = window.is_visible().unwrap_or(false);
+              if visible {
+                let _ = window.hide();
+              } else {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+              }
+            }
+          }
+        })
+        .build(app)?;
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
