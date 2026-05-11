@@ -237,29 +237,36 @@
   }
 
   /* Narrow-width pass — main window in assistant-sized mode
-     (~480–720px). Push .session metadata to its own row so the
-     primary controls (brand / picker / search / contact) fit in
-     a single line. Hide the version badge as decorative. */
+     (~480–720px). Two rows: brand-left | picker+search-right on
+     row 1, last-event-left | session/project/mode-right on row 2.
+     Float-right is via flex order + margin-left:auto on the first
+     right-side item per row. Version badge drops as decorative. */
   @media (max-width: 720px) {
     .bar {
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 8px 10px;
       padding: 12px 16px;
+      align-items: center;
     }
     .version { display: none; }
+    .brand { order: 1; }
+    /* SessionPicker + SearchPanel render their own .picker / .search
+       roots; Svelte's scoped CSS won't add this component's hash to
+       those (they're rendered inside child components), so target
+       via :global. Picker gets margin-left:auto to push itself + the
+       trailing search to the right of brand on row 1. */
+    .bar > :global(.picker) { order: 2; margin-left: auto; }
+    .bar > :global(.search) { order: 3; }
+    .contact { order: 4; font-size: 10px; gap: 4px; }
     .session {
-      order: 99;
-      width: 100%;
-      font-size: 11px;
+      order: 5;
+      margin-left: auto;
+      font-size: 10px;
       gap: 6px;
     }
     .session code {
       padding: 2px 5px;
       font-size: 10px;
-    }
-    .contact {
-      font-size: 10px;
-      gap: 4px;
     }
     .contact-when { min-width: 50px; }
   }
