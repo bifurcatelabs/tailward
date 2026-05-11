@@ -71,6 +71,7 @@ async fn open_review_window(
     .inner_size(1100.0, 800.0)
     .min_inner_size(600.0, 480.0)
     .resizable(true)
+    .decorations(false)
     .build()
     .map_err(|e| {
       println!("[tailward] open_review_window: build failed: {e}");
@@ -79,6 +80,35 @@ async fn open_review_window(
 
   println!("[tailward] open_review_window: spawned '{label}'");
   Ok(())
+}
+
+/// Window controls invoked from the custom title bar. Each takes the
+/// current ``WebviewWindow`` so the action applies to the window that
+/// initiated the call — main window's titlebar controls the main
+/// window, a spawned review window's controls control itself.
+///
+/// ``window_close`` flows through the standard ``WindowEvent::Close
+/// Requested`` handler, which honors the main-window-only close-to-
+/// hide rule. Review windows truly close; main window hides.
+
+#[tauri::command]
+async fn window_minimize(window: tauri::WebviewWindow) -> Result<(), String> {
+  window.minimize().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn window_toggle_maximize(window: tauri::WebviewWindow) -> Result<(), String> {
+  let is_max = window.is_maximized().map_err(|e| e.to_string())?;
+  if is_max {
+    window.unmaximize().map_err(|e| e.to_string())
+  } else {
+    window.maximize().map_err(|e| e.to_string())
+  }
+}
+
+#[tauri::command]
+async fn window_close(window: tauri::WebviewWindow) -> Result<(), String> {
+  window.close().map_err(|e| e.to_string())
 }
 
 /// Dev-only sink for ``console.log/warn/error/info`` from the webview.
@@ -112,7 +142,13 @@ async fn daemon_is_healthy(client: &reqwest::Client) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![open_review_window, _dev_log])
+    .invoke_handler(tauri::generate_handler![
+      open_review_window,
+      _dev_log,
+      window_minimize,
+      window_toggle_maximize,
+      window_close
+    ])
     // Single-instance enforcement runs as the FIRST plugin so a second
     // invocation of tailward.exe is rejected before it can race the
     // bundled-daemon spawn or the health-check probe. The closure runs

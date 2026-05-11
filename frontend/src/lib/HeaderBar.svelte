@@ -39,8 +39,11 @@
 <header class="bar">
   <div class="brand">
     <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-      <!-- Stylized monogram: a "W" rendered as three rising chevrons,
-           lit from the left. Matches the copper accent. -->
+      <!-- tw monogram: T descender flows into the W's middle peak.
+           Crossbar sits slightly off-center to the left of the
+           descender (asymmetric, avoids reading as the .tw / TW
+           Taiwan abbreviation). W's outer peaks sit higher than the
+           middle to make the T-to-W transition visible. -->
       <defs>
         <linearGradient id="markFill" x1="0" y1="1" x2="1" y2="0">
           <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.55"/>
@@ -48,7 +51,7 @@
         </linearGradient>
       </defs>
       <path
-        d="M3 9 L8 23 L13 13 L18 23 L23 9 M14 22 L19 12 L24 22"
+        d="M2 6 L18 6 M11 6 L11 13 M4 8 L7 24 L11 13 L15 24 L18 8"
         fill="none"
         stroke="url(#markFill)"
         stroke-width="2.2"

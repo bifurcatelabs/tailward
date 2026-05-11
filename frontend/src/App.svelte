@@ -3,6 +3,7 @@
   import HeaderBar from './lib/HeaderBar.svelte';
   import TopStrip from './lib/TopStrip.svelte';
   import TabNav from './lib/TabNav.svelte';
+  import TitleBar from './lib/TitleBar.svelte';
   import SessionView from './lib/SessionView.svelte';
   import ReflectionView from './lib/ReflectionView.svelte';
   import PlatformView from './lib/PlatformView.svelte';
@@ -85,6 +86,9 @@
 </script>
 
 <div class="app">
+  {#if isTauri}
+    <TitleBar />
+  {/if}
   {#if page === 'session'}
     <HeaderBar {ph} {sessionId} />
     {#if !spawned}
