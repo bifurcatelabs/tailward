@@ -78,32 +78,6 @@
 </script>
 
 <section class="feed">
-  <div class="filter-bar">
-    <button
-      type="button"
-      class="pill"
-      class:active={feedFilter.empty()}
-      onclick={() => feedFilter.clear()}
-      title="show every event type (clear all filter pills)"
-    >all</button>
-    {#each FILTER_GROUPS as g (g.key)}
-      <button
-        type="button"
-        class="pill pill-{g.key}"
-        class:active={feedFilter.isActive(g.key)}
-        onclick={() => feedFilter.toggle(g.key)}
-        title={g.description}
-      >{g.label}</button>
-    {/each}
-    <span class="filter-count">
-      {#if feedFilter.empty()}
-        {totalCount} event{totalCount === 1 ? '' : 's'}
-      {:else}
-        {visibleCount} / {totalCount}
-      {/if}
-    </span>
-  </div>
-
   {#if reversed.length === 0}
     <div class="empty">
       {#if feedFilter.empty()}

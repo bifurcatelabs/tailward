@@ -351,13 +351,18 @@
     hover = null;
   }
 
-  // Visual width of a cluster tick. Single events stay 2px (the
-  // existing density). Clusters widen logarithmically with count so
-  // a cluster of 4 reads slightly wider, a cluster of 16 noticeably
-  // so, capped at 8px to avoid swallowing the track.
-  function tickWidthPx(count) {
-    if (count <= 1) return 2;
-    return Math.min(8, Math.round(2 + Math.log2(count)));
+  // Height encoding: every tick is the same narrow width (2px) so
+  // the arc reads as time density across the horizontal axis. Count
+  // encodes vertically — a single event is a short tick, a busy
+  // cluster grows toward the top of the track. Reads as a sparkline
+  // /histogram instead of width-encoded chunks that competed with
+  // the no-activity band for visual weight.
+  const TICK_WIDTH_PX = 2;
+  const TRACK_HEIGHT_PX = 22;
+  const TICK_MIN_PX = 6;
+  function tickHeightPx(count) {
+    if (count <= 1) return TICK_MIN_PX;
+    return Math.min(TRACK_HEIGHT_PX, TICK_MIN_PX + Math.log2(count) * 4);
   }
 </script>
 
@@ -391,29 +396,6 @@
       {/if}
     </span>
   </header>
-  <!-- Type-pill row mirrors the Feed's filter bar. Multi-toggle: each
-       pill independently adds/removes its group from the active set,
-       and "all" lights up + clears when the set is empty. State is
-       shared via feedFilter so toggling here also narrows the Feed
-       below — single control surface for both views. -->
-  <div class="filter-bar" role="group" aria-label="event type filter">
-    <button
-      type="button"
-      class="filter-pill"
-      class:active={feedFilter.empty()}
-      onclick={() => feedFilter.clear()}
-      title="show every event type (clear all filter pills)"
-    >all</button>
-    {#each FILTER_GROUPS as g (g.key)}
-      <button
-        type="button"
-        class="filter-pill filter-pill-{g.key}"
-        class:active={feedFilter.isActive(g.key)}
-        onclick={() => feedFilter.toggle(g.key)}
-        title={g.description}
-      >{g.label}</button>
-    {/each}
-  </div>
   <div class="track" role="img" aria-label="session event timeline">
     {#if layout.length === 0}
       <div class="placeholder">no activity yet</div>
@@ -437,8 +419,9 @@
           style="
             left: {c.pct}%;
             background: {COLORS[c.events[0].type] ?? 'var(--muted)'};
-            width: {tickWidthPx(c.count)}px;
-            transform: translateX(-{tickWidthPx(c.count) / 2}px);
+            width: {TICK_WIDTH_PX}px;
+            height: {tickHeightPx(c.count)}px;
+            transform: translateX(-{TICK_WIDTH_PX / 2}px);
           "
           onmouseenter={(ev) => clusterEnter(ev, c)}
           onmouseleave={leave}
@@ -608,56 +591,29 @@
     pointer-events: auto;
     z-index: 0;
   }
+  /* No-activity band — a subtle dim wash with dotted endpoint markers
+     so the eye registers "gap" without competing with the event ticks
+     for visual weight. Previously a loud diagonal stripe pattern. */
   .band-idle {
-    background:
-      repeating-linear-gradient(
-        135deg,
-        transparent 0,
-        transparent 4px,
-        rgba(255, 255, 255, 0.03) 4px,
-        rgba(255, 255, 255, 0.03) 8px
-      );
-    border-left: 1px dashed rgba(255, 255, 255, 0.10);
-    border-right: 1px dashed rgba(255, 255, 255, 0.10);
+    background: rgba(255, 255, 255, 0.015);
+    border-left: 1px dotted rgba(255, 255, 255, 0.10);
+    border-right: 1px dotted rgba(255, 255, 255, 0.10);
     cursor: help;
   }
   .band-idle:hover {
-    background:
-      repeating-linear-gradient(
-        135deg,
-        transparent 0,
-        transparent 4px,
-        rgba(255, 255, 255, 0.06) 4px,
-        rgba(255, 255, 255, 0.06) 8px
-      );
+    background: rgba(255, 255, 255, 0.04);
   }
   .tick {
     position: absolute;
-    top: 4px;
-    bottom: 4px;
+    bottom: 2px;
     border-radius: 1px;
     opacity: 0.85;
-    transition: opacity 120ms;
+    transition: opacity 120ms, height 180ms ease-out;
     cursor: help;
     z-index: 1;
   }
   .tick:hover {
     opacity: 1;
-  }
-  /* Cluster ticks have a thin top highlight to read as "more than one
-     here" at a glance, so the eye picks them out from singletons even
-     when the width difference is small (count of 2-3). */
-  .tick.cluster::before {
-    content: '';
-    position: absolute;
-    top: -3px;
-    left: 50%;
-    transform: translateX(-50%);
-    width: 6px;
-    height: 2px;
-    background: currentColor;
-    opacity: 0.6;
-    border-radius: 1px;
   }
   .placeholder {
     position: absolute;
