@@ -1,5 +1,10 @@
 import { mount } from 'svelte';
 import App from './App.svelte';
+import { installDevLogMirror } from './lib/devlog.js';
+
+// Install the console mirror before mounting so any early-init logs in
+// the SPA already route through it. No-op outside dev-Tauri context.
+installDevLogMirror();
 
 // Parse the URL pathname into a page kind + props. The same SPA
 // bundle serves three pages — ``/``, ``/p/<ph>``, and

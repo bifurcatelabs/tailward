@@ -45,17 +45,21 @@ async fn open_review_window(
   session_id: String,
 ) -> Result<(), String> {
   if !REVIEW_VIEWS.contains(&view.as_str()) {
+    println!("[tailward] open_review_window: rejected unknown view '{view}'");
     return Err(format!("'{view}' is not a spawnable review surface"));
   }
 
   let label = format!("review-{view}");
 
   if let Some(window) = app.get_webview_window(&label) {
+    println!("[tailward] open_review_window: focusing existing '{label}'");
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
     return Ok(());
   }
+
+  println!("[tailward] open_review_window: spawning new '{label}' for view='{view}'");
 
   let url_str = format!(
     "http://127.0.0.1:7878/p/{ph}/live/{session_id}?spawned=1#{view}"
@@ -68,9 +72,27 @@ async fn open_review_window(
     .min_inner_size(600.0, 480.0)
     .resizable(true)
     .build()
-    .map_err(|e| e.to_string())?;
+    .map_err(|e| {
+      println!("[tailward] open_review_window: build failed: {e}");
+      e.to_string()
+    })?;
 
+  println!("[tailward] open_review_window: spawned '{label}'");
   Ok(())
+}
+
+/// Dev-only sink for ``console.log/warn/error/info`` from the webview.
+/// The frontend's ``devlog.js`` shim installs a console override in
+/// debug-Tauri context that funnels everything here so ``cargo tauri
+/// dev``'s stdout carries the SPA's logs alongside Rust's. No-op in
+/// release builds (the shim doesn't install there either; this gating
+/// is belt-and-braces).
+#[tauri::command]
+fn _dev_log(level: String, message: String) {
+  #[cfg(debug_assertions)]
+  println!("[webview {level}] {message}");
+  #[cfg(not(debug_assertions))]
+  let _ = (level, message);
 }
 
 /// Probe the daemon's ``/health`` endpoint with a tight timeout. Returns
@@ -90,7 +112,7 @@ async fn daemon_is_healthy(client: &reqwest::Client) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
-    .invoke_handler(tauri::generate_handler![open_review_window])
+    .invoke_handler(tauri::generate_handler![open_review_window, _dev_log])
     // Single-instance enforcement runs as the FIRST plugin so a second
     // invocation of tailward.exe is rejected before it can race the
     // bundled-daemon spawn or the health-check probe. The closure runs
