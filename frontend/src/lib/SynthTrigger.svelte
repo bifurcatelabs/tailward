@@ -1,8 +1,8 @@
 <script>
-  // Minimal inline affordance to fire a comprehensive synth from the
-  // live page without opening the full Synthesis surface. The full
-  // panel (snapshot list, regenerate, intent.md viewer) lives on the
-  // Synthesis tab and pops out in its own window via #30.
+  // Inline session-level synth trigger. Pill-shaped with a faint
+  // accent glow so it reads as "action" against the muted-border
+  // filter pills around it but doesn't shout. Lives in the Filter &
+  // Actions card header (next to the card label).
 
   let { ph, sessionId } = $props();
 
@@ -28,52 +28,45 @@
   }
 </script>
 
-<div class="trigger">
-  <button onclick={fire} disabled={synthesizing}>
-    {synthesizing ? 'synthesizing…' : 'synthesize now'}
-  </button>
-  {#if lastResult}
-    <span class="result">{lastResult}</span>
-  {/if}
-  <span class="muted">full snapshot history on the synthesis tab</span>
-</div>
+<button
+  class="synth"
+  onclick={fire}
+  disabled={synthesizing}
+  title={lastResult || 'fire a comprehensive synthesis now'}
+>
+  {synthesizing ? 'synthesizing…' : 'synthesize now'}
+</button>
 
 <style>
-  .trigger {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 8px 24px 0;
-    font-size: 11px;
-  }
-  button {
-    background: var(--surface-2);
-    border: 1px solid var(--border);
-    color: var(--text-soft);
-    padding: 4px 10px;
-    border-radius: 4px;
-    font-size: 11px;
+  .synth {
+    background: rgba(232,153,104,0.06);
+    border: 1px solid rgba(232,153,104,0.40);
+    color: var(--accent);
+    padding: 3px 10px;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    font-weight: 600;
+    border-radius: 999px;
+    box-shadow: 0 0 12px rgba(232,153,104,0.10);
     cursor: pointer;
     font-family: inherit;
+    transition:
+      background 140ms ease,
+      box-shadow 140ms ease,
+      color 140ms ease;
   }
-  button:hover:not(:disabled) {
-    background: var(--surface-3);
-    color: var(--text);
+  .synth:hover:not(:disabled) {
+    background: rgba(232,153,104,0.14);
+    box-shadow: 0 0 18px rgba(232,153,104,0.22);
+    color: var(--accent-soft);
   }
-  button:disabled {
+  .synth:active:not(:disabled) {
+    background: rgba(232,153,104,0.20);
+  }
+  .synth:disabled {
     opacity: 0.6;
     cursor: default;
-  }
-  .result {
-    color: var(--muted);
-    font-family: var(--mono);
-  }
-  .muted {
-    color: var(--muted-deep);
-    margin-left: auto;
-  }
-  @media (max-width: 720px) {
-    .trigger { padding: 8px 16px 0; font-size: 10px; }
-    .muted { display: none; }
+    box-shadow: none;
   }
 </style>
