@@ -163,6 +163,36 @@ def parse_line(line: str) -> TranscriptEvent | None:
     cwd = obj.get("cwd") or obj.get("projectPath") or obj.get("project_path")
 
     message = obj.get("message", obj)
+
+    # Claude Code wraps tool results inside ``type: user`` envelopes.
+    # ``_classify`` only sees the outer type and tags these
+    # ``user_message``, which makes downstream consumers (synthesis
+    # denoise + per-event size caps, feed grouping, user-turn counts)
+    # treat the entire tool output as user prose. Reclassify here so
+    # the inner block kind wins — without this, a Read of a 30K-line
+    # file lands in the synth prompt as one uncapped USER entry.
+    #
+    # Discrimination mirrors ``_looks_like_human_prompt``: only flip to
+    # ``tool_result`` when the content is *purely* tool_result block(s)
+    # and has no real text. A user message that mixes typed text with
+    # a tool_result reference stays ``user_message`` because the typed
+    # text is the primary signal.
+    if kind == "user_message" and isinstance(message, dict):
+        content = message.get("content")
+        if isinstance(content, list):
+            has_text = False
+            has_tool_result = False
+            for block in content:
+                if not isinstance(block, dict):
+                    continue
+                btype = block.get("type")
+                if btype == "text" and (block.get("text") or "").strip():
+                    has_text = True
+                elif btype == "tool_result":
+                    has_tool_result = True
+            if has_tool_result and not has_text:
+                kind = "tool_result"
+
     text = _extract_text(message)
 
     tool_name = None
@@ -178,7 +208,7 @@ def parse_line(line: str) -> TranscriptEvent | None:
         bid = obj.get("id") or (message or {}).get("id")
         if isinstance(bid, str):
             tool_use_id = bid
-    elif kind in ("user_message", "assistant_message") and isinstance(message, dict):
+    elif kind in ("user_message", "assistant_message", "tool_result") and isinstance(message, dict):
         content = message.get("content")
         if isinstance(content, list):
             for block in content:

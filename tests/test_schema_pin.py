@@ -270,11 +270,12 @@ def test_user_message_compact_summary_is_flagged_synthesized() -> None:
 # ---------- user_message: tool_result wrapper (NOT a typed prompt) ----------
 
 
-def test_user_message_tool_result_wrapper_parses() -> None:
+def test_user_message_tool_result_wrapper_reclassifies() -> None:
     """Claude Code wraps tool *results* as ``type=user`` events with a
-    tool_result block in content. The parser produces ``user_message``
-    kind, but downstream code (``_looks_like_human_prompt``) filters
-    these out before publishing as user_turn."""
+    tool_result block in content. The parser reclassifies these to
+    ``tool_result`` kind so downstream size caps + filters can branch
+    correctly. A pure-tool_result content flips; mixed text+tool_result
+    stays ``user_message`` (see the mixed-content test below)."""
     line = _line(
         {
             "type": "user",
@@ -294,9 +295,38 @@ def test_user_message_tool_result_wrapper_parses() -> None:
     )
     ev = parse_line(line)
     assert ev is not None
-    assert ev.kind == "user_message"
+    assert ev.kind == "tool_result"
+    assert ev.tool_output == "file contents here"
+    assert ev.tool_use_id == "tu_01"
     # Synthesized flag must NOT fire on tool results (only on /compact).
     assert ev.synthesized is False
+
+
+def test_user_message_mixed_text_and_tool_result_stays_user() -> None:
+    """When the user-type envelope contains BOTH a text block (real
+    typed prompt) and a tool_result block, the typed text is the
+    primary signal — stay classified as user_message."""
+    line = _line(
+        {
+            "type": "user",
+            "sessionId": "sess-1",
+            "cwd": "C:/warden",
+            "message": {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "Continue with the next step."},
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": "tu_99",
+                        "content": "some output",
+                    },
+                ],
+            },
+        }
+    )
+    ev = parse_line(line)
+    assert ev is not None
+    assert ev.kind == "user_message"
 
 
 # ---------- system events ----------
