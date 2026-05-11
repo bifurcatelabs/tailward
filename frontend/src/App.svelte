@@ -42,10 +42,11 @@
   async function setView(v) {
     if (!TABS.includes(v)) return;
 
-    // Sidebar window in Tauri: clicking a review tab spawns a separate
+    // Main window in Tauri: clicking a review tab spawns a separate
     // window instead of switching view in-place. Session tab stays in
-    // the sidebar. Spawned windows fall through to the in-place switch
-    // (they don't re-spawn each other; not that they show TabNav anyway).
+    // the main window. Spawned review windows fall through to the
+    // in-place switch (they don't re-spawn from themselves; not that
+    // they show TabNav anyway).
     if (isTauri && !spawned && page === 'session' && v !== 'session') {
       try {
         await window.__TAURI_INTERNALS__.invoke('open_review_window', {

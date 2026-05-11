@@ -129,13 +129,20 @@ pub fn run() {
     // platform-appropriate path on app exit, restores on next start.
     .plugin(tauri_plugin_window_state::Builder::default().build())
     .on_window_event(|window, event| {
-      // Close button hides the window instead of quitting. Real
-      // shutdown happens via the tray menu's Quit item or ⌘Q / Alt+F4.
-      // This is the standard "background app with menu-bar / tray
-      // presence" UX on both Mac and Windows.
+      // Close-to-hide applies only to the main (sidebar) window — the
+      // standard "background app with menu-bar / tray presence" UX.
+      // Real shutdown happens via the tray menu's Quit item.
+      //
+      // Review windows (label ``review-<view>``) close normally so a
+      // subsequent tab click triggers a fresh spawn instead of un-
+      // hiding the prior window. Hiding them would shadow the
+      // focus-if-exists branch since Tauri still considers a hidden
+      // window "existing."
       if let WindowEvent::CloseRequested { api, .. } = event {
-        let _ = window.hide();
-        api.prevent_close();
+        if window.label() == "main" {
+          let _ = window.hide();
+          api.prevent_close();
+        }
       }
     })
     .setup(|app| {
