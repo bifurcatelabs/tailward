@@ -15,8 +15,8 @@
   });
 </script>
 
-<SessionTimeline {ph} {sessionId} />
-<FilterStrip />
+<SessionTimeline />
+<FilterStrip {ph} {sessionId} />
 <main class="layout">
   <Feed {sessionId} />
 </main>

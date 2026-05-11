@@ -78,6 +78,16 @@
 </script>
 
 <section class="feed">
+  <header>
+    <span class="label">live feed</span>
+    <span class="count">
+      {#if feedFilter.empty()}
+        {totalCount} event{totalCount === 1 ? '' : 's'}
+      {:else}
+        {visibleCount} / {totalCount}
+      {/if}
+    </span>
+  </header>
   {#if reversed.length === 0}
     <div class="empty">
       {#if feedFilter.empty()}
@@ -116,40 +126,26 @@
   .feed {
     background: var(--surface);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 10px;
     overflow: hidden;
   }
-  .filter-bar {
+  header {
     display: flex;
-    flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    padding: 10px 14px;
-    background: var(--surface-2);
+    justify-content: space-between;
+    padding: 12px 18px;
+    gap: 12px;
     border-bottom: 1px solid var(--border);
+    background: var(--surface);
   }
-  .pill {
-    background: transparent;
-    border: 1px solid var(--border);
-    color: var(--muted);
-    padding: 3px 10px;
+  .label {
     font-size: 10px;
+    color: var(--muted);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.10em;
     font-weight: 600;
-    border-radius: 999px;
-    cursor: pointer;
-    font-family: inherit;
-    transition: color 120ms, border-color 120ms, background 120ms;
   }
-  .pill:hover { color: var(--text-soft); border-color: var(--text-soft); }
-  .pill.active {
-    color: var(--accent);
-    border-color: rgba(232,153,104,0.40);
-    background: rgba(232,153,104,0.08);
-  }
-  .filter-count {
-    margin-left: auto;
+  .count {
     color: var(--muted-deep);
     font-size: 10px;
     font-family: var(--mono);
