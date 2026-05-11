@@ -1,10 +1,12 @@
 <script>
+  import HeroStrip from './HeroStrip.svelte';
   import PathDiagram from './PathDiagram.svelte';
   import ProbePanel from './ProbePanel.svelte';
   import TurnMetricsPanel from './TurnMetricsPanel.svelte';
   import StopReasonsPanel from './StopReasonsPanel.svelte';
   import ClaimVerificationPanel from './ClaimVerificationPanel.svelte';
   import ProjectQuickPicker from './ProjectQuickPicker.svelte';
+  import Rail from './Rail.svelte';
 
   let { ph } = $props();
 </script>
@@ -23,11 +25,17 @@
     </p>
   </header>
 
+  <HeroStrip />
   <PathDiagram />
   <TurnMetricsPanel {ph} />
   <StopReasonsPanel {ph} />
   <ClaimVerificationPanel {ph} />
   <ProbePanel {ph} />
+  <!-- Agent-output audits: LLM-judged rubric + session-close
+       8-mode report card. Moved from session view's right rail
+       so the live page can be filter-and-arc heavy and the audit
+       signals live next to the rest of the inference stack. -->
+  <Rail />
 </section>
 
 <style>
