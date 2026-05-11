@@ -42,14 +42,23 @@ def _kind_profile(
     display_kind: str | None = None,
 ) -> dict[str, Any]:
     cfg = get_config()
-    # Sampler + max_tokens are global as of the post-rename schema
-    # slim — what differs per kind is the prompt, which is the part
-    # that earns user attention on the Settings transparency panel.
+    # Sampler + identity follow the routed profile for this kind.
+    # Surfaced verbatim so the Platform/Settings transparency panel
+    # shows what the worker will actually send, including which
+    # profile (1 or 2) handles it.
+    route_idx = cfg.route_for(kind)
+    profile = cfg.profile(route_idx)
     return {
         "kind": display_kind or kind,
-        "model": cfg.local_llm_model,
-        "max_tokens": cfg.local_llm_max_tokens,
-        "temperature": cfg.local_llm_temperature,
+        "profile": route_idx,
+        "model": profile.model,
+        "max_tokens": profile.max_tokens,
+        "temperature": profile.temperature,
+        "top_p": profile.top_p,
+        "top_k": profile.top_k,
+        "min_p": profile.min_p,
+        "presence_penalty": profile.presence_penalty,
+        "repetition_penalty": profile.repetition_penalty,
         "system_prompt": system,
         "user_prompt_template": user_template,
     }
@@ -96,17 +105,41 @@ def all_profiles() -> list[dict[str, Any]]:
     ]
 
 
+def _profile_dict(cfg, idx: int) -> dict[str, Any]:
+    """Serialize a profile's editable surface for the Settings UI. The
+    raw api_key value is never returned (boolean ``api_key_set`` only);
+    writes go through ``POST /v2/config/local-llm``."""
+    p = cfg.profile(idx)
+    return {
+        "idx": idx,
+        "enabled": True if idx == 1 else cfg.local_llm_2_enabled,
+        "endpoint": p.endpoint,
+        "model": p.model,
+        "context_tokens": p.context_tokens,
+        "temperature": p.temperature,
+        "top_p": p.top_p,
+        "top_k": p.top_k,
+        "min_p": p.min_p,
+        "presence_penalty": p.presence_penalty,
+        "repetition_penalty": p.repetition_penalty,
+        "max_tokens": p.max_tokens,
+        "api_key_set": bool(p.api_key) and p.api_key != "not-needed",
+    }
+
+
 def endpoint_summary() -> dict[str, Any]:
-    """Editable global config: URL, model, context window, sampler /
-    output budget, and api-key-presence. The literal API key value is
-    never returned (UI shows "set, hidden" or "not set"); writes to
-    the api_key field go through the POST endpoint."""
+    """Editable surface for both profiles + the routing matrix. UI
+    consumes this to render the two-profile Settings card."""
     cfg = get_config()
     return {
-        "endpoint": cfg.local_llm_endpoint,
-        "default_model": cfg.local_llm_model,
-        "context_tokens": cfg.local_llm_context_tokens,
-        "temperature": cfg.local_llm_temperature,
-        "max_tokens": cfg.local_llm_max_tokens,
-        "api_key_set": bool(cfg.local_llm_api_key) and cfg.local_llm_api_key != "not-needed",
+        "profiles": [_profile_dict(cfg, 1), _profile_dict(cfg, 2)],
+        "routing": {
+            "drift": cfg.local_llm_route_drift,
+            "audit": cfg.local_llm_route_audit,
+            "rubric": cfg.local_llm_route_rubric,
+            "user_rubric": cfg.local_llm_route_user_rubric,
+            "synth": cfg.local_llm_route_synth,
+            "consolidator": cfg.local_llm_route_consolidator,
+            "query": cfg.local_llm_route_query,
+        },
     }

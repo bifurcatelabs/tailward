@@ -110,7 +110,8 @@ async def test_complete_records_metric_on_success(tmp_path) -> None:
             reasoning_tokens=900,
         )
 
-    client._client = _stub_client(_create)
+    _p = client._cfg.profile(1)
+    client._clients[(_p.endpoint, _p.api_key)] = _stub_client(_create)
 
     out = await client.complete("sys", "user", kind="rubric")
     assert out == '{"ok":true}'
@@ -152,7 +153,8 @@ async def test_complete_records_metric_on_length_truncation(tmp_path) -> None:
             reasoning_tokens=2500,
         )
 
-    client._client = _stub_client(_create)
+    _p = client._cfg.profile(1)
+    client._clients[(_p.endpoint, _p.api_key)] = _stub_client(_create)
 
     with pytest.raises(RuntimeError, match="finish_reason=length"):
         await client.complete("sys", "user", kind="rubric")
@@ -167,11 +169,13 @@ async def test_complete_records_metric_on_length_truncation(tmp_path) -> None:
 
 
 @pytest.mark.asyncio
-async def test_global_temperature_flows_to_api(tmp_path) -> None:
-    """The single global temperature reaches every call regardless of
-    kind. Per-call-kind sampler differentiation was retired in the
-    schema slim — what differs per kind is the prompt, not the sampler.
-    """
+async def test_profile_sampler_flows_to_api(tmp_path) -> None:
+    """The routed profile's sampler config reaches every call. Standard
+    OpenAI params (``temperature``, ``top_p``, ``presence_penalty``,
+    ``max_tokens``) land at the top level; non-standard ones
+    (``top_k``, ``min_p``, ``repetition_penalty``) ride in ``extra_body``
+    so OpenAI-compatible servers (vLLM, llama.cpp) get them too.
+    Profile 1 is the default route for every call kind."""
     db = tmp_path / "ledger.db"
     ledger = Ledger(db_path=db)
     await ledger.connect()
@@ -184,19 +188,22 @@ async def test_global_temperature_flows_to_api(tmp_path) -> None:
 
     client = LocalLLMClient()
     client.attach_recorder(ledger)
-    client._client = _stub_client(_capture)
+    _p = client._cfg.profile(1)
+    client._clients[(_p.endpoint, _p.api_key)] = _stub_client(_capture)
 
-    await client.complete("sys", "user", kind="rubric")
-    assert captured["temperature"] == pytest.approx(0.6)
-    assert "presence_penalty" not in captured
-
-    captured.clear()
-    await client.complete("sys", "user", kind="synth")
-    assert captured["temperature"] == pytest.approx(0.6)
-
-    captured.clear()
-    await client.complete("sys", "user", kind="drift")
-    assert captured["temperature"] == pytest.approx(0.6)
+    for kind in ("rubric", "synth", "drift"):
+        captured.clear()
+        await client.complete("sys", "user", kind=kind)
+        # Top-level standard params.
+        assert captured["temperature"] == pytest.approx(_p.temperature)
+        assert captured["top_p"] == pytest.approx(_p.top_p)
+        assert captured["presence_penalty"] == pytest.approx(_p.presence_penalty)
+        assert captured["max_tokens"] == _p.max_tokens
+        # Non-standard params via extra_body for OpenAI-compat servers.
+        eb = captured.get("extra_body") or {}
+        assert eb.get("top_k") == _p.top_k
+        assert eb.get("min_p") == pytest.approx(_p.min_p)
+        assert eb.get("repetition_penalty") == pytest.approx(_p.repetition_penalty)
 
     await ledger.close()
 
@@ -217,7 +224,8 @@ async def test_complete_records_metric_on_http_failure(tmp_path) -> None:
         await asyncio.sleep(0.01)
         raise RuntimeError("connection refused")
 
-    client._client = _stub_client(_boom)
+    _p = client._cfg.profile(1)
+    client._clients[(_p.endpoint, _p.api_key)] = _stub_client(_boom)
 
     with pytest.raises(RuntimeError, match="connection refused"):
         await client.complete("sys", "user", kind="drift")
@@ -255,7 +263,8 @@ async def test_complete_propagates_cancellation_promptly(tmp_path) -> None:
         await asyncio.sleep(60.0)
         return _fake_response(content="never reached")
 
-    client._client = _stub_client(_hang)
+    _p = client._cfg.profile(1)
+    client._clients[(_p.endpoint, _p.api_key)] = _stub_client(_hang)
 
     task = asyncio.create_task(client.complete("sys", "user", kind="drift"))
     # Wait until the stub is actually inside the await before cancelling

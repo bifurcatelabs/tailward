@@ -91,13 +91,18 @@ class ProbeWorker:
         """
         if self._client is None:
             return
-        endpoint = (cfg.local_llm_endpoint or "").rstrip("/")
+        # Probe profile 1's endpoint — the default that most workers
+        # route through. Profile 2 is opt-in; probing it would double
+        # probe load without a clear use case until per-profile health
+        # tracking lands as its own surface.
+        profile = cfg.profile(1)
+        endpoint = (profile.endpoint or "").rstrip("/")
         if not endpoint:
             return
         url = f"{endpoint}/models"
         headers = {}
-        if cfg.local_llm_api_key:
-            headers["Authorization"] = f"Bearer {cfg.local_llm_api_key}"
+        if profile.api_key:
+            headers["Authorization"] = f"Bearer {profile.api_key}"
 
         start = time.monotonic()
         status = "error"

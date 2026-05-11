@@ -34,14 +34,23 @@ CallKind = Literal["synth", "drift", "query", "rubric", "consolidator"]
 
 
 class LocalLLMClient:
-    """Single queue in front of a local OpenAI-compatible endpoint."""
+    """Profile-aware queue in front of one or more local OpenAI-
+    compatible endpoints.
+
+    Resolves each call's profile via ``Config.profile_for(kind)`` —
+    profile 1 by default, profile 2 if the worker kind is routed there
+    and profile 2 is enabled. AsyncOpenAI client instances are cached
+    per ``(endpoint, api_key)`` so two profiles pointing at distinct
+    GPU nodes maintain separate connection pools.
+    """
 
     def __init__(self) -> None:
         cfg = get_config()
         self._cfg = cfg
-        self._client = AsyncOpenAI(
-            base_url=cfg.local_llm_endpoint, api_key=cfg.local_llm_api_key
-        )
+        # Cache keyed on (endpoint, api_key). Letting two profiles
+        # share a single client when they reuse the same endpoint is
+        # safe — AsyncOpenAI is stateless beyond the connection pool.
+        self._clients: dict[tuple[str, str], AsyncOpenAI] = {}
         self._sem = asyncio.Semaphore(1)
         self._ledger: Ledger | None = None
 
@@ -52,13 +61,19 @@ class LocalLLMClient:
         — metric writes now happen on the same loop as the LLM call."""
         self._ledger = ledger
 
+    def _client_for(self, endpoint: str, api_key: str) -> AsyncOpenAI:
+        key = (endpoint, api_key)
+        client = self._clients.get(key)
+        if client is None:
+            client = AsyncOpenAI(base_url=endpoint, api_key=api_key)
+            self._clients[key] = client
+        return client
+
     def resolve_model(self, kind: CallKind) -> str:
-        # ``kind`` is preserved on the public method for caller
-        # compatibility and metric attribution, even though the model
-        # is now a single global setting (the per-kind override knobs
-        # were retired). If you need to route different kinds to
-        # different model quants again, that's the place to add it back.
-        return self._cfg.local_llm_model
+        """Return the model identifier that handles a given call kind.
+        Reads through the profile router so callers see the
+        actually-routed model, not just profile 1's."""
+        return self._cfg.profile_for(kind).model
 
     async def complete(
         self,
@@ -72,20 +87,33 @@ class LocalLLMClient:
     ) -> str:
         async with self._sem:
             cfg = self._cfg
-            # Caller-passed values override config; otherwise the single
-            # global setting applies to every call.
-            temp = cfg.local_llm_temperature if temperature is None else temperature
-            mt = cfg.local_llm_max_tokens if max_tokens is None else max_tokens
-            model = cfg.local_llm_model
+            profile = cfg.profile_for(kind)
+            # Caller-passed values override the profile's defaults;
+            # otherwise the routed profile's sampler config applies.
+            temp = profile.temperature if temperature is None else temperature
+            mt = profile.max_tokens if max_tokens is None else max_tokens
+            model = profile.model
+            client = self._client_for(profile.endpoint, profile.api_key)
 
+            # Standard OpenAI params at top level; non-standard sampler
+            # params (top_k / min_p / repetition_penalty — vLLM and
+            # llama.cpp extensions) go through extra_body, which the
+            # SDK forwards to the server unchanged.
             kwargs: dict[str, Any] = dict(
                 model=model,
                 temperature=temp,
+                top_p=profile.top_p,
+                presence_penalty=profile.presence_penalty,
                 max_tokens=mt,
                 messages=[
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
+                extra_body={
+                    "top_k": profile.top_k,
+                    "min_p": profile.min_p,
+                    "repetition_penalty": profile.repetition_penalty,
+                },
             )
             if json_mode:
                 kwargs["response_format"] = {"type": "json_object"}
@@ -113,7 +141,7 @@ class LocalLLMClient:
             started = time.monotonic()
 
             try:
-                resp = await self._client.chat.completions.create(**kwargs)
+                resp = await client.chat.completions.create(**kwargs)
             except asyncio.CancelledError:
                 # Cooperative cancel propagated from the caller's task;
                 # httpx tears down the socket. Record the cancel so the

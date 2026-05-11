@@ -53,9 +53,14 @@ def _max_chars() -> int:
     from tailward.config import get_config
 
     cfg = get_config()
+    # Comprehensive synth routes through the synth call kind. Size the
+    # window against the actual profile that will handle the call so
+    # different profiles (different context sizes, different max_tokens)
+    # don't share a single global budget.
+    profile = cfg.profile_for("synth")
     # output + system prompt + prior intent block
-    reserved = cfg.local_llm_max_tokens + 1500 + 800
-    usable_tokens = max(2048, cfg.local_llm_context_tokens - reserved)
+    reserved = profile.max_tokens + 1500 + 800
+    usable_tokens = max(2048, profile.context_tokens - reserved)
     # ~3.2 chars/token is a conservative English estimate.
     return int(usable_tokens * 3.2)
 

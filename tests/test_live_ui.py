@@ -173,30 +173,32 @@ def test_v2_projects_dedupes_alt_cwd_encodings(tmp_path: Path) -> None:
 def test_post_local_llm_config_writes_and_reloads(tmp_path: Path) -> None:
     """Settings UI POST: writes config.toml + rebuilds the in-memory
     LLM client so endpoint / model changes take effect on the next
-    call without a daemon restart. The endpoint summary reflects the
-    new values immediately."""
+    call without a daemon restart. The summary reflects the new
+    values immediately. Profile 1 is the editable default; profile 2
+    is opt-in via ``local_llm_2_enabled``."""
     with TestClient(create_app()) as client:
-        # Pre-update sanity: the endpoint defaults are loopback / empty.
-        before = client.get("/llm-profiles").json()["endpoint"]
-        assert before["endpoint"] == "http://127.0.0.1:8080/v1"
+        # Pre-update sanity: profile 1 holds the default loopback endpoint.
+        before = client.get("/llm-profiles").json()
+        assert before["profiles"][0]["endpoint"] == "http://127.0.0.1:8080/v1"
 
         r = client.post("/v2/config/local-llm", json={
-            "local_llm_endpoint": "http://10.0.0.5:9000/v1",
-            "local_llm_model": "test-model-7B",
-            "local_llm_temperature": 0.4,
-            "local_llm_max_tokens": 12000,
+            "local_llm_1_endpoint": "http://10.0.0.5:9000/v1",
+            "local_llm_1_model": "test-model-7B",
+            "local_llm_1_temperature": 0.4,
+            "local_llm_1_max_tokens": 12000,
         })
         assert r.status_code == 200
         body = r.json()
         assert body["ok"] is True
-        assert "local_llm_endpoint" in body["applied"]
+        assert "local_llm_1_endpoint" in body["applied"]
 
-        # Endpoint summary now reflects the persisted values.
-        after = client.get("/llm-profiles").json()["endpoint"]
-        assert after["endpoint"] == "http://10.0.0.5:9000/v1"
-        assert after["default_model"] == "test-model-7B"
-        assert after["temperature"] == 0.4
-        assert after["max_tokens"] == 12000
+        # Summary now reflects the persisted values on profile 1.
+        after = client.get("/llm-profiles").json()
+        p1 = after["profiles"][0]
+        assert p1["endpoint"] == "http://10.0.0.5:9000/v1"
+        assert p1["model"] == "test-model-7B"
+        assert p1["temperature"] == 0.4
+        assert p1["max_tokens"] == 12000
 
 
 def test_post_local_llm_config_rejects_bad_endpoint(tmp_path: Path) -> None:
@@ -205,7 +207,7 @@ def test_post_local_llm_config_rejects_bad_endpoint(tmp_path: Path) -> None:
     not a runtime failure on the next LLM call."""
     with TestClient(create_app()) as client:
         r = client.post("/v2/config/local-llm", json={
-            "local_llm_endpoint": "ftp://nope/v1",
+            "local_llm_1_endpoint": "ftp://nope/v1",
         })
         assert r.status_code == 400
         assert "http" in r.text.lower()

@@ -31,34 +31,102 @@ def is_loopback_bind(host: str) -> bool:
         return False
 
 
+@dataclass(frozen=True)
+class LocalLLMProfile:
+    """Read-only snapshot of a single profile's identity + sampler config.
+
+    Returned by ``Config.profile()`` so workers can ask for "the profile
+    that handles synth calls" without binding to specific field names —
+    insulates callers from the flat per-profile schema in ``Config``.
+    """
+    enabled: bool
+    endpoint: str
+    api_key: str
+    model: str
+    context_tokens: int
+    temperature: float
+    top_p: float
+    top_k: int
+    min_p: float
+    presence_penalty: float
+    repetition_penalty: float
+    max_tokens: int
+
+
+# Call-kind → routing-field name. Used by ``Config.route_for`` so
+# unknown kinds map cleanly to profile 1 instead of raising.
+_ROUTE_FIELDS = {
+    "drift": "local_llm_route_drift",
+    "audit": "local_llm_route_audit",
+    "rubric": "local_llm_route_rubric",
+    "user_rubric": "local_llm_route_user_rubric",
+    "synth": "local_llm_route_synth",
+    "consolidator": "local_llm_route_consolidator",
+    "query": "local_llm_route_query",
+}
+
+
 @dataclass
 class Config:
-    # Local OpenAI-compatible LLM endpoint.
-    local_llm_endpoint: str = "http://127.0.0.1:8080/v1"
+    # Local LLM profiles — two slots. Each profile is fully self-
+    # contained: endpoint, auth, model identity, sampler params.
+    # Different profiles can hit different inference servers (useful
+    # for direct-to-GPU-node routing without a model router) or
+    # different model identities served by the same backend.
+    #
+    # Profile 1 is the default; every worker kind routes here unless
+    # ``local_llm_route_<kind>`` is set to 2. Profile 2 is opt-in
+    # (``local_llm_2_enabled``); when disabled, routes pointing at it
+    # silently fall back to profile 1.
+    #
+    # Sampler param set follows what recent frontier models publish in
+    # release notes: temperature, top_p, top_k, min_p,
+    # presence_penalty, repetition_penalty, max_tokens. ``top_k`` /
+    # ``min_p`` / ``repetition_penalty`` aren't standard OpenAI API
+    # params; they're sent via ``extra_body`` to OpenAI-compatible
+    # servers (vLLM, llama.cpp). ``presence_penalty`` is standard.
+
+    # --- Profile 1 (default) ---
+    local_llm_1_endpoint: str = "http://127.0.0.1:8080/v1"
+    local_llm_1_api_key: str = "not-needed"
     # Model name your serving stack expects. Empty = pick a model.
     # Recent dense models that work well on consumer-class hardware:
     # Qwen3.6-27B (Q6_K for accuracy, Q4 for speed), Gemma-4-31B-Instruct.
-    # Whatever you pick has to match what your local server is serving.
-    local_llm_model: str = ""
-    local_llm_api_key: str = "not-needed"
-
+    local_llm_1_model: str = ""
     # Context window of the served model (used to size transcript slices).
-    local_llm_context_tokens: int = 32768
-
-    # Single global temperature applied to every call. Sampler control
-    # used to be per-call-kind, mirroring profiles published in a
-    # particular model card; that granularity wasn't earning its keep
-    # across endpoints and made the schema noisier than the actual
-    # behavioral axis (which is determined upstream by model + serving
-    # stack, not by this client).
-    local_llm_temperature: float = 0.6
-
+    local_llm_1_context_tokens: int = 32768
+    local_llm_1_temperature: float = 0.6
+    local_llm_1_top_p: float = 0.95
+    local_llm_1_top_k: int = 20
+    local_llm_1_min_p: float = 0.0
+    local_llm_1_presence_penalty: float = 0.0
+    local_llm_1_repetition_penalty: float = 1.0
     # Output budget. Thinking models need generous headroom — the budget
-    # covers any reasoning preamble plus the visible output. Default
-    # sized for thinking-class models on a 32k-context server. Used to
-    # be split per call kind; collapsed to a single knob since the
-    # per-kind values were converging in practice anyway.
-    local_llm_max_tokens: int = 8000
+    # covers any reasoning preamble plus the visible output.
+    local_llm_1_max_tokens: int = 8000
+
+    # --- Profile 2 (optional alternate) ---
+    local_llm_2_enabled: bool = False
+    local_llm_2_endpoint: str = "http://127.0.0.1:8080/v1"
+    local_llm_2_api_key: str = "not-needed"
+    local_llm_2_model: str = ""
+    local_llm_2_context_tokens: int = 32768
+    local_llm_2_temperature: float = 0.6
+    local_llm_2_top_p: float = 0.95
+    local_llm_2_top_k: int = 20
+    local_llm_2_min_p: float = 0.0
+    local_llm_2_presence_penalty: float = 0.0
+    local_llm_2_repetition_penalty: float = 1.0
+    local_llm_2_max_tokens: int = 8000
+
+    # --- Per-call routing (1 = profile_1, 2 = profile_2) ---
+    local_llm_route_drift: int = 1
+    local_llm_route_audit: int = 1
+    local_llm_route_rubric: int = 1
+    local_llm_route_user_rubric: int = 1
+    local_llm_route_synth: int = 1
+    local_llm_route_consolidator: int = 1
+    local_llm_route_query: int = 1
 
     # Daemon HTTP (hook IPC + web UI) on localhost.
     http_host: str = "127.0.0.1"
@@ -194,6 +262,56 @@ class Config:
     def default(cls) -> Config:
         return cls()
 
+    def profile(self, idx: int) -> LocalLLMProfile:
+        """Return profile 1 or 2's identity + sampler snapshot. Unknown
+        indices fall back to profile 1."""
+        if idx == 2:
+            return LocalLLMProfile(
+                enabled=self.local_llm_2_enabled,
+                endpoint=self.local_llm_2_endpoint,
+                api_key=self.local_llm_2_api_key,
+                model=self.local_llm_2_model,
+                context_tokens=self.local_llm_2_context_tokens,
+                temperature=self.local_llm_2_temperature,
+                top_p=self.local_llm_2_top_p,
+                top_k=self.local_llm_2_top_k,
+                min_p=self.local_llm_2_min_p,
+                presence_penalty=self.local_llm_2_presence_penalty,
+                repetition_penalty=self.local_llm_2_repetition_penalty,
+                max_tokens=self.local_llm_2_max_tokens,
+            )
+        return LocalLLMProfile(
+            enabled=True,
+            endpoint=self.local_llm_1_endpoint,
+            api_key=self.local_llm_1_api_key,
+            model=self.local_llm_1_model,
+            context_tokens=self.local_llm_1_context_tokens,
+            temperature=self.local_llm_1_temperature,
+            top_p=self.local_llm_1_top_p,
+            top_k=self.local_llm_1_top_k,
+            min_p=self.local_llm_1_min_p,
+            presence_penalty=self.local_llm_1_presence_penalty,
+            repetition_penalty=self.local_llm_1_repetition_penalty,
+            max_tokens=self.local_llm_1_max_tokens,
+        )
+
+    def route_for(self, kind: str) -> int:
+        """Map a worker call kind to its routed profile index (1 or 2).
+        Silent fallback to 1 when the route points at a disabled
+        profile 2 — disabling profile 2 in Settings shouldn't break any
+        worker that was routed there."""
+        field_name = _ROUTE_FIELDS.get(kind)
+        if field_name is None:
+            return 1
+        idx = getattr(self, field_name, 1)
+        if idx == 2 and not self.local_llm_2_enabled:
+            return 1
+        return 2 if idx == 2 else 1
+
+    def profile_for(self, kind: str) -> LocalLLMProfile:
+        """Resolve a call kind directly to the profile that handles it."""
+        return self.profile(self.route_for(kind))
+
     def to_toml(self) -> str:
         lines = ["# tailward configuration. Restart daemon after editing.", ""]
         for key, value in asdict(self).items():
@@ -215,6 +333,23 @@ class Config:
 
 def _coerce(raw: dict[str, Any]) -> Config:
     defaults = asdict(Config.default())
+
+    # Migration: pre-profile schema used unprefixed local_llm_* keys
+    # for what is now profile 1. Map old → new so existing configs
+    # keep their values without manual editing. The next ``to_toml``
+    # write replaces the legacy keys with the new prefixed shape.
+    _LEGACY_PROFILE_1 = {
+        "local_llm_endpoint": "local_llm_1_endpoint",
+        "local_llm_api_key": "local_llm_1_api_key",
+        "local_llm_model": "local_llm_1_model",
+        "local_llm_context_tokens": "local_llm_1_context_tokens",
+        "local_llm_temperature": "local_llm_1_temperature",
+        "local_llm_max_tokens": "local_llm_1_max_tokens",
+    }
+    for legacy, new_key in _LEGACY_PROFILE_1.items():
+        if legacy in raw and new_key not in raw:
+            raw[new_key] = raw[legacy]
+
     merged: dict[str, Any] = {}
     for k, default_value in defaults.items():
         if k in raw:

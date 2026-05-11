@@ -202,9 +202,18 @@ def mount_web(app: FastAPI) -> None:
         """
         from ..daemon.llm_profiles import all_profiles, endpoint_summary
 
+        # Response shape: identity/sampler config (``profiles``,
+        # ``routing``) flattened at the top level, plus the
+        # per-call-kind prompt templates under ``call_profiles``. The
+        # prior nested ``{endpoint: {...}, profiles: [...]}`` shape
+        # had ``profiles`` mean two different things; flattening
+        # disambiguates and the editable surface (profiles + routing)
+        # reads cleanly.
+        summary = endpoint_summary()
         return JSONResponse({
-            "endpoint": endpoint_summary(),
-            "profiles": all_profiles(),
+            "profiles": summary["profiles"],
+            "routing": summary["routing"],
+            "call_profiles": all_profiles(),
         })
 
     @app.post("/v2/config/local-llm")
@@ -230,22 +239,43 @@ def mount_web(app: FastAPI) -> None:
         if not isinstance(body, dict):
             raise HTTPException(400, "body must be a JSON object")
 
-        # Editable surface. Other config keys (watch_paths,
-        # rubric_turn_interval, hook_timeout_ms, etc.) stay TOML-only.
+        # Editable surface — full per-profile config + routing matrix.
+        # Other config keys (watch_paths, rubric_turn_interval, hook_
+        # timeout_ms, etc.) stay TOML-only.
+        _NUM = (int, float)
         editable: dict[str, type | tuple[type, ...]] = {
-            "local_llm_endpoint": str,
-            "local_llm_model": str,
-            "local_llm_api_key": str,
-            "local_llm_context_tokens": int,
-            "local_llm_temperature": (int, float),
-            "local_llm_max_tokens": int,
+            "local_llm_2_enabled": bool,
         }
+        # Per-profile identity + sampler fields. Same shape for both;
+        # generated to avoid a wall of repetition.
+        for idx in (1, 2):
+            editable.update({
+                f"local_llm_{idx}_endpoint": str,
+                f"local_llm_{idx}_api_key": str,
+                f"local_llm_{idx}_model": str,
+                f"local_llm_{idx}_context_tokens": int,
+                f"local_llm_{idx}_temperature": _NUM,
+                f"local_llm_{idx}_top_p": _NUM,
+                f"local_llm_{idx}_top_k": int,
+                f"local_llm_{idx}_min_p": _NUM,
+                f"local_llm_{idx}_presence_penalty": _NUM,
+                f"local_llm_{idx}_repetition_penalty": _NUM,
+                f"local_llm_{idx}_max_tokens": int,
+            })
+        for kind in ("drift", "audit", "rubric", "user_rubric", "synth",
+                     "consolidator", "query"):
+            editable[f"local_llm_route_{kind}"] = int
+
         updates: dict[str, object] = {}
         for k, expected in editable.items():
             if k not in body:
                 continue
             v = body[k]
-            if not isinstance(v, expected) or isinstance(v, bool):
+            # ``bool`` is a subclass of ``int`` — reject bool where int
+            # was asked for to avoid silently storing True/False as 1/0.
+            if expected is int and isinstance(v, bool):
+                raise HTTPException(400, f"{k} must be int (not bool)")
+            if not isinstance(v, expected):
                 raise HTTPException(400, f"{k} must be {expected!r}")
             updates[k] = v
 
@@ -253,21 +283,51 @@ def mount_web(app: FastAPI) -> None:
             raise HTTPException(400, "no editable fields in body")
 
         # Value-level validation.
-        if "local_llm_endpoint" in updates:
-            ep = str(updates["local_llm_endpoint"]).strip()
-            if not ep.startswith(("http://", "https://")):
-                raise HTTPException(
-                    400, "local_llm_endpoint must start with http:// or https://"
-                )
-            updates["local_llm_endpoint"] = ep
-        for k in ("local_llm_context_tokens", "local_llm_max_tokens"):
-            if k in updates and updates[k] <= 0:
-                raise HTTPException(400, f"{k} must be > 0")
-        if "local_llm_temperature" in updates:
-            t = float(updates["local_llm_temperature"])
-            if not 0.0 <= t <= 2.0:
-                raise HTTPException(400, "local_llm_temperature must be in [0.0, 2.0]")
-            updates["local_llm_temperature"] = t
+        for idx in (1, 2):
+            ep_key = f"local_llm_{idx}_endpoint"
+            if ep_key in updates:
+                ep = str(updates[ep_key]).strip()
+                if not ep.startswith(("http://", "https://")):
+                    raise HTTPException(
+                        400, f"{ep_key} must start with http:// or https://"
+                    )
+                updates[ep_key] = ep
+            for k in (
+                f"local_llm_{idx}_context_tokens",
+                f"local_llm_{idx}_max_tokens",
+                f"local_llm_{idx}_top_k",
+            ):
+                if k in updates and updates[k] <= 0:
+                    raise HTTPException(400, f"{k} must be > 0")
+            t_key = f"local_llm_{idx}_temperature"
+            if t_key in updates:
+                t = float(updates[t_key])
+                if not 0.0 <= t <= 2.0:
+                    raise HTTPException(400, f"{t_key} must be in [0.0, 2.0]")
+                updates[t_key] = t
+            for pkey in (f"local_llm_{idx}_top_p", f"local_llm_{idx}_min_p"):
+                if pkey in updates:
+                    v = float(updates[pkey])
+                    if not 0.0 <= v <= 1.0:
+                        raise HTTPException(400, f"{pkey} must be in [0.0, 1.0]")
+                    updates[pkey] = v
+            pen_key = f"local_llm_{idx}_presence_penalty"
+            if pen_key in updates:
+                v = float(updates[pen_key])
+                if not -2.0 <= v <= 2.0:
+                    raise HTTPException(400, f"{pen_key} must be in [-2.0, 2.0]")
+                updates[pen_key] = v
+            rep_key = f"local_llm_{idx}_repetition_penalty"
+            if rep_key in updates:
+                v = float(updates[rep_key])
+                if v <= 0:
+                    raise HTTPException(400, f"{rep_key} must be > 0")
+                updates[rep_key] = v
+        for kind in ("drift", "audit", "rubric", "user_rubric", "synth",
+                     "consolidator", "query"):
+            r_key = f"local_llm_route_{kind}"
+            if r_key in updates and updates[r_key] not in (1, 2):
+                raise HTTPException(400, f"{r_key} must be 1 or 2")
 
         # Read existing TOML, merge, write back via the dataclass's
         # canonical to_toml (drops obsolete unknown keys).
