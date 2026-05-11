@@ -14,9 +14,9 @@ const HEALTH_TIMEOUT_SECS: u64 = 30;
 const HEALTH_POLL_INTERVAL_MS: u64 = 500;
 
 /// Review surfaces that spawn dedicated windows instead of switching the
-/// sidebar's view. ``session`` stays in the sidebar window because the
-/// sidebar IS the live-activity surface.
-const REVIEW_VIEWS: &[&str] = &["reflection", "platform", "settings"];
+/// main window's view. ``session`` stays in the main window because the
+/// main window IS the live-activity surface.
+const REVIEW_VIEWS: &[&str] = &["reflection", "platform", "synthesis", "settings"];
 
 /// Holds the bundled daemon's child handle when we spawned it ourselves.
 /// Stays ``None`` on the reuse path — the user owns that daemon's

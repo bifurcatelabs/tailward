@@ -1,7 +1,10 @@
 <script>
   import { live } from './live.svelte.js';
   import { fmtClock, humanizeDuration } from './format.js';
-  import { feedFilter, FILTER_GROUPS } from './feedFilter.svelte.js';
+  import { feedFilter } from './feedFilter.svelte.js';
+  import SynthTrigger from './SynthTrigger.svelte';
+
+  let { ph = '', sessionId = '' } = $props();
 
   // Color per event type — kept in lockstep with the chip palette in
   // FeedItem so the timeline reads as a compressed view of the feed.
@@ -372,6 +375,9 @@
         >{r.label}</button>
       {/each}
     </div>
+    {#if ph && sessionId}
+      <SynthTrigger {ph} {sessionId} />
+    {/if}
     <span
       class="count"
       title="shown / total in session arc — narrowed by the range and filter pills"

@@ -6,14 +6,15 @@
   import SessionView from './lib/SessionView.svelte';
   import ReflectionView from './lib/ReflectionView.svelte';
   import PlatformView from './lib/PlatformView.svelte';
+  import SynthesisView from './lib/SynthesisView.svelte';
   import SettingsView from './lib/SettingsView.svelte';
   import LandingView from './lib/LandingView.svelte';
   import ProjectView from './lib/ProjectView.svelte';
 
   let { page = 'landing', ph = '', sessionId = '' } = $props();
 
-  // Within the session page, four tabs (hash-routed).
-  const TABS = ['session', 'reflection', 'platform', 'settings'];
+  // Within the session page, five tabs (hash-routed).
+  const TABS = ['session', 'reflection', 'platform', 'synthesis', 'settings'];
 
   // Spawned-window detection. Review surfaces (reflection / platform /
   // settings) can open in their own Tauri window with ?spawned=1 in the
@@ -95,6 +96,8 @@
       <ReflectionView {ph} />
     {:else if view === 'platform'}
       <PlatformView {ph} />
+    {:else if view === 'synthesis'}
+      <SynthesisView {ph} {sessionId} />
     {:else if view === 'settings'}
       <SettingsView />
     {/if}
