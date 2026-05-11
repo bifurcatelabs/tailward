@@ -77,6 +77,18 @@
   @media (max-width: 1080px) {
     .hero { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
+  @media (max-width: 720px) {
+    .hero { margin: 12px 16px 0; border-radius: 8px; }
+    .cell { padding: 14px 14px 12px; }
+    .value { font-size: 26px; }
+    /* Sparklines drop at narrow widths — cards become number-first
+       for glance use. Trend data belongs on the analytics surface
+       (Reflection — #18) where there's actual chart room. The
+       violations indicator (.spark-placeholder, only on the 4th
+       cell) stays since it's a status signal not a graph. */
+    .spark { display: none; }
+    .spark-placeholder { height: 22px; margin-top: 8px; font-size: 11px; }
+  }
   @media (max-width: 540px) {
     .hero { grid-template-columns: 1fr; }
   }

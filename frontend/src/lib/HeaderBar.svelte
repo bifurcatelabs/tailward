@@ -235,4 +235,32 @@
     0%, 100% { opacity: 1; transform: scale(1); }
     50%      { opacity: 0.55; transform: scale(1.4); }
   }
+
+  /* Narrow-width pass — main window in assistant-sized mode
+     (~480–720px). Push .session metadata to its own row so the
+     primary controls (brand / picker / search / contact) fit in
+     a single line. Hide the version badge as decorative. */
+  @media (max-width: 720px) {
+    .bar {
+      flex-wrap: wrap;
+      gap: 12px;
+      padding: 12px 16px;
+    }
+    .version { display: none; }
+    .session {
+      order: 99;
+      width: 100%;
+      font-size: 11px;
+      gap: 6px;
+    }
+    .session code {
+      padding: 2px 5px;
+      font-size: 10px;
+    }
+    .contact {
+      font-size: 10px;
+      gap: 4px;
+    }
+    .contact-when { min-width: 50px; }
+  }
 </style>
