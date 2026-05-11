@@ -43,3 +43,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # Tauri uses tokio internally but doesn't re-export the time module.
 # Minimum viable feature set; we don't need the full tokio surface.
 tokio = { version = "1", features = ["time"] }
+# WebviewUrl::External takes a url::Url. Already in the tree
+# transitively (reqwest, tauri); listing explicitly to make the
+# dependency intentional.
+url = "2"

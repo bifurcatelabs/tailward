@@ -2,7 +2,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use tauri::{
-  Manager, RunEvent, WindowEvent,
+  AppHandle, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder, WindowEvent,
   menu::{Menu, MenuItem},
   tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
 };
@@ -13,11 +13,65 @@ const DAEMON_HEALTH_URL: &str = "http://127.0.0.1:7878/health";
 const HEALTH_TIMEOUT_SECS: u64 = 30;
 const HEALTH_POLL_INTERVAL_MS: u64 = 500;
 
+/// Review surfaces that spawn dedicated windows instead of switching the
+/// sidebar's view. ``session`` stays in the sidebar window because the
+/// sidebar IS the live-activity surface.
+const REVIEW_VIEWS: &[&str] = &["reflection", "platform", "settings"];
+
 /// Holds the bundled daemon's child handle when we spawned it ourselves.
 /// Stays ``None`` on the reuse path — the user owns that daemon's
 /// lifecycle and we don't terminate it on app exit.
 #[derive(Default)]
 struct SpawnedDaemon(Arc<Mutex<Option<CommandChild>>>);
+
+/// Spawn (or focus) a dedicated window for one of the review surfaces.
+/// Sidebar window stays focused on live session activity; review surfaces
+/// (reflection / platform / settings) open in their own larger windows
+/// so chart/table area isn't fighting the narrow sidebar for space.
+///
+/// Focus-if-exists: a second click of the same tab brings the existing
+/// window to the front instead of duplicating. The ``review-<view>``
+/// label keys both the lookup and the per-window state persistence
+/// handled by ``tauri-plugin-window-state``.
+///
+/// The spawned URL hits the daemon directly (same SPA bundle, same path
+/// routing) with a ``?spawned=1`` flag the frontend uses to hide
+/// TabNav, and a ``#<view>`` hash that selects the target tab.
+#[tauri::command]
+async fn open_review_window(
+  app: AppHandle,
+  view: String,
+  ph: String,
+  session_id: String,
+) -> Result<(), String> {
+  if !REVIEW_VIEWS.contains(&view.as_str()) {
+    return Err(format!("'{view}' is not a spawnable review surface"));
+  }
+
+  let label = format!("review-{view}");
+
+  if let Some(window) = app.get_webview_window(&label) {
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    return Ok(());
+  }
+
+  let url_str = format!(
+    "http://127.0.0.1:7878/p/{ph}/live/{session_id}?spawned=1#{view}"
+  );
+  let url = url::Url::parse(&url_str).map_err(|e| e.to_string())?;
+
+  WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
+    .title(format!("tailward — {view}"))
+    .inner_size(1100.0, 800.0)
+    .min_inner_size(600.0, 480.0)
+    .resizable(true)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+  Ok(())
+}
 
 /// Probe the daemon's ``/health`` endpoint with a tight timeout. Returns
 /// true on a 2xx response; false on any error / non-2xx / timeout.
@@ -36,6 +90,7 @@ async fn daemon_is_healthy(client: &reqwest::Client) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
   tauri::Builder::default()
+    .invoke_handler(tauri::generate_handler![open_review_window])
     // Single-instance enforcement runs as the FIRST plugin so a second
     // invocation of tailward.exe is rejected before it can race the
     // bundled-daemon spawn or the health-check probe. The closure runs

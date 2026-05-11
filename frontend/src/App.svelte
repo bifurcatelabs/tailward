@@ -15,6 +15,22 @@
   // Within the session page, four tabs (hash-routed).
   const TABS = ['session', 'reflection', 'platform', 'settings'];
 
+  // Spawned-window detection. Review surfaces (reflection / platform /
+  // settings) can open in their own Tauri window with ?spawned=1 in the
+  // URL. In that mode the SPA hides TabNav so the window is dedicated
+  // to one view — the sidebar window owns navigation.
+  const params = typeof window !== 'undefined'
+    ? new URLSearchParams(window.location.search)
+    : new URLSearchParams();
+  const spawned = params.get('spawned') === '1';
+
+  // Tauri context detection. In Tauri (and not already in a spawned
+  // window), review-tab clicks call the open_review_window command to
+  // spawn a separate window instead of switching the current view.
+  // In a regular browser, the existing hash-route behavior is preserved.
+  const isTauri = typeof window !== 'undefined'
+    && window.__TAURI_INTERNALS__ !== undefined;
+
   function readHash() {
     const h = (typeof window !== 'undefined' ? window.location.hash : '')
       .replace(/^#/, '');
@@ -23,8 +39,27 @@
 
   let view = $state(readHash());
 
-  function setView(v) {
+  async function setView(v) {
     if (!TABS.includes(v)) return;
+
+    // Sidebar window in Tauri: clicking a review tab spawns a separate
+    // window instead of switching view in-place. Session tab stays in
+    // the sidebar. Spawned windows fall through to the in-place switch
+    // (they don't re-spawn each other; not that they show TabNav anyway).
+    if (isTauri && !spawned && page === 'session' && v !== 'session') {
+      try {
+        await window.__TAURI_INTERNALS__.invoke('open_review_window', {
+          view: v,
+          ph,
+          sessionId,
+        });
+        return;
+      } catch (e) {
+        // Graceful degradation: log + fall through to in-place switch.
+        console.error('[tailward] open_review_window failed:', e);
+      }
+    }
+
     view = v;
     if (typeof window !== 'undefined' && window.location.hash !== '#' + v) {
       history.replaceState(null, '', '#' + v);
@@ -50,7 +85,9 @@
 <div class="app">
   {#if page === 'session'}
     <HeaderBar {ph} {sessionId} />
-    <TabNav {view} {setView} />
+    {#if !spawned}
+      <TabNav {view} {setView} />
+    {/if}
     {#if view === 'session'}
       <SessionView {sessionId} />
     {:else if view === 'reflection'}
