@@ -36,6 +36,18 @@
     border-bottom: 1px solid var(--border);
     background: var(--bg);
   }
+  /* Narrow-window pass — at assistant widths the 5-tab row crowds.
+     Tighten container + per-tab padding, and drop sub-labels at the
+     tightest range so labels stay readable instead of overflowing
+     past the viewport. */
+  @media (max-width: 720px) {
+    .tabs { padding: 0 12px; }
+    button { padding: 12px 10px 10px; }
+  }
+  @media (max-width: 540px) {
+    button { padding: 10px 8px 8px; }
+    .sub { display: none; }
+  }
   button {
     background: transparent;
     border: 0;
