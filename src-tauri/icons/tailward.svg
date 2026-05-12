@@ -21,8 +21,15 @@
   aria-label="tailward TW monogram"
 >
   <defs>
+    <!-- Fully opaque gradient for bundled-icon rendering. The in-app
+         SVG uses a translucent bottom-left stop (0.55) for the
+         "lit from above" feel against the app's consistent dark
+         surface; on the OS taskbar / tray the icon sits over varied
+         backgrounds, so transparency reads as "ghosted" rather than
+         "atmospheric." Color luminance (e89968 → f5b58e) still
+         provides the gradient direction. -->
     <linearGradient id="twCopper" x1="0" y1="600" x2="600" y2="0" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#e89968" stop-opacity="0.55"/>
+      <stop offset="0" stop-color="#e89968" stop-opacity="1"/>
       <stop offset="1" stop-color="#f5b58e" stop-opacity="1"/>
     </linearGradient>
   </defs>
@@ -30,15 +37,22 @@
   <g
     fill="none"
     stroke="url(#twCopper)"
-    stroke-width="44"
+    stroke-width="52"
     stroke-linecap="round"
     stroke-linejoin="round"
   >
+    <!-- Content scaled up ~18% (around viewBox center 300,300) so the
+         icon fills more of the 600x600 canvas — without this, the
+         naturally-wide-but-not-tall design left ~30% vertical
+         whitespace top + bottom and the icon read smaller than
+         neighbors in the Windows taskbar. 1.18 is the safe max:
+         beyond that the W's rightmost round-cap clips the viewBox.
+         Stroke scaled to match to maintain visual line weight. -->
     <!-- T crossbar -->
-    <path d="M70 187 H315"/>
+    <path d="M29 167 H318"/>
     <!-- T stem with curved foot tail -->
-    <path d="M164 187 V388 C164 406 177 417 195 417 H223"/>
+    <path d="M140 167 V404 C140 425 156 438 176 438 H209"/>
     <!-- W zigzag, shifted right of T so the curved tail is visible -->
-    <path d="M236 248 C248 248 254 258 261 272 L322 396 L378 287 L438 404 L530 196"/>
+    <path d="M224 239 C239 239 246 250 254 267 L326 413 L392 285 L463 423 L571 177"/>
   </g>
 </svg>

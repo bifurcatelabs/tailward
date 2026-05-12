@@ -9,21 +9,27 @@
 
 <header class="strip">
   <a href="/" class="brand">
-    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+    <svg class="mark" viewBox="0 0 510 323" aria-hidden="true">
+      <!-- TW monogram — kept in sync with HeaderBar.svelte and the
+           standalone src-tauri/icons/tailward.svg source for tray /
+           taskbar / favicon generation. Update all three together. -->
       <defs>
-        <linearGradient id="markFill" x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.55"/>
-          <stop offset="100%" stop-color="var(--accent-soft)" stop-opacity="1"/>
+        <linearGradient id="markFillTop" x1="0" y1="323" x2="510" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="var(--accent)" stop-opacity="0.55"/>
+          <stop offset="1" stop-color="var(--accent-soft)" stop-opacity="1"/>
         </linearGradient>
       </defs>
-      <path
-        d="M3 9 L8 23 L13 13 L18 23 L23 9 M14 22 L19 12 L24 22"
+      <g
         fill="none"
-        stroke="url(#markFill)"
-        stroke-width="2.2"
+        stroke="url(#markFillTop)"
+        stroke-width="44"
         stroke-linecap="round"
         stroke-linejoin="round"
-      />
+      >
+        <path d="M34 51H279"/>
+        <path d="M128 51V252 C128 270 141 281 159 281 H187"/>
+        <path d="M200 112 C212 112 218 122 225 136 L286 260 L342 151 L402 268 L494 60"/>
+      </g>
     </svg>
     <span class="name">tailward</span>
     <span class="version">2.10.0</span>
@@ -52,6 +58,9 @@
   .mark {
     width: 22px;
     height: 22px;
+    /* Same icon→lowercase-text alignment nudge as HeaderBar — pushes
+       the visual midline down to match the "tailward" glyph center. */
+    margin-top: 2px;
     filter: drop-shadow(0 0 6px var(--accent-glow));
   }
   .name {
