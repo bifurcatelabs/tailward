@@ -38,26 +38,31 @@
 
 <header class="bar">
   <div class="brand">
-    <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
-      <!-- tw monogram: T descender flows into the W's middle peak.
-           Crossbar sits slightly off-center to the left of the
-           descender (asymmetric, avoids reading as the .tw / TW
-           Taiwan abbreviation). W's outer peaks sit higher than the
-           middle to make the T-to-W transition visible. -->
+    <svg class="mark" viewBox="0 0 510 323" aria-hidden="true">
+      <!-- TW monogram: T crossbar above a lowercase-t-style stem
+           that curves right at the foot, with a separate W zigzag
+           shifted right so the T's curved tail clears the W's
+           leftmost stroke. ViewBox widened to 510 to accommodate
+           the shift without compressing the W's proportions.
+           Stroke sized so the effective stroke at the 22px display
+           lands ~2.3px, consistent with the rest of the interface. -->
       <defs>
-        <linearGradient id="markFill" x1="0" y1="1" x2="1" y2="0">
-          <stop offset="0%" stop-color="var(--accent)" stop-opacity="0.55"/>
-          <stop offset="100%" stop-color="var(--accent-soft)" stop-opacity="1"/>
+        <linearGradient id="markFill" x1="0" y1="323" x2="510" y2="0" gradientUnits="userSpaceOnUse">
+          <stop offset="0" stop-color="var(--accent)" stop-opacity="0.55"/>
+          <stop offset="1" stop-color="var(--accent-soft)" stop-opacity="1"/>
         </linearGradient>
       </defs>
-      <path
-        d="M2 6 L18 6 M11 6 L11 13 M4 8 L7 24 L11 13 L15 24 L18 8"
+      <g
         fill="none"
         stroke="url(#markFill)"
-        stroke-width="2.2"
+        stroke-width="44"
         stroke-linecap="round"
         stroke-linejoin="round"
-      />
+      >
+        <path d="M34 51H279"/>
+        <path d="M128 51V252 C128 270 141 281 159 281 H187"/>
+        <path d="M200 112 C212 112 218 122 225 136 L286 260 L342 151 L402 268 L494 60"/>
+      </g>
     </svg>
     <a href="/" class="name" style="text-decoration:none;color:inherit">tailward</a>
     <span class="version">2.10.0</span>
@@ -125,6 +130,14 @@
   .mark {
     width: 22px;
     height: 22px;
+    /* Nudge down ~2px so the icon's visual midline aligns with the
+       lowercase "tailward" glyph midline. align-items:center on the
+       flex parent aligns boxes to the line center; lowercase text
+       has no ascenders, so its glyph center sits slightly below
+       the line center, while the icon's content (centered in its
+       22x22 box) sits AT the line center. ~2px translation closes
+       the gap. */
+    margin-top: 2px;
     filter: drop-shadow(0 0 6px var(--accent-glow));
   }
   .name {

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Tailward TW monogram — source for tray, taskbar, favicon, and
+  installed-app icon generation. Square 600x600 viewBox with the
+  design centered (paths shifted +36x +136y from the in-app SVG).
+  Copper gradient hardcoded (no CSS variables) so this file is
+  self-contained for icon-generation tools (tauri icon, ImageMagick,
+  Inkscape CLI, etc.).
+
+  Match in-app HeaderBar.svelte: stroke-width tuned for the in-app
+  22px display (~1.9px effective stroke). Icon generators scale this
+  proportionally so the same weight reads correctly at 16 / 32 / 128
+  / 256 / 512 px outputs.
+-->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 600 600"
+  width="600"
+  height="600"
+  role="img"
+  aria-label="tailward TW monogram"
+>
+  <defs>
+    <linearGradient id="twCopper" x1="0" y1="600" x2="600" y2="0" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#e89968" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#f5b58e" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+
+  <g
+    fill="none"
+    stroke="url(#twCopper)"
+    stroke-width="44"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  >
+    <!-- T crossbar -->
+    <path d="M70 187 H315"/>
+    <!-- T stem with curved foot tail -->
+    <path d="M164 187 V388 C164 406 177 417 195 417 H223"/>
+    <!-- W zigzag, shifted right of T so the curved tail is visible -->
+    <path d="M236 248 C248 248 254 258 261 272 L322 396 L378 287 L438 404 L530 196"/>
+  </g>
+</svg>
