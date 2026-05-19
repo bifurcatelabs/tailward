@@ -388,6 +388,16 @@ class SynthesisWorker:
                 consecutive_failures=state.consecutive_failures,
                 suppressed_until=state.suppressed_until if entered else None,
             )
+            # Fire-once-per-streak: only at the crossing point, not on
+            # subsequent retries while the failure streak persists.
+            if entered and state.consecutive_failures == threshold:
+                self._daemon.surface.os_notify(
+                    state.session_id,
+                    "synthesis_backoff",
+                    "warn",
+                    f"Session synthesis paused after {threshold} "
+                    f"consecutive failures; retrying in {int(backoff)}s.",
+                )
             return
 
         # Archive previous + save fresh.
@@ -654,6 +664,19 @@ class SynthesisWorker:
                     state.suppressed_until if entered_suppression else None
                 ),
             )
+            # Fire-once-per-streak: only at the crossing point, not on
+            # subsequent retries while the failure streak persists.
+            if (
+                entered_suppression
+                and state.consecutive_failures == threshold
+            ):
+                self._daemon.surface.os_notify(
+                    state.session_id,
+                    "synthesis_backoff",
+                    "warn",
+                    f"Session synthesis paused after {threshold} "
+                    f"consecutive failures; retrying in {int(backoff)}s.",
+                )
             return None
         # Success: reset backoff state.
         state.consecutive_failures = 0

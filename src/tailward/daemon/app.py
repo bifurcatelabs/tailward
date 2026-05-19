@@ -176,6 +176,21 @@ def create_app() -> FastAPI:
                         },
                         **_pub_kwargs,
                     )
+                # Passive OS toast for the user who's stepped away. Debounced
+                # per (session, kind=exfiltration) so a burst of matches in
+                # one payload doesn't spam. The detail of which patterns
+                # matched is in the live feed; the toast just says "look".
+                if not is_backlog:
+                    pattern_summary = ", ".join(
+                        sorted({m.pattern_name for m in matches})
+                    )
+                    daemon.surface.os_notify(
+                        fs.session_id,
+                        "exfiltration",
+                        "high",
+                        f"Secret pattern detected in {source_event_type}: "
+                        f"{pattern_summary}. Rotate if real.",
+                    )
                 return (
                     exfiltration.redact(text, matches),
                     [m.pattern_name for m in matches],

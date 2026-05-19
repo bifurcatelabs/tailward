@@ -6,8 +6,12 @@ live session view + report card without touching the model's prompt.
 This module handles an auxiliary channel for situations where the user
 isn't looking at the browser: an OS-level toast via ``plyer``.
 
-Both channels write the same surfacing row to the ledger; only the
-user-visible notification is debounced.
+``surface()`` is the full pipeline (ledger row + file artifact + OS toast)
+for first-class surfacings like audit / drift / constraint verdicts.
+``os_notify()`` is the OS-toast-only path for events that already carry
+their own ledger persistence elsewhere (e.g., ``exfiltration_alert`` and
+``synthesis_failed`` LiveBus rows) but still warrant a passive OS ping
+when the user isn't watching the live view.
 """
 
 from __future__ import annotations
@@ -61,9 +65,9 @@ class Surfacer:
                 f"# {kind} ({severity})\n\n{text}\n", encoding="utf-8"
             )
 
-        self._notify(session_id, kind, severity, text)
+        self.os_notify(session_id, kind, severity, text)
 
-    def _notify(self, session_id: str, kind: str, severity: str, text: str) -> None:
+    def os_notify(self, session_id: str, kind: str, severity: str, text: str) -> None:
         # Off by default — the live web UI is the primary surface and
         # an OS toast on top of it is redundant for an interactive
         # session. The ledger row + LiveBus event have already fired by
