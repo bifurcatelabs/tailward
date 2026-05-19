@@ -32,7 +32,9 @@ Thumbs.db
 # OS
 *.log
 
-# modmcp local state (should live in ~/.modmcp/, not in-repo, but guard anyway)
+# tailward / modmcp local state (should live in ~/.tailward/ or ~/.modmcp/,
+# not in-repo, but guard anyway)
+.tailward/
 .modmcp/
 
 # Claude Code per-project config (local-only, may contain machine paths / hook wiring)
