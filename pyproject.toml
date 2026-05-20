@@ -51,6 +51,12 @@ warden = "tailward.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/tailward"]
+# The compiled Svelte bundle lives at src/tailward/web/static/dist/ and is
+# gitignored (built, not source). hatchling excludes VCS-ignored paths by
+# default, so without this the published wheel ships with no UI — the daemon
+# would serve only its "run npm build" fallback. artifacts re-includes it.
+# The release workflow must build the frontend before `python -m build`.
+artifacts = ["src/tailward/web/static/dist/**"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

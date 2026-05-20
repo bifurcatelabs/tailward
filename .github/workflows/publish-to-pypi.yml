@@ -34,6 +34,15 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "20"
+      # The wheel includes the compiled Svelte bundle (via the artifacts
+      # directive in pyproject.toml). It must exist on disk before
+      # `python -m build` runs, or the wheel ships without a UI.
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
       - name: Install build backend
         run: python -m pip install --upgrade build
       - name: Build distributions
