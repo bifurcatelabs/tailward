@@ -34,9 +34,10 @@ struct SpawnedDaemon(Arc<Mutex<Option<CommandChild>>>);
 /// label keys both the lookup and the per-window state persistence
 /// handled by ``tauri-plugin-window-state``.
 ///
-/// The spawned URL hits the daemon directly (same SPA bundle, same path
-/// routing) with a ``?spawned=1`` flag the frontend uses to hide
-/// TabNav, and a ``#<view>`` hash that selects the target tab.
+/// Loads the bundled app origin (so Tauri IPC works for the titlebar in
+/// release — a remote http origin gets no IPC injection), with data
+/// reaching the daemon via the main.js shim + CORS, same as the main
+/// window. ``?spawned=1`` hides TabNav; ``#<view>`` selects the tab.
 #[tauri::command]
 async fn open_review_window(
   app: AppHandle,
@@ -61,12 +62,13 @@ async fn open_review_window(
 
   println!("[tailward] open_review_window: spawning new '{label}' for view='{view}'");
 
-  let url_str = format!(
-    "http://127.0.0.1:7878/p/{ph}/live/{session_id}?spawned=1#{view}"
-  );
-  let url = url::Url::parse(&url_str).map_err(|e| e.to_string())?;
+  // App-origin route (not the daemon's http URL) so the window gets Tauri
+  // IPC in release; titlebar controls invoke Rust commands that a remote
+  // http origin can't reach. Data still flows to the daemon via the
+  // main.js shim + CORS, identical to the main window.
+  let route = format!("p/{ph}/live/{session_id}?spawned=1#{view}");
 
-  WebviewWindowBuilder::new(&app, &label, WebviewUrl::External(url))
+  WebviewWindowBuilder::new(&app, &label, WebviewUrl::App(route.into()))
     .title(format!("tailward — {view}"))
     .inner_size(1100.0, 800.0)
     .min_inner_size(600.0, 480.0)
