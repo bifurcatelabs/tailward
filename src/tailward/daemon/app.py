@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
 
 from ..config import get_config, is_loopback_bind
 from ..paths import (
@@ -807,6 +808,24 @@ def create_app() -> FastAPI:
 
     app = FastAPI(title="tailward", lifespan=lifespan)
     app.state.daemon = daemon
+
+    # Allow the packaged Tauri webview (served from the bundled
+    # ``tauri.localhost`` origin, not the daemon) to call the daemon's
+    # API + SSE cross-origin. The desktop app keeps Tauri IPC strictly
+    # local; the daemon only ever serves DATA to this origin, never
+    # control — so a remote daemon reached over an SSH tunnel can't drive
+    # local Tauri commands. Same-origin browser/dev use ignores these
+    # headers entirely.
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[
+            "http://tauri.localhost",
+            "https://tauri.localhost",
+            "tauri://localhost",
+        ],
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # Content-Security-Policy + standard security headers.
     #
