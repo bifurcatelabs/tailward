@@ -47,6 +47,25 @@ jobs:
         run: python -m pip install --upgrade build
       - name: Build distributions
         run: python -m build
+      # Guard against shipping a wheel that installs but can't serve the UI
+      # (the 2026-05 frontend-missing-from-wheel bug). Install the built
+      # wheel clean, start the daemon, and assert it serves the real SPA
+      # bundle + JSON — not the "run npm build" fallback or an HTML page.
+      - name: Smoke-test the built wheel serves the UI
+        run: |
+          mkdir -p ~/.claude/projects
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install dist/*.whl
+          /tmp/smoke/bin/tailward daemon start
+          for i in $(seq 1 30); do
+            curl -sf http://127.0.0.1:7878/health >/dev/null && break || sleep 1
+          done
+          curl -s http://127.0.0.1:7878/ | grep -Eq 'static/dist/assets/index-.*\.js' \
+            || { echo "FAIL: wheel served no SPA bundle (frontend missing from wheel)"; /tmp/smoke/bin/tailward daemon stop || true; exit 1; }
+          curl -s http://127.0.0.1:7878/v2/projects | /tmp/smoke/bin/python -c 'import sys,json; json.load(sys.stdin)' \
+            || { echo "FAIL: /v2/projects returned non-JSON (UI cannot reach API)"; /tmp/smoke/bin/tailward daemon stop || true; exit 1; }
+          /tmp/smoke/bin/tailward daemon stop || true
+          echo "Smoke test passed: wheel serves the SPA bundle + JSON API."
       - name: Upload distributions as artifact
         uses: actions/upload-artifact@v7
         with:
