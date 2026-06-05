@@ -587,17 +587,22 @@ def create_app() -> FastAPI:
         from ..paths import claude_projects_root
         from ..remote import box_projects_roots
 
-        roots = [claude_projects_root(), *box_projects_roots(cfg)]
-        if len(roots) > 1:
+        mirror_roots = box_projects_roots(cfg)
+        roots = [claude_projects_root(), *mirror_roots]
+        # Map each mirror root to its box label (<mirror>/<box>/projects),
+        # so the watcher folds box provenance into those projects' hashes.
+        root_boxes = {pr: pr.parent.name for pr in mirror_roots}
+        if mirror_roots:
             log.info(
                 "watching %d remote-mirror root(s) alongside the local root",
-                len(roots) - 1,
+                len(mirror_roots),
             )
         daemon.watcher = TranscriptWatcher(
             daemon.state,
             daemon.ledger,
             on_event=on_event,
             roots=roots,
+            root_boxes=root_boxes,
             watch_paths=cfg.watch_paths,
             exclude_paths=cfg.exclude_paths,
         )
@@ -1115,7 +1120,9 @@ async def _close_turn_metric(daemon, st, fs) -> None:
 
     try:
         from .mode_profile import session_mode_for_project
-        mode_label = session_mode_for_project(fs.project_path)
+        mode_label = session_mode_for_project(
+            fs.project_path, box=getattr(fs, "box", "")
+        )
     except Exception:
         mode_label = None
 

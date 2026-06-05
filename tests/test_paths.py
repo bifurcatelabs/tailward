@@ -29,6 +29,22 @@ def test_project_hash_distinguishes_paths(_isolated_home: Path) -> None:
     assert project_hash("/a/b") != project_hash("/a/c")
 
 
+def test_project_hash_empty_box_unchanged(_isolated_home: Path) -> None:
+    """box="" (the default) must produce the byte-identical hash to the
+    no-box call, so existing local projects keep their identity and need
+    no data migration."""
+    assert project_hash("/opt/camcontrol") == project_hash("/opt/camcontrol", box="")
+
+
+def test_project_hash_box_disambiguates_same_path(_isolated_home: Path) -> None:
+    """The collision fix: the same absolute path on two different boxes
+    (and on the local machine) yields three distinct identities."""
+    local = project_hash("/opt/camcontrol")
+    box_a = project_hash("/opt/camcontrol", box="ubuclau1")
+    box_b = project_hash("/opt/camcontrol", box="lab-gpu-2")
+    assert len({local, box_a, box_b}) == 3
+
+
 def test_canonicalize_lowercases_drive_on_windows(_isolated_home: Path, monkeypatch) -> None:
     import sys
 

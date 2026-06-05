@@ -177,7 +177,8 @@ class RubricWorker:
         if self._daemon.local_llm is None:
             return
         from .mode_profile import active_profile_for_project
-        profile = active_profile_for_project(fs.project_path)
+        _box = getattr(fs, "box", "")
+        profile = active_profile_for_project(fs.project_path, box=_box)
         # Mode-aware short-circuit: a profile with no active dimensions
         # means the rubric framing doesn't apply to this session at
         # all (default / yolo / minimal labels). Save the LLM call.
@@ -204,7 +205,7 @@ class RubricWorker:
                 log.exception("live publish failed (rubric_in_flight)")
 
         try:
-            payload = await self._call_llm(window, project_path=fs.project_path)
+            payload = await self._call_llm(window, project_path=fs.project_path, box=_box)
             await self._record(fs, turn_idx, payload, triggers)
             if live is not None:
                 await live.publish(
@@ -229,9 +230,11 @@ class RubricWorker:
             async with self._lock:
                 state.in_flight = False
 
-    async def _call_llm(self, window: list[str], project_path: str | None = None) -> dict:
+    async def _call_llm(
+        self, window: list[str], project_path: str | None = None, box: str = ""
+    ) -> dict:
         from .mode_profile import active_profile_for_project
-        profile = active_profile_for_project(project_path)
+        profile = active_profile_for_project(project_path, box=box)
         active = profile.rubric_dimensions
         # Filter the static DIMENSIONS list to the profile's active set,
         # preserving the canonical order so prompt and persistence
@@ -260,8 +263,9 @@ class RubricWorker:
         trigger = ",".join(triggers) or None
         model_used = self._daemon.local_llm.resolve_model("rubric") if self._daemon.local_llm else None
         live = getattr(self._daemon, "live", None)
-        profile = active_profile_for_project(fs.project_path)
-        mode_label = session_mode_for_project(fs.project_path)
+        _box = getattr(fs, "box", "")
+        profile = active_profile_for_project(fs.project_path, box=_box)
+        mode_label = session_mode_for_project(fs.project_path, box=_box)
 
         # Persist only the dimensions the active profile asked for.
         # If the LLM emitted scores for inactive dimensions (legacy

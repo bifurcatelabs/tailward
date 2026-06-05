@@ -1,23 +1,88 @@
-"""Phase-0 remote aggregation: mirror-layout + rsync-transport helpers.
+"""Phase-0 remote aggregation: mirror-layout + rsync-transport helpers,
+plus the box-provenance collision behaviour through the watcher → ledger.
 
-Watcher multi-root behaviour lives in test_watcher.py alongside the
-watcher refactor it exercises.
+Generic watcher multi-root behaviour lives in test_watcher.py.
 """
 
 from __future__ import annotations
 
+import asyncio
+import json
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
 
 from tailward.config import Config
+from tailward.daemon.state import StateStore
+from tailward.daemon.watcher import TranscriptWatcher
+from tailward.paths import project_hash
 from tailward.remote import (
     box_projects_dir,
     box_projects_roots,
     build_rsync_cmd,
     remote_mirror_root,
 )
+from tailward.storage.ledger import Ledger
+
+
+def _write_jsonl(path: Path, cwd: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    line = json.dumps(
+        {
+            "type": "user",
+            "sessionId": path.stem,
+            "cwd": cwd,
+            "message": {"role": "user", "content": "hi"},
+        }
+    )
+    path.write_text(line + "\n", encoding="utf-8")
+
+
+# ---------------- box provenance / collision ----------------
+
+
+@pytest.mark.asyncio
+async def test_same_path_on_two_sources_stays_distinct(tmp_path: Path) -> None:
+    """The headline collision case: a local project and a remote box both
+    working in ``/opt/camcontrol`` must NOT merge — they get distinct
+    project hashes and surface as two rows, the remote one labelled."""
+    local_root = tmp_path / "claude" / "projects"
+    box_root = tmp_path / "mirror" / "ubuclau1" / "projects"
+    # Same cwd on both sources — would collide without box provenance.
+    _write_jsonl(local_root / "-opt-camcontrol" / "local.jsonl", "/opt/camcontrol")
+    _write_jsonl(box_root / "-opt-camcontrol" / "remote.jsonl", "/opt/camcontrol")
+
+    local_hash = project_hash("/opt/camcontrol")
+    box_hash = project_hash("/opt/camcontrol", box="ubuclau1")
+    assert local_hash != box_hash  # sanity
+
+    ledger = Ledger()
+    await ledger.connect()
+    await ledger.mark_project_seeded(local_hash)
+    await ledger.mark_project_seeded(box_hash)
+    try:
+        watcher = TranscriptWatcher(
+            StateStore(),
+            ledger,
+            roots=[local_root, box_root],
+            root_boxes={box_root: "ubuclau1"},
+        )
+        await watcher.start()
+        await asyncio.sleep(0.5)
+        await watcher.stop()
+
+        summary = {r["project_hash"]: r for r in await ledger.projects_summary()}
+        assert local_hash in summary and box_hash in summary, (
+            "local and remote same-path projects should be two distinct rows"
+        )
+        # Both report the same path; only the remote row carries the box.
+        assert summary[local_hash]["project_path"] == "/opt/camcontrol"
+        assert summary[box_hash]["project_path"] == "/opt/camcontrol"
+        assert (summary[local_hash]["box"] or "") == ""
+        assert summary[box_hash]["box"] == "ubuclau1"
+    finally:
+        await ledger.close()
 
 
 # ---------------- mirror layout helpers ----------------

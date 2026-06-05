@@ -215,7 +215,7 @@ class UserRubricWorker:
                 log.exception("live publish failed (user rubric_in_flight)")
 
         try:
-            payload = await self._call_llm(window, fs.project_path)
+            payload = await self._call_llm(window, fs.project_path, getattr(fs, "box", ""))
             await self._record(fs, user_turn_count, payload)
             if live is not None:
                 await live.publish(
@@ -250,10 +250,10 @@ class UserRubricWorker:
                 state.in_flight = False
 
     async def _call_llm(
-        self, window: list[str], project_path: str | None
+        self, window: list[str], project_path: str | None, box: str = ""
     ) -> dict:
         from .mode_profile import session_mode_for_project
-        mode_label = session_mode_for_project(project_path) or "unspecified"
+        mode_label = session_mode_for_project(project_path, box=box) or "unspecified"
         active = tuple(name for name, _ in DIMENSIONS_USER)
         dim_hints = "\n".join(
             f"- {name}: {desc}" for name, desc in DIMENSIONS_USER
@@ -276,7 +276,7 @@ class UserRubricWorker:
             if self._daemon.local_llm else None
         )
         live = getattr(self._daemon, "live", None)
-        mode_label = session_mode_for_project(fs.project_path)
+        mode_label = session_mode_for_project(fs.project_path, box=getattr(fs, "box", ""))
 
         for name, _desc in DIMENSIONS_USER:
             dim = payload.get(name) or {}

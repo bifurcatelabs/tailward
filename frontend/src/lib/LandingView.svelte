@@ -100,6 +100,9 @@
         <a class="card" href={urlFor(p)} title={p.project_path}>
           <div class="card-head">
             <span class="proj">{shortName(p.project_path)}</span>
+            {#if p.box}
+              <span class="box" title="remote box: {p.box}">⇄ {p.box}</span>
+            {/if}
             {#if p.session_mode}
               <span class="mode">{p.session_mode}</span>
             {/if}
@@ -228,6 +231,16 @@
     background: rgba(232,153,104,0.10);
     color: var(--accent);
     border: 1px solid rgba(232,153,104,0.30);
+  }
+  .box {
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0.04em;
+    padding: 2px 6px;
+    border-radius: 999px;
+    background: rgba(120,160,210,0.10);
+    color: #7ba0d2;
+    border: 1px solid rgba(120,160,210,0.30);
   }
   .seeded {
     font-family: var(--mono);

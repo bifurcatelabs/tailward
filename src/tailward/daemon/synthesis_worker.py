@@ -361,7 +361,7 @@ class SynthesisWorker:
 
         # Load existing intent.md or start fresh — phase1 mutates the
         # Intent in place + returns it.
-        ipath = intent_path(state.project_path)
+        ipath = intent_path(state.project_path, box=getattr(state, "box", ""))
         if ipath.exists():
             intent = load_intent(ipath)
         else:
@@ -403,7 +403,7 @@ class SynthesisWorker:
         # Archive previous + save fresh.
         archive_path: Path | None = None
         if ipath.exists():
-            adir = archive_dir(state.project_path)
+            adir = archive_dir(state.project_path, box=getattr(state, "box", ""))
             adir.mkdir(parents=True, exist_ok=True)
             ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
             archive_path = adir / f"intent-{ts}.md"
@@ -738,7 +738,7 @@ class SynthesisWorker:
             log.debug("synthesis persist skipped: no project_path on session state")
             return None
         ts = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime())
-        snap_dir = project_dir(state.project_path) / "snapshots"
+        snap_dir = project_dir(state.project_path, box=getattr(state, "box", "")) / "snapshots"
         snap_path = snap_dir / f"{ts}.md"
         meta_path = snap_dir / f"{ts}.meta.json"
 

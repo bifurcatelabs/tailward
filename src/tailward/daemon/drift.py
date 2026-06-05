@@ -136,7 +136,7 @@ class DriftWorker:
         cfg = get_config()
         if not fs.project_path or not fs.session_id:
             return
-        ip: Path = intent_path(fs.project_path)
+        ip: Path = intent_path(fs.project_path, box=getattr(fs, "box", ""))
         if not ip.exists():
             return
         try:

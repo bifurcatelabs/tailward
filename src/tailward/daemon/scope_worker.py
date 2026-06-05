@@ -146,8 +146,9 @@ class ScopeWorker:
         # to a profile with ``scope_creep_floor=None``, in which case
         # the snapshot still records counters but no creep event ever
         # fires. Build mode keeps the SWE thresholds.
-        profile = active_profile_for_project(fs.project_path)
-        mode_label = session_mode_for_project(fs.project_path)
+        _box = getattr(fs, "box", "")
+        profile = active_profile_for_project(fs.project_path, box=_box)
+        mode_label = session_mode_for_project(fs.project_path, box=_box)
         floor = profile.scope_creep_floor
         factor = profile.scope_creep_factor
 

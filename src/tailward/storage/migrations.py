@@ -52,6 +52,12 @@ ADDITIVE_COLUMNS: list[tuple[str, str, str]] = [
     # via ON CONFLICT, so a session that's seeded then observed
     # live correctly de-flags as live.
     ("session_state", "is_backlog", "INTEGER NOT NULL DEFAULT 0"),
+    # ``box`` carries remote-transcript provenance: "" / NULL for local
+    # sessions, else the followed box name. It's already folded into the
+    # session's ``project_hash`` (so remote projects don't collide with
+    # local ones sharing a path); this column surfaces the label for the
+    # project index to group + display by source without re-deriving it.
+    ("session_state", "box", "TEXT"),
 ]
 
 

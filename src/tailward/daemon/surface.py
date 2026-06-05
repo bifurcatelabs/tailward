@@ -55,10 +55,11 @@ class Surfacer:
 
         session = await self._daemon.ledger.get_session(session_id)
         project_path = session["project_path"] if session else None
+        box = (session.get("box") if session else "") or ""
 
         # File artifact per [V1 Proposal.md §8]
         if project_path:
-            surf_dir = project_dir(project_path) / "surfacings"
+            surf_dir = project_dir(project_path, box=box) / "surfacings"
             surf_dir.mkdir(parents=True, exist_ok=True)
             ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S")
             (surf_dir / f"{kind}-{severity}-{sid}-{ts}.md").write_text(

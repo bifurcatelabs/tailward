@@ -119,6 +119,7 @@ class Ledger:
         project_hash: str,
         project_path: str,
         *,
+        box: str = "",
         is_backlog: bool = False,
     ) -> None:
         # ``is_backlog`` flows from the watcher's seed/prime path. On
@@ -127,14 +128,19 @@ class Ledger:
         # never re-flags a session that's been observed live. Lets
         # SessionCloseDetector decide whether to fire LLM
         # consolidation on idle-tick close.
+        #
+        # ``box`` is remote-provenance (already baked into project_hash);
+        # stored for display/grouping. It's a stable property of the
+        # session's source, so it's set on insert and left alone on
+        # conflict.
         now = _now_iso()
         await self.conn.execute(
             """
             INSERT INTO session_state(
                 session_id, project_hash, project_path,
-                started_at, last_seen_at, is_backlog
+                started_at, last_seen_at, is_backlog, box
             )
-            VALUES(?, ?, ?, ?, ?, ?)
+            VALUES(?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(session_id) DO UPDATE SET
                 last_seen_at=excluded.last_seen_at,
                 is_backlog=CASE
@@ -142,7 +148,10 @@ class Ledger:
                     ELSE is_backlog
                 END
             """,
-            (session_id, project_hash, project_path, now, now, 1 if is_backlog else 0),
+            (
+                session_id, project_hash, project_path,
+                now, now, 1 if is_backlog else 0, box,
+            ),
         )
         await self._commit()
 
@@ -894,6 +903,7 @@ class Ledger:
         async with self.conn.execute(
             """SELECT project_hash,
                       MAX(project_path) AS project_path,
+                      MAX(box) AS box,
                       COUNT(*) AS session_count,
                       MAX(last_seen_at) AS last_active_at
                FROM session_state

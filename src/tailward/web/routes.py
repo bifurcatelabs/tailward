@@ -591,21 +591,32 @@ def mount_web(app: FastAPI) -> None:
         for r in rows:
             ph = r["project_hash"]
             project_path = r["project_path"]
+            # Remote-provenance label; folded into ph already, surfaced
+            # here so on-disk lookups resolve the box-aware directory and
+            # the UI can show + group by source.
+            box = (r.get("box") or "")
             seen.add(ph)
-            skip_dirs.add(claude_dir_name(project_path))
+            # Only local projects participate in ghost-dedup (the
+            # discovered set below scans the local root). Box-qualified
+            # remote dirs never collide with a local sanitized name.
+            if not box:
+                skip_dirs.add(claude_dir_name(project_path))
             try:
-                intent_exists = intent_path(project_path).exists()
+                intent_exists = intent_path(project_path, box=box).exists()
             except Exception:
                 intent_exists = False
             try:
-                pdir = project_dir(project_path).exists()
+                pdir = project_dir(project_path, box=box).exists()
             except Exception:
                 pdir = False
             try:
                 latest_sid = await daemon.ledger.latest_session_for_project(ph)
             except Exception:
                 latest_sid = None
-            mode = session_mode_for_project(project_path) if intent_exists else None
+            mode = (
+                session_mode_for_project(project_path, box=box)
+                if intent_exists else None
+            )
             try:
                 seeded = await daemon.ledger.is_project_seeded(ph)
             except Exception:
@@ -613,6 +624,7 @@ def mount_web(app: FastAPI) -> None:
             out.append({
                 "project_hash": ph,
                 "project_path": project_path,
+                "box": box,
                 "session_count": int(r["session_count"]),
                 "last_active_at": r["last_active_at"],
                 "intent_exists": bool(intent_exists),
@@ -637,6 +649,7 @@ def mount_web(app: FastAPI) -> None:
             out.append({
                 "project_hash": ph,
                 "project_path": project_path,
+                "box": "",
                 "session_count": 0,
                 "last_active_at": None,
                 "intent_exists": bool(intent_exists),

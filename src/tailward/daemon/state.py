@@ -13,6 +13,11 @@ class SessionState:
     project_path: str
     project_hash: str
     jsonl_path: str
+    # Remote-provenance label: "" for local sessions, else the followed
+    # box name. Carried so workers that derive on-disk project state
+    # (synthesis snapshots, intent.md) locate it under the same
+    # box-aware project_hash the session is keyed by.
+    box: str = ""
     turns_seen: int = 0
     last_assistant_text: str = ""
     last_assistant_at: datetime | None = None
@@ -62,7 +67,12 @@ class StateStore:
         self._by_session: dict[str, SessionState] = {}
 
     def get_or_create(
-        self, session_id: str, project_path: str, project_hash: str, jsonl_path: str
+        self,
+        session_id: str,
+        project_path: str,
+        project_hash: str,
+        jsonl_path: str,
+        box: str = "",
     ) -> SessionState:
         st = self._by_session.get(session_id)
         if st is None:
@@ -71,6 +81,7 @@ class StateStore:
                 project_path=project_path,
                 project_hash=project_hash,
                 jsonl_path=jsonl_path,
+                box=box,
             )
             self._by_session[session_id] = st
         return st
@@ -92,6 +103,7 @@ class StateStore:
             project_path=row.get("project_path") or "",
             project_hash=row.get("project_hash") or "",
             jsonl_path="",  # filled by the watcher when the next event arrives
+            box=row.get("box") or "",
             turns_seen=int(row.get("turns_seen") or 0),
             last_message_id=row.get("last_message_id"),
             total_input_tokens=int(row.get("total_input_tokens") or 0),

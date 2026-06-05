@@ -165,15 +165,21 @@ def known_profile_names() -> list[str]:
     return list(_REGISTRY.keys())
 
 
-def session_mode_for_project(project_path: str | None) -> str | None:
+def session_mode_for_project(
+    project_path: str | None, *, box: str = ""
+) -> str | None:
     """Read the ``session_mode`` string from ``intent.md`` for a
     project. Returns ``None`` if the file is missing or the field is
     unset — callers should treat that as "default profile applies"
-    rather than an error."""
+    rather than an error.
+
+    ``box`` is remote provenance: pass the session's box so a remote
+    project's intent.md is read from its own box-aware directory rather
+    than colliding with a local project that shares the path."""
     if not project_path:
         return None
     try:
-        intent = load_intent(intent_path(project_path))
+        intent = load_intent(intent_path(project_path, box=box))
     except Exception:
         return None
     label = intent.front.session_mode
@@ -182,11 +188,13 @@ def session_mode_for_project(project_path: str | None) -> str | None:
     return label.strip() or None
 
 
-def active_profile_for_project(project_path: str | None) -> ModeProfile:
+def active_profile_for_project(
+    project_path: str | None, *, box: str = ""
+) -> ModeProfile:
     """Convenience: read intent.md, look up the matching profile.
 
     Workers call this each time they process an event. The intent.md
     read is cheap (~kB) and re-reading on every event means a user
     edit lands without daemon restart.
     """
-    return profile_for(session_mode_for_project(project_path))
+    return profile_for(session_mode_for_project(project_path, box=box))

@@ -133,14 +133,26 @@ def canonicalize_project_path(p: str | os.PathLike[str]) -> str:
     return s
 
 
-def project_hash(project_path: str | os.PathLike[str]) -> str:
-    """12-char SHA-256 hex digest of the canonical project path."""
+def project_hash(project_path: str | os.PathLike[str], *, box: str = "") -> str:
+    """12-char SHA-256 hex digest of the canonical project path.
+
+    ``box`` is a remote-provenance label: empty for local projects
+    (the default, so existing hashes are unchanged), or the followed
+    box's name for transcripts pulled from a remote machine. Folding it
+    into the digest gives two boxes working in the *same* absolute path
+    (e.g. both ``/opt/camcontrol``) distinct project identities, so they
+    don't merge in the ledger or collide in on-disk project state. The
+    ``\\x00`` separator can't appear in a path, so ``(box, path)`` maps
+    unambiguously to one digest.
+    """
     canonical = canonicalize_project_path(project_path)
+    if box:
+        canonical = f"{box}\x00{canonical}"
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:12]
 
 
-def project_dir(project_path: str | os.PathLike[str]) -> Path:
-    return projects_dir() / project_hash(project_path)
+def project_dir(project_path: str | os.PathLike[str], *, box: str = "") -> Path:
+    return projects_dir() / project_hash(project_path, box=box)
 
 
 def claude_dir_name(project_path: str) -> str:
@@ -228,16 +240,16 @@ def _first_cwd_in_jsonl(path: Path, max_lines: int = 200) -> str | None:
     return None
 
 
-def intent_path(project_path: str | os.PathLike[str]) -> Path:
-    return project_dir(project_path) / "intent.md"
+def intent_path(project_path: str | os.PathLike[str], *, box: str = "") -> Path:
+    return project_dir(project_path, box=box) / "intent.md"
 
 
-def archive_dir(project_path: str | os.PathLike[str]) -> Path:
-    return project_dir(project_path) / "archive"
+def archive_dir(project_path: str | os.PathLike[str], *, box: str = "") -> Path:
+    return project_dir(project_path, box=box) / "archive"
 
 
-def project_toml_path(project_path: str | os.PathLike[str]) -> Path:
-    return project_dir(project_path) / "project.toml"
+def project_toml_path(project_path: str | os.PathLike[str], *, box: str = "") -> Path:
+    return project_dir(project_path, box=box) / "project.toml"
 
 
 def ensure_layout() -> None:

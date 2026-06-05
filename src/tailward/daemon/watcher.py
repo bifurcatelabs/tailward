@@ -59,6 +59,7 @@ class FileState:
         "session_id",
         "project_path",
         "project_hash",
+        "box",
         "last_permission_mode",
         "tool_use_names",
     )
@@ -69,6 +70,11 @@ class FileState:
         self.session_id: str | None = None
         self.project_path: str | None = None
         self.project_hash: str | None = None
+        # Remote-provenance label for this file's root: "" for the local
+        # root, else the followed box name. A property of *which root* the
+        # JSONL lives under, so it's set once at FileState creation and
+        # folded into every project_hash this file produces.
+        self.box: str = ""
         # Carry-forward state for detecting permission-mode transitions.
         # ``None`` until the first event carrying ``permissionMode``; on
         # subsequent events that carry a different value, the dispatcher
@@ -109,6 +115,7 @@ class TranscriptWatcher:
         on_event: EventHandler | None = None,
         root: Path | None = None,
         roots: list[Path] | None = None,
+        root_boxes: dict[Path, str] | None = None,
         watch_paths: list[str] | None = None,
         exclude_paths: list[str] | None = None,
     ) -> None:
@@ -133,6 +140,10 @@ class TranscriptWatcher:
         # Primary root — first in the list. Retained for callers/tests
         # that reference a single root and for log messages.
         self._root = self._roots[0]
+        # Map of root -> remote-provenance box label. Roots absent from
+        # the map (the local root) carry box "". Set by the daemon from
+        # the followed-box mirror layout (<mirror>/<box>/projects).
+        self._root_box: dict[Path, str] = dict(root_boxes or {})
         self._files: dict[Path, FileState] = {}
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
@@ -161,6 +172,18 @@ class TranscriptWatcher:
             except ValueError:
                 continue
         return None
+
+    def _box_for(self, path: Path) -> str:
+        """Remote-provenance box label for the root owning ``path``.
+
+        "" for the local root (and anything outside the watched roots);
+        the followed box name for a remote-mirror root. Folded into every
+        project_hash this file produces so remote projects keep distinct
+        identities from local ones that share a path."""
+        root = self._root_for(path)
+        if root is None:
+            return ""
+        return self._root_box.get(root, "")
 
     def _iter_jsonl(self):
         """Yield every ``*.jsonl`` under all watched roots that exist."""
@@ -329,10 +352,11 @@ class TranscriptWatcher:
                 first = f.readline()
         except OSError:
             return False
+        box = self._box_for(jsonl_path)
         if first:
             ev = parse_line(first.decode("utf-8", errors="replace"))
             if ev is not None and ev.cwd:
-                return project_hash(ev.cwd) in self._seeded_hashes
+                return project_hash(ev.cwd, box=box) in self._seeded_hashes
         # Empty file or first line lacks cwd — best-effort fallback.
         root = self._root_for(jsonl_path)
         if root is None:
@@ -344,7 +368,7 @@ class TranscriptWatcher:
         if not rel.parts:
             return False
         sanitized = rel.parts[0]
-        candidate_hash = project_hash(_sanitize_to_path(sanitized))
+        candidate_hash = project_hash(_sanitize_to_path(sanitized), box=box)
         return candidate_hash in self._seeded_hashes
 
     async def _mark_offset_at_eof(self, path: Path) -> None:
@@ -405,6 +429,7 @@ class TranscriptWatcher:
                 # Resolve the JSONL's project via cwd-from-first-line
                 # (preferred, matches what /seed received from the UI)
                 # with sanitized-folder-name as fallback.
+                box = self._box_for(jsonl)
                 candidate_hash: str | None = None
                 try:
                     with open(jsonl, "rb") as f:
@@ -414,7 +439,7 @@ class TranscriptWatcher:
                 if first:
                     ev = parse_line(first.decode("utf-8", errors="replace"))
                     if ev is not None and ev.cwd:
-                        candidate_hash = project_hash(ev.cwd)
+                        candidate_hash = project_hash(ev.cwd, box=box)
                 if candidate_hash is None:
                     root = self._root_for(jsonl)
                     if root is None:
@@ -425,7 +450,9 @@ class TranscriptWatcher:
                         continue
                     if not rel.parts:
                         continue
-                    candidate_hash = project_hash(_sanitize_to_path(rel.parts[0]))
+                    candidate_hash = project_hash(
+                        _sanitize_to_path(rel.parts[0]), box=box
+                    )
                 if candidate_hash != project_hash_value:
                     continue
                 session_id = jsonl.stem
@@ -441,6 +468,9 @@ class TranscriptWatcher:
         fs = self._files.get(path)
         if fs is None:
             fs = FileState(path)
+            # Box is a property of which root owns this file, so set it
+            # once here; every project_hash this file produces folds it in.
+            fs.box = self._box_for(path)
             # Seed offset from ledger if we know this session.
             session_id = path.stem
             stored = await self._ledger.get_offset(session_id)
@@ -510,21 +540,27 @@ class TranscriptWatcher:
             fs.session_id = session_id
 
         # Resolve project path lazily; prefer the cwd embedded in events.
+        # fs.box (set at FileState creation from the owning root) folds
+        # into the hash so remote projects keep distinct identities.
         if ev.cwd and not fs.project_path:
             fs.project_path = ev.cwd
-            fs.project_hash = project_hash(ev.cwd)
+            fs.project_hash = project_hash(ev.cwd, box=fs.box)
         if not fs.project_path:
             # Best-effort from the sanitized folder name.
             sanitized = fs.path.parent.name
             fs.project_path = _sanitize_to_path(sanitized)
-            fs.project_hash = project_hash(fs.project_path)
+            fs.project_hash = project_hash(fs.project_path, box=fs.box)
 
         if session_id and fs.project_hash and fs.project_path:
             await self._ledger.upsert_session(
-                session_id, fs.project_hash, fs.project_path, is_backlog=is_backlog
+                session_id,
+                fs.project_hash,
+                fs.project_path,
+                box=fs.box,
+                is_backlog=is_backlog,
             )
             st = self._state.get_or_create(
-                session_id, fs.project_path, fs.project_hash, str(fs.path)
+                session_id, fs.project_path, fs.project_hash, str(fs.path), box=fs.box
             )
             if ev.kind == "assistant_message":
                 # Coalesce on message_id: every content block of one

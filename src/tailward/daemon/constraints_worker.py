@@ -49,7 +49,7 @@ class ConstraintsWorker:
         self._q: asyncio.Queue[tuple[TranscriptEvent, object, bool]] = asyncio.Queue()
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
-        self._policies: dict[str, _PolicyCache] = {}
+        self._policies: dict[tuple[str, str], _PolicyCache] = {}
         self._seen_violations: dict[str, set[tuple[str, str]]] = {}
 
     async def enqueue(self, ev: TranscriptEvent, fs, *, is_backlog: bool = False) -> None:
@@ -83,18 +83,21 @@ class ConstraintsWorker:
             except Exception:
                 log.exception("constraints processing failed")
 
-    def _compute_policy(self, project_path: str) -> CompiledPolicy:
+    def _compute_policy(self, project_path: str, box: str = "") -> CompiledPolicy:
         try:
-            intent = load_intent(intent_path(project_path))
+            intent = load_intent(intent_path(project_path, box=box))
         except Exception:
             return default_policy()
         rules_body = intent.sections.get("Active Rules", "") or ""
         digest = hashlib.sha1(rules_body.encode("utf-8")).hexdigest()
-        cached = self._policies.get(project_path)
+        # Key the cache by (box, path) so two boxes sharing a project
+        # path don't read each other's policy.
+        cache_key = (box, project_path)
+        cached = self._policies.get(cache_key)
         if cached and cached.rules_digest == digest:
             return cached.policy
         policy = merge(default_policy(), parse_active_rules(rules_body))
-        self._policies[project_path] = _PolicyCache(policy, digest)
+        self._policies[cache_key] = _PolicyCache(policy, digest)
         return policy
 
     async def _process(self, ev: TranscriptEvent, fs, *, is_backlog: bool = False) -> None:
@@ -117,7 +120,7 @@ class ConstraintsWorker:
         # and is kept working for defense-in-depth.
         if not ev.tool_name:
             return
-        policy = self._compute_policy(fs.project_path)
+        policy = self._compute_policy(fs.project_path, getattr(fs, "box", ""))
         if policy.is_empty():
             return
 
