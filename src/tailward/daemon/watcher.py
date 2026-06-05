@@ -108,13 +108,31 @@ class TranscriptWatcher:
         ledger: Ledger,
         on_event: EventHandler | None = None,
         root: Path | None = None,
+        roots: list[Path] | None = None,
         watch_paths: list[str] | None = None,
         exclude_paths: list[str] | None = None,
     ) -> None:
         self._state = state
         self._ledger = ledger
         self._on_event = on_event
-        self._root = root or claude_projects_root()
+        # Multiple "projects roots" are watched identically: the local
+        # ``~/.claude/projects/`` plus, optionally, one ``<box>/projects``
+        # directory per followed remote box (transcript mirrors). Each
+        # root behaves the same — the sanitized per-project folder is its
+        # immediate child, so all path logic (``relative_to``, the
+        # sanitized-name fallback, the watch/exclude filters) works
+        # unchanged once it's keyed to the *owning* root rather than a
+        # single global one. ``roots`` takes precedence; ``root`` is the
+        # back-compat single-root form; default is the local root only.
+        if roots is not None:
+            self._roots = [Path(r) for r in roots]
+        elif root is not None:
+            self._roots = [Path(root)]
+        else:
+            self._roots = [claude_projects_root()]
+        # Primary root — first in the list. Retained for callers/tests
+        # that reference a single root and for log messages.
+        self._root = self._roots[0]
         self._files: dict[Path, FileState] = {}
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
@@ -130,13 +148,37 @@ class TranscriptWatcher:
         # real-time appends (via the awatch loop) still process.
         self._seeded_hashes: set[str] = set()
 
+    def _root_for(self, path: Path) -> Path | None:
+        """Return the watched root that contains ``path``, or ``None``.
+
+        Project-path logic (the sanitized-folder name, the watch/exclude
+        filters) is all relative to *which* root a JSONL lives under, so
+        every per-path operation resolves its owning root first."""
+        for r in self._roots:
+            try:
+                path.relative_to(r)
+                return r
+            except ValueError:
+                continue
+        return None
+
+    def _iter_jsonl(self):
+        """Yield every ``*.jsonl`` under all watched roots that exist."""
+        for r in self._roots:
+            if not r.exists():
+                continue
+            yield from r.rglob("*.jsonl")
+
     def _path_allowed(self, jsonl_path: Path) -> bool:
+        root = self._root_for(jsonl_path)
+        if root is None:
+            return False
         if self._exclude_paths and _path_matches_filter(
-            jsonl_path, self._root, self._exclude_paths
+            jsonl_path, root, self._exclude_paths
         ):
             return False
         if self._watch_paths and not _path_matches_filter(
-            jsonl_path, self._root, self._watch_paths
+            jsonl_path, root, self._watch_paths
         ):
             return False
         return True
@@ -167,9 +209,12 @@ class TranscriptWatcher:
             self._task = None
 
     async def _run(self) -> None:
-        if not self._root.exists():
-            log.warning("Claude projects root %s does not exist yet; waiting", self._root)
-            while not self._root.exists() and not self._stop.is_set():
+        if not any(r.exists() for r in self._roots):
+            log.warning(
+                "no watched projects root exists yet (%s); waiting",
+                ", ".join(str(r) for r in self._roots),
+            )
+            while not any(r.exists() for r in self._roots) and not self._stop.is_set():
                 await asyncio.sleep(2.0)
             if self._stop.is_set():
                 # Unblock start() before bailing.
@@ -205,9 +250,14 @@ class TranscriptWatcher:
             # exception during prime doesn't leave start() hung.
             self._prime_done.set()
 
+        # ``awatch`` raises if handed a non-existent path, so only watch
+        # roots that exist right now. A remote-mirror root created after
+        # daemon start (first pull of a new box) is picked up on the next
+        # restart — interval auto-discovery is a later phase.
+        watch_roots = [r for r in self._roots if r.exists()]
         try:
             async for changes in awatch(
-                self._root,
+                *watch_roots,
                 recursive=True,
                 stop_event=self._stop,
                 watch_filter=_jsonl_filter,
@@ -222,10 +272,10 @@ class TranscriptWatcher:
                     # start. Events get full worker enqueue.
                     await self._process_file(p, is_backlog=False)
         except RuntimeError as e:
-            # watchfiles raises if the watched root disappears mid-run; treat
+            # watchfiles raises if a watched root disappears mid-run; treat
             # that as shutdown. Anything else is a real bug — log it so it
             # doesn't vanish silently.
-            if self._stop.is_set() or not self._root.exists():
+            if self._stop.is_set() or not any(r.exists() for r in self._roots):
                 return
             log.exception("transcript watcher exited on unexpected RuntimeError: %s", e)
 
@@ -243,7 +293,7 @@ class TranscriptWatcher:
         # early-return on size==offset==0; this preserves the
         # ``self._files`` registration that downstream awatch processing
         # expects on first encounter of a freshly-created file.
-        for jsonl in self._root.rglob("*.jsonl"):
+        for jsonl in self._iter_jsonl():
             if not self._path_allowed(jsonl):
                 continue
             if self._is_seeded(jsonl):
@@ -284,8 +334,11 @@ class TranscriptWatcher:
             if ev is not None and ev.cwd:
                 return project_hash(ev.cwd) in self._seeded_hashes
         # Empty file or first line lacks cwd — best-effort fallback.
+        root = self._root_for(jsonl_path)
+        if root is None:
+            return False
         try:
-            rel = jsonl_path.relative_to(self._root)
+            rel = jsonl_path.relative_to(root)
         except ValueError:
             return False
         if not rel.parts:
@@ -346,7 +399,7 @@ class TranscriptWatcher:
             self._seeded_hashes.add(project_hash_value)
 
             count = 0
-            for jsonl in self._root.rglob("*.jsonl"):
+            for jsonl in self._iter_jsonl():
                 if not self._path_allowed(jsonl):
                     continue
                 # Resolve the JSONL's project via cwd-from-first-line
@@ -363,8 +416,11 @@ class TranscriptWatcher:
                     if ev is not None and ev.cwd:
                         candidate_hash = project_hash(ev.cwd)
                 if candidate_hash is None:
+                    root = self._root_for(jsonl)
+                    if root is None:
+                        continue
                     try:
-                        rel = jsonl.relative_to(self._root)
+                        rel = jsonl.relative_to(root)
                     except ValueError:
                         continue
                     if not rel.parts:

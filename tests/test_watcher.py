@@ -63,13 +63,17 @@ async def test_watcher_picks_up_existing_jsonl(tmp_path: Path) -> None:
 
 
 def _write_minimal_jsonl(path: Path) -> None:
+    _write_jsonl_cwd(path, "/p")
+
+
+def _write_jsonl_cwd(path: Path, cwd: str) -> None:
     import json
     path.parent.mkdir(parents=True, exist_ok=True)
     line = json.dumps(
         {
             "type": "user",
             "sessionId": path.stem,
-            "cwd": "/p",
+            "cwd": cwd,
             "message": {"role": "user", "content": "hi"},
         }
     )
@@ -353,5 +357,99 @@ async def test_prime_pass_tags_events_as_backlog(tmp_path: Path) -> None:
             f"prime pass should tag all events is_backlog=True; "
             f"got {sum(1 for x in captured if not x)} untagged"
         )
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_watcher_ingests_from_a_second_root(tmp_path: Path) -> None:
+    """A JSONL under a second projects root is ingested exactly like one
+    under the first, when both are passed via ``roots=``. This is what
+    lets a remote-transcript mirror feed the same pipeline."""
+    root_a = tmp_path / "claude" / "projects"
+    root_b = tmp_path / "mirror" / "ubuclau1" / "projects"
+    # Distinct cwds → distinct project hashes (no collision in this test).
+    _write_jsonl_cwd(root_a / "C--warden" / "a-1.jsonl", "C:/warden")
+    _write_jsonl_cwd(root_b / "-opt-camcontrol" / "b-1.jsonl", "/opt/camcontrol")
+
+    ledger = Ledger()
+    await ledger.connect()
+    await _seed_cwd(ledger, "C:/warden")
+    await _seed_cwd(ledger, "/opt/camcontrol")
+    try:
+        state = StateStore()
+        seen: list[str] = []
+
+        async def capture(ev, fs, is_backlog=False):
+            if fs.session_id:
+                seen.append(fs.session_id)
+
+        watcher = TranscriptWatcher(
+            state, ledger, on_event=capture, roots=[root_a, root_b]
+        )
+        await watcher.start()
+        await asyncio.sleep(0.5)
+        await watcher.stop()
+
+        assert "a-1" in seen, "first root session should ingest"
+        assert "b-1" in seen, "second root session should ingest"
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_watcher_tolerates_nonexistent_root(tmp_path: Path) -> None:
+    """A configured-but-not-yet-created root (e.g. a mirror for a box not
+    pulled yet) must not stop the watcher priming the roots that exist."""
+    root_a = tmp_path / "claude" / "projects"
+    missing = tmp_path / "mirror" / "neverpulled" / "projects"
+    _write_jsonl_cwd(root_a / "C--warden" / "a-1.jsonl", "C:/warden")
+
+    ledger = Ledger()
+    await ledger.connect()
+    await _seed_cwd(ledger, "C:/warden")
+    try:
+        state = StateStore()
+        seen: list[str] = []
+
+        async def capture(ev, fs, is_backlog=False):
+            if fs.session_id:
+                seen.append(fs.session_id)
+
+        watcher = TranscriptWatcher(
+            state, ledger, on_event=capture, roots=[root_a, missing]
+        )
+        await watcher.start()
+        await asyncio.sleep(0.4)
+        await watcher.stop()
+
+        assert "a-1" in seen
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
+async def test_single_root_constructor_still_works(tmp_path: Path) -> None:
+    """Back-compat: the legacy ``root=`` kwarg yields a single-root watcher."""
+    root = tmp_path / "claude" / "projects"
+    _write_jsonl_cwd(root / "C--warden" / "s-1.jsonl", "C:/warden")
+
+    ledger = Ledger()
+    await ledger.connect()
+    await _seed_cwd(ledger, "C:/warden")
+    try:
+        state = StateStore()
+        seen: list[str] = []
+
+        async def capture(ev, fs, is_backlog=False):
+            if fs.session_id:
+                seen.append(fs.session_id)
+
+        watcher = TranscriptWatcher(state, ledger, on_event=capture, root=root)
+        assert watcher._roots == [root]
+        await watcher.start()
+        await asyncio.sleep(0.4)
+        await watcher.stop()
+        assert "s-1" in seen
     finally:
         await ledger.close()
