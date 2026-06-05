@@ -41,6 +41,9 @@ app = typer.Typer(
 daemon_app = typer.Typer(help="Daemon lifecycle.")
 app.add_typer(daemon_app, name="daemon")
 
+remote_app = typer.Typer(help="Remote transcript aggregation (Phase 0).")
+app.add_typer(remote_app, name="remote")
+
 
 # ---------------- top-level ----------------
 
@@ -108,6 +111,78 @@ def daemon_run(
         port=port or cfg.http_port,
         log_level="info",
     )
+
+
+# ---------------- remote ----------------
+
+
+@remote_app.command("pull")
+def remote_pull(
+    name: str = typer.Argument(..., help="Box name (mirror namespace + provenance label)."),
+    host: str = typer.Option(..., "--host", help="Remote host or ~/.ssh/config alias."),
+    user: str = typer.Option(..., "--user", help="Remote user that owns ~/.claude/projects."),
+    key: Path = typer.Option(
+        None, "--key", help="SSH key to use (default: your normal SSH credentials)."
+    ),
+    port: int = typer.Option(22, "--port", help="SSH port."),
+    remote_path: str = typer.Option(
+        ".claude/projects/",
+        "--remote-path",
+        help="Remote transcripts dir, relative to the remote home (or absolute).",
+    ),
+) -> None:
+    """Pull a remote box's Claude Code transcripts into the local mirror.
+
+    Lands them at ``<remote_mirror_root>/<name>/projects/`` where the
+    watcher ingests them like local sessions. Set ``remote_mirror_root``
+    in ``config.toml`` first. Restart the daemon after the first pull of
+    a new box so the watcher picks up its mirror root.
+    """
+    from .remote import RsyncMissingError, pull_box
+
+    cfg = get_config()
+    try:
+        result = pull_box(
+            cfg, name=name, host=host, user=user, key=key, port=port,
+            remote_path=remote_path,
+        )
+    except ValueError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=2) from e
+    except RsyncMissingError as e:
+        typer.echo(str(e), err=True)
+        raise typer.Exit(code=3) from e
+
+    if result.stdout:
+        typer.echo(result.stdout.rstrip())
+    if result.returncode != 0:
+        typer.echo(
+            f"rsync failed (exit {result.returncode}): {result.stderr.rstrip()}",
+            err=True,
+        )
+        raise typer.Exit(code=result.returncode)
+    typer.echo(f"pulled {name} → mirror")
+
+
+@remote_app.command("list")
+def remote_list() -> None:
+    """List remote boxes discovered under the mirror root."""
+    from .remote import box_projects_roots, remote_mirror_root
+
+    cfg = get_config()
+    root = remote_mirror_root(cfg)
+    if root is None:
+        typer.echo("remote_mirror_root is not configured (set it in config.toml).")
+        raise typer.Exit(code=0)
+    roots = box_projects_roots(cfg)
+    if not roots:
+        typer.echo(f"no boxes pulled yet under {root}")
+        raise typer.Exit(code=0)
+    typer.echo(f"mirror root: {root}")
+    for projects_dir in roots:
+        box = projects_dir.parent.name
+        sessions = sum(1 for _ in projects_dir.rglob("*.jsonl"))
+        typer.echo(f"  {box}  ({sessions} transcript file(s))")
 
 
 # ---------------- handoff ----------------

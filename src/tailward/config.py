@@ -135,6 +135,20 @@ class Config:
     # Transcript watcher: how many projects we will watch simultaneously.
     max_watch_projects: int = 32
 
+    # Remote transcript aggregation (Phase 0). When set to a directory,
+    # the watcher consumes it as ADDITIONAL projects roots alongside the
+    # local ``claude_projects_root()``. Transcripts pulled from remote
+    # boxes via ``tailward remote pull`` land as
+    # ``<remote_mirror_root>/<box>/projects/<sanitized>/*.jsonl``; each
+    # ``<box>/projects`` directory is watched exactly like the local
+    # projects root, so remote sessions ingest through the same pipeline.
+    # Empty = local-only (default). MUST NOT point inside
+    # ``~/.claude/projects/`` nor equal a watched local root — that would
+    # double-ingest and collide project hashes. Box roots are enumerated
+    # at daemon start; a box pulled while the daemon is running is picked
+    # up on the next restart (interval auto-discovery is a later phase).
+    remote_mirror_root: str = ""
+
     # Project scope filters. Default empty lists = watch every project
     # under ``~/.claude/projects/``. Both lists accept entries in either
     # form: the sanitized folder name as Claude Code stores it

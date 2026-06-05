@@ -580,10 +580,24 @@ def create_app() -> FastAPI:
                     )
 
         cfg = get_config()
+        # Local projects root plus any followed remote boxes' mirror roots
+        # (Phase 0 remote aggregation). Box roots are enumerated once at
+        # startup; a box pulled while the daemon runs is picked up on the
+        # next restart.
+        from ..paths import claude_projects_root
+        from ..remote import box_projects_roots
+
+        roots = [claude_projects_root(), *box_projects_roots(cfg)]
+        if len(roots) > 1:
+            log.info(
+                "watching %d remote-mirror root(s) alongside the local root",
+                len(roots) - 1,
+            )
         daemon.watcher = TranscriptWatcher(
             daemon.state,
             daemon.ledger,
             on_event=on_event,
+            roots=roots,
             watch_paths=cfg.watch_paths,
             exclude_paths=cfg.exclude_paths,
         )
