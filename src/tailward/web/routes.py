@@ -658,6 +658,43 @@ def mount_web(app: FastAPI) -> None:
                 "session_mode": mode,
                 "seeded": False,
             })
+        # Remote-mirror projects that haven't been ingested yet. The local
+        # discovery above scans only ~/.claude/projects/, so without this a
+        # freshly pulled box's projects would be invisible (and un-seedable
+        # from the UI). Surface them as box-labelled ghosts the user can seed.
+        from ..remote import discover_remote_projects
+
+        for rp in discover_remote_projects(get_config()):
+            ph = rp["project_hash"]
+            if ph in seen:
+                continue
+            seen.add(ph)
+            project_path = rp["project_path"]
+            box = rp["box"]
+            try:
+                intent_exists = intent_path(project_path, box=box).exists()
+            except Exception:
+                intent_exists = False
+            try:
+                pdir = project_dir(project_path, box=box).exists()
+            except Exception:
+                pdir = False
+            mode = (
+                session_mode_for_project(project_path, box=box)
+                if intent_exists else None
+            )
+            out.append({
+                "project_hash": ph,
+                "project_path": project_path,
+                "box": box,
+                "session_count": 0,
+                "last_active_at": None,
+                "intent_exists": bool(intent_exists),
+                "project_dir_exists": bool(pdir),
+                "latest_session_id": None,
+                "session_mode": mode,
+                "seeded": False,
+            })
         return JSONResponse({"projects": out})
 
     @app.get("/v2/projects/{ph}")

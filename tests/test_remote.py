@@ -21,6 +21,7 @@ from tailward.remote import (
     box_projects_dir,
     box_projects_roots,
     build_rsync_cmd,
+    discover_remote_projects,
     remote_mirror_root,
 )
 from tailward.storage.ledger import Ledger
@@ -118,6 +119,32 @@ def test_box_projects_dir_requires_mirror_root() -> None:
 def test_box_projects_dir_path_shape(tmp_path: Path) -> None:
     cfg = replace(Config.default(), remote_mirror_root=str(tmp_path / "m"))
     assert box_projects_dir(cfg, "ubuclau1") == tmp_path / "m" / "ubuclau1" / "projects"
+
+
+# ---------------- remote project discovery ----------------
+
+
+def test_discover_remote_projects_surfaces_box_aware_entries(tmp_path: Path) -> None:
+    mirror = tmp_path / "mirror"
+    _write_jsonl(
+        mirror / "ubuclau1" / "projects" / "-opt-camcontrol" / "s1.jsonl",
+        "/opt/camcontrol",
+    )
+    _write_jsonl(
+        mirror / "lab-gpu-2" / "projects" / "-opt-camcontrol" / "s2.jsonl",
+        "/opt/camcontrol",
+    )
+    cfg = replace(Config.default(), remote_mirror_root=str(mirror))
+
+    found = {(d["box"], d["project_hash"]): d for d in discover_remote_projects(cfg)}
+    # Same path on two boxes → two distinct entries, each labelled + box-aware.
+    assert ("ubuclau1", project_hash("/opt/camcontrol", box="ubuclau1")) in found
+    assert ("lab-gpu-2", project_hash("/opt/camcontrol", box="lab-gpu-2")) in found
+    assert all(d["project_path"] == "/opt/camcontrol" for d in found.values())
+
+
+def test_discover_remote_projects_empty_when_unconfigured() -> None:
+    assert discover_remote_projects(Config.default()) == []
 
 
 # ---------------- rsync command builder ----------------

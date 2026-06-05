@@ -12,11 +12,9 @@ Mirror layout::
 
 Each ``<box>/projects`` directory is a drop-in parallel to the local
 ``~/.claude/projects/`` root, which is what lets the watcher treat it
-identically (see ``TranscriptWatcher`` multi-root support).
-
-This module is transport + layout only. Box provenance / hash-collision
-handling (two boxes that share a project path) is a later phase — until then
-two boxes working in the same absolute path would share a project hash.
+identically (see ``TranscriptWatcher`` multi-root support). Box provenance
+is folded into each project's hash (see ``project_hash(..., box=...)``), so
+two boxes working in the same absolute path stay distinct.
 """
 
 from __future__ import annotations
@@ -26,7 +24,7 @@ import subprocess
 from pathlib import Path
 
 from .config import Config
-from .paths import home_dir
+from .paths import _first_cwd_in_jsonl, home_dir, project_hash
 
 
 def remote_mirror_root(cfg: Config) -> Path | None:
@@ -66,6 +64,40 @@ def box_projects_roots(cfg: Config) -> list[Path]:
         projects = box_dir / "projects"
         if projects.is_dir():
             out.append(projects)
+    return out
+
+
+def discover_remote_projects(cfg: Config) -> list[dict]:
+    """Projects mirrored under followed boxes, for the project index.
+
+    The watcher only writes a ``session_state`` row once it *ingests* a
+    project, and ``discover_claude_projects`` scans the local root only —
+    so a freshly pulled remote project would otherwise be invisible (and
+    thus un-seedable from the UI). This surfaces each mirrored project as
+    a discoverable entry with its box-aware hash + provenance label.
+
+    Returns ``[{project_hash, project_path, box}]``. ``project_path`` is
+    read from the first ``cwd`` in a project's JSONL (the authoritative
+    signal, same as the local discovery path); projects whose JSONL
+    carries no ``cwd`` are skipped.
+    """
+    out: list[dict] = []
+    seen: set[str] = set()
+    for projects_root in box_projects_roots(cfg):
+        box = projects_root.parent.name
+        for entry in sorted(projects_root.iterdir()):
+            if not entry.is_dir():
+                continue
+            for jsonl in entry.glob("*.jsonl"):
+                cwd = _first_cwd_in_jsonl(jsonl)
+                if not cwd:
+                    continue
+                ph = project_hash(cwd, box=box)
+                if ph in seen:
+                    break
+                seen.add(ph)
+                out.append({"project_hash": ph, "project_path": cwd, "box": box})
+                break
     return out
 
 
