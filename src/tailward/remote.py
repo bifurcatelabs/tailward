@@ -108,6 +108,21 @@ def default_pull_key() -> Path:
     return home_dir() / "keys" / "tailward-pull"
 
 
+def restricted_authorized_keys_line(
+    pubkey: str, confined_path: str = "~/.claude/projects/"
+) -> str:
+    """The ``authorized_keys`` line that confines a key to a read-only rsync
+    of one directory and nothing else.
+
+    ``restrict`` strips pty, port/agent/X11 forwarding; the forced
+    ``rrsync -ro`` command limits the key to a read-only rsync within
+    ``confined_path``. If the key leaks, its blast radius is read access to
+    that one transcript directory — data that's leaving for the mirror
+    anyway. Pair with ``remote add --key … --remote-path .`` (the pull path
+    is relative to the rrsync-confined root)."""
+    return f'restrict,command="rrsync -ro {confined_path}" {pubkey.strip()}'
+
+
 # --------------- followed-box list (persistent) ---------------
 #
 # The set of remote boxes tailward follows, persisted in its own file

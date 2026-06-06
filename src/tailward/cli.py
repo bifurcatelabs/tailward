@@ -147,6 +147,51 @@ def remote_add(
     typer.echo(f"added {name} ({user}@{host}) to the follow list")
 
 
+@remote_app.command("keygen")
+def remote_keygen(
+    path: str = typer.Option(
+        "~/.claude/projects/", "--path",
+        help="Directory on the remote the key may read (the rrsync-confined root).",
+    ),
+) -> None:
+    """Generate a dedicated read-only SSH pull key and print the line to add
+    to each box's ``~/.ssh/authorized_keys``. The key can do nothing but
+    rsync-read the given directory — minimal blast radius if it leaks."""
+    from .remote import default_pull_key, restricted_authorized_keys_line
+
+    key = default_pull_key()
+    pub_path = Path(str(key) + ".pub")
+    if not key.exists():
+        key.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            os.chmod(key.parent, 0o700)
+        except OSError:
+            pass
+        try:
+            subprocess.run(
+                ["ssh-keygen", "-t", "ed25519", "-f", str(key), "-N", "",
+                 "-C", "tailward-pull"],
+                check=True, capture_output=True, text=True,
+            )
+        except FileNotFoundError as e:
+            typer.echo("ssh-keygen not found on PATH.", err=True)
+            raise typer.Exit(code=1) from e
+        except subprocess.CalledProcessError as e:
+            typer.echo(f"ssh-keygen failed: {e.stderr.strip()}", err=True)
+            raise typer.Exit(code=1) from e
+        typer.echo(f"generated {key}")
+    else:
+        typer.echo(f"using existing {key}")
+    pub = pub_path.read_text(encoding="utf-8").strip()
+    typer.echo("\nAdd this line to each box's ~/.ssh/authorized_keys:\n")
+    typer.echo("  " + restricted_authorized_keys_line(pub, path))
+    typer.echo(
+        f"\nThen follow a box with it:\n"
+        f"  tailward remote add <name> --host H --user U "
+        f"--key {key} --remote-path ."
+    )
+
+
 @remote_app.command("remove")
 def remote_remove(
     name: str = typer.Argument(..., help="Box name to stop following."),

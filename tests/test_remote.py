@@ -28,6 +28,7 @@ from tailward.remote import (
     load_follow_list,
     remote_mirror_root,
     remove_followed_box,
+    restricted_authorized_keys_line,
     save_follow_list,
     upsert_followed_box,
 )
@@ -336,3 +337,17 @@ def test_build_rsync_cmd_custom_remote_path(tmp_path: Path) -> None:
         host="h", user="u", dest=tmp_path, remote_path="/abs/claude/projects/"
     )
     assert "u@h:/abs/claude/projects/" in cmd
+
+
+# ---------------- restricted key line ----------------
+
+
+def test_restricted_authorized_keys_line() -> None:
+    line = restricted_authorized_keys_line("ssh-ed25519 AAAA... tailward-pull")
+    assert line.startswith('restrict,command="rrsync -ro ~/.claude/projects/" ')
+    assert line.endswith("ssh-ed25519 AAAA... tailward-pull")
+
+
+def test_restricted_authorized_keys_line_custom_path() -> None:
+    line = restricted_authorized_keys_line("ssh-ed25519 KEY", "/srv/.claude/projects/")
+    assert 'command="rrsync -ro /srv/.claude/projects/"' in line
