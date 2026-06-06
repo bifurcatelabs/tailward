@@ -60,6 +60,8 @@ class Daemon:
         self.session_close = None
         # v0.2 platform probe worker.
         self.probe = None
+        # Remote auto-pull worker (keeps followed boxes' mirrors fresh).
+        self.remote_pull = None
         # v2.6 session-synthesis stream worker.
         self.synthesis = None
         # Live event bus; persister is attached after ledger connects.
@@ -682,6 +684,13 @@ def create_app() -> FastAPI:
             log.warning("probe worker unavailable: %s", e)
 
         try:
+            from .remote_pull_worker import RemotePullWorker
+            daemon.remote_pull = RemotePullWorker(daemon)
+            await daemon.remote_pull.start()
+        except Exception as e:
+            log.warning("remote-pull worker unavailable: %s", e)
+
+        try:
             from .synthesis_worker import SynthesisWorker
             daemon.synthesis = SynthesisWorker(daemon)
             await daemon.synthesis.start()
@@ -766,6 +775,7 @@ def create_app() -> FastAPI:
                 ("user_rubric", getattr(daemon, "user_rubric", None)),
                 ("session_close", daemon.session_close),
                 ("probe", daemon.probe),
+                ("remote_pull", getattr(daemon, "remote_pull", None)),
                 ("synthesis", getattr(daemon, "synthesis", None)),
                 ("test_slow", getattr(daemon, "_test_slow_worker", None)),
                 ("test_hung", getattr(daemon, "_test_hung_worker", None)),

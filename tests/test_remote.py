@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 
@@ -167,6 +168,77 @@ def test_remove_followed_box() -> None:
     assert remove_followed_box("x") is True
     assert get_followed_box("x") is None
     assert remove_followed_box("x") is False  # already gone
+
+
+# ---------------- auto-pull worker ----------------
+
+
+class _FakeWatcher:
+    def __init__(self) -> None:
+        self.roots: set[Path] = set()
+
+    def is_watching(self, p: Path) -> bool:
+        return Path(p) in self.roots
+
+    def add_root(self, p: Path, box: str = "") -> None:
+        self.roots.add(Path(p))
+
+
+class _FakeDaemon:
+    def __init__(self, watcher: _FakeWatcher) -> None:
+        self.watcher = watcher
+
+
+@pytest.mark.asyncio
+async def test_pull_worker_pulls_due_box_and_registers_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The worker pulls a due box (no real rsync) and registers its mirror
+    root with the watcher so it ingests without a restart. A second tick
+    inside the interval does not re-pull."""
+    from tailward.daemon import remote_pull_worker as rpw
+
+    mirror = tmp_path / "mirror"
+    cfg = replace(Config.default(), remote_mirror_root=str(mirror))
+    monkeypatch.setattr(rpw, "get_config", lambda: cfg)
+
+    calls: list[str] = []
+
+    def fake_pull(cfg_, box):
+        calls.append(box.name)
+        d = box_projects_dir(cfg_, box.name)  # simulate rsync creating the mirror
+        d.mkdir(parents=True, exist_ok=True)
+        return subprocess.CompletedProcess(args=[], returncode=0, stdout="", stderr="")
+
+    monkeypatch.setattr(rpw, "pull_followed", fake_pull)
+
+    save_follow_list([RemoteBox(name="box1", host="h", user="u", interval_seconds=600)])
+    watcher = _FakeWatcher()
+    worker = rpw.RemotePullWorker(_FakeDaemon(watcher))
+
+    await worker._tick()
+    assert calls == ["box1"]  # first sight = due
+    assert watcher.is_watching(mirror / "box1" / "projects")  # root registered
+
+    await worker._tick()  # within interval → no re-pull
+    assert calls == ["box1"]
+
+
+@pytest.mark.asyncio
+async def test_pull_worker_skips_disabled_box(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tailward.daemon import remote_pull_worker as rpw
+
+    cfg = replace(Config.default(), remote_mirror_root=str(tmp_path / "mirror"))
+    monkeypatch.setattr(rpw, "get_config", lambda: cfg)
+    calls: list[str] = []
+    monkeypatch.setattr(rpw, "pull_followed", lambda c, b: calls.append(b.name))
+
+    save_follow_list([RemoteBox(name="off", host="h", user="u", enabled=False)])
+    worker = rpw.RemotePullWorker(_FakeDaemon(_FakeWatcher()))
+    await worker._tick()
+    assert calls == []  # disabled box not pulled
 
 
 # ---------------- mirror layout helpers ----------------
