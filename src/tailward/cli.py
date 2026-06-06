@@ -116,8 +116,8 @@ def daemon_run(
 # ---------------- remote ----------------
 
 
-@remote_app.command("pull")
-def remote_pull(
+@remote_app.command("add")
+def remote_add(
     name: str = typer.Argument(..., help="Box name (mirror namespace + provenance label)."),
     host: str = typer.Option(..., "--host", help="Remote host or ~/.ssh/config alias."),
     user: str = typer.Option(..., "--user", help="Remote user that owns ~/.claude/projects."),
@@ -126,63 +126,148 @@ def remote_pull(
     ),
     port: int = typer.Option(22, "--port", help="SSH port."),
     remote_path: str = typer.Option(
-        ".claude/projects/",
-        "--remote-path",
+        ".claude/projects/", "--remote-path",
         help="Remote transcripts dir, relative to the remote home (or absolute).",
     ),
+    interval: int = typer.Option(
+        60, "--interval", help="Auto-pull cadence in seconds (used by the daemon worker)."
+    ),
+    enabled: bool = typer.Option(
+        True, "--enabled/--disabled", help="Whether this box is followed."
+    ),
 ) -> None:
-    """Pull a remote box's Claude Code transcripts into the local mirror.
+    """Add (or update) a box in the follow list. Does not pull — run
+    ``tailward remote pull <name>`` (or ``--all``) to fetch."""
+    from .remote import RemoteBox, upsert_followed_box
 
-    Lands them at ``<remote_mirror_root>/<name>/projects/`` where the
-    watcher ingests them like local sessions. Set ``remote_mirror_root``
-    in ``config.toml`` first. Restart the daemon after the first pull of
-    a new box so the watcher picks up its mirror root.
+    upsert_followed_box(RemoteBox(
+        name=name, host=host, user=user, enabled=enabled, port=port,
+        remote_path=remote_path, key=str(key) if key else "", interval_seconds=interval,
+    ))
+    typer.echo(f"added {name} ({user}@{host}) to the follow list")
+
+
+@remote_app.command("remove")
+def remote_remove(
+    name: str = typer.Argument(..., help="Box name to stop following."),
+) -> None:
+    """Remove a box from the follow list. Leaves its mirror on disk."""
+    from .remote import remove_followed_box
+
+    if remove_followed_box(name):
+        typer.echo(f"removed {name} from the follow list")
+    else:
+        typer.echo(f"{name} is not in the follow list", err=True)
+        raise typer.Exit(code=1)
+
+
+@remote_app.command("pull")
+def remote_pull(
+    name: str = typer.Argument(
+        None, help="Box name. Connection is resolved from the follow list if "
+        "--host/--user are omitted."
+    ),
+    host: str = typer.Option(None, "--host", help="Ad-hoc remote host (skips the follow list)."),
+    user: str = typer.Option(None, "--user", help="Ad-hoc remote user."),
+    key: Path = typer.Option(None, "--key", help="SSH key for an ad-hoc pull."),
+    port: int = typer.Option(22, "--port", help="SSH port for an ad-hoc pull."),
+    remote_path: str = typer.Option(
+        ".claude/projects/", "--remote-path", help="Remote transcripts dir for an ad-hoc pull."
+    ),
+    all_boxes: bool = typer.Option(
+        False, "--all", help="Pull every enabled box in the follow list."
+    ),
+) -> None:
+    """Pull remote transcripts into the local mirror.
+
+    Three forms: ``pull <name> --host H --user U`` (ad-hoc, not saved),
+    ``pull <name>`` (resolve connection from the follow list), or
+    ``pull --all`` (every enabled followed box). Lands at
+    ``<remote_mirror_root>/<name>/projects/``. Restart the daemon after
+    the first pull of a new box so the watcher picks up its mirror root.
     """
-    from .remote import RsyncMissingError, pull_box
+    from .remote import (
+        RemoteBox,
+        RsyncMissingError,
+        get_followed_box,
+        load_follow_list,
+        pull_followed,
+    )
 
     cfg = get_config()
-    try:
-        result = pull_box(
-            cfg, name=name, host=host, user=user, key=key, port=port,
-            remote_path=remote_path,
-        )
-    except ValueError as e:
-        typer.echo(str(e), err=True)
-        raise typer.Exit(code=2) from e
-    except RsyncMissingError as e:
-        typer.echo(str(e), err=True)
-        raise typer.Exit(code=3) from e
+    boxes: list[RemoteBox] = []
+    if all_boxes:
+        boxes = [b for b in load_follow_list() if b.enabled]
+        if not boxes:
+            typer.echo("no enabled boxes in the follow list", err=True)
+            raise typer.Exit(code=1)
+    elif not name:
+        typer.echo("provide a box name, or --all", err=True)
+        raise typer.Exit(code=2)
+    elif host and user:
+        boxes = [RemoteBox(
+            name=name, host=host, user=user,
+            key=str(key) if key else "", port=port, remote_path=remote_path,
+        )]
+    else:
+        box = get_followed_box(name)
+        if box is None:
+            typer.echo(
+                f"{name} is not in the follow list; pass --host and --user, or "
+                f"add it first with `tailward remote add`.",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        boxes = [box]
 
-    if result.stdout:
-        typer.echo(result.stdout.rstrip())
-    if result.returncode != 0:
-        typer.echo(
-            f"rsync failed (exit {result.returncode}): {result.stderr.rstrip()}",
-            err=True,
-        )
-        raise typer.Exit(code=result.returncode)
-    typer.echo(f"pulled {name} → mirror")
+    failures = 0
+    for b in boxes:
+        try:
+            result = pull_followed(cfg, b)
+        except ValueError as e:
+            typer.echo(str(e), err=True)
+            raise typer.Exit(code=2) from e
+        except RsyncMissingError as e:
+            typer.echo(str(e), err=True)
+            raise typer.Exit(code=3) from e
+        if result.returncode != 0:
+            failures += 1
+            typer.echo(
+                f"{b.name}: rsync failed (exit {result.returncode}): "
+                f"{result.stderr.rstrip()}",
+                err=True,
+            )
+        else:
+            typer.echo(f"pulled {b.name} → mirror")
+    if failures:
+        raise typer.Exit(code=1)
 
 
 @remote_app.command("list")
 def remote_list() -> None:
-    """List remote boxes discovered under the mirror root."""
-    from .remote import box_projects_roots, remote_mirror_root
+    """List followed boxes and their mirror status."""
+    from .remote import box_projects_dir, load_follow_list, remote_mirror_root
 
     cfg = get_config()
     root = remote_mirror_root(cfg)
-    if root is None:
-        typer.echo("remote_mirror_root is not configured (set it in config.toml).")
+    typer.echo(
+        f"mirror root: {root}" if root is not None
+        else "remote_mirror_root is not configured (set it in config.toml)."
+    )
+    boxes = load_follow_list()
+    if not boxes:
+        typer.echo("no boxes in the follow list (add one with `tailward remote add`).")
         raise typer.Exit(code=0)
-    roots = box_projects_roots(cfg)
-    if not roots:
-        typer.echo(f"no boxes pulled yet under {root}")
-        raise typer.Exit(code=0)
-    typer.echo(f"mirror root: {root}")
-    for projects_dir in roots:
-        box = projects_dir.parent.name
-        sessions = sum(1 for _ in projects_dir.rglob("*.jsonl"))
-        typer.echo(f"  {box}  ({sessions} transcript file(s))")
+    for b in boxes:
+        mirrored = "-"
+        if root is not None:
+            pdir = box_projects_dir(cfg, b.name)
+            mirrored = (
+                f"{sum(1 for _ in pdir.rglob('*.jsonl'))} file(s)"
+                if pdir.is_dir() else "not pulled"
+            )
+        state = "" if b.enabled else " [disabled]"
+        typer.echo(f"  {b.name}{state}  {b.user}@{b.host}  mirror: {mirrored}")
 
 
 # ---------------- handoff ----------------

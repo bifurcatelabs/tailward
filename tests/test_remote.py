@@ -18,11 +18,17 @@ from tailward.daemon.state import StateStore
 from tailward.daemon.watcher import TranscriptWatcher
 from tailward.paths import project_hash
 from tailward.remote import (
+    RemoteBox,
     box_projects_dir,
     box_projects_roots,
     build_rsync_cmd,
     discover_remote_projects,
+    get_followed_box,
+    load_follow_list,
     remote_mirror_root,
+    remove_followed_box,
+    save_follow_list,
+    upsert_followed_box,
 )
 from tailward.storage.ledger import Ledger
 
@@ -125,6 +131,42 @@ async def test_shared_session_id_across_boxes_is_guarded(tmp_path: Path) -> None
         assert "box2" not in offset_row["jsonl_path"]
     finally:
         await ledger.close()
+
+
+# ---------------- followed-box list (persistent) ----------------
+
+
+def test_follow_list_empty_when_no_file() -> None:
+    assert load_follow_list() == []
+
+
+def test_follow_list_roundtrip() -> None:
+    boxes = [
+        RemoteBox(name="ubuclau1", host="172.16.80.207", user="twtest"),
+        RemoteBox(
+            name="labgpu", host="gpu.lan", user="gw", enabled=False, port=2222,
+            remote_path="/srv/.claude/projects/", key="/k/pull", interval_seconds=30,
+        ),
+    ]
+    save_follow_list(boxes)
+    loaded = load_follow_list()
+    assert loaded == boxes  # dataclass equality, field-for-field
+
+
+def test_upsert_replaces_by_name_and_sorts() -> None:
+    upsert_followed_box(RemoteBox(name="b", host="h1", user="u"))
+    upsert_followed_box(RemoteBox(name="a", host="h2", user="u"))
+    upsert_followed_box(RemoteBox(name="b", host="h-new", user="u"))  # replace
+    boxes = load_follow_list()
+    assert [b.name for b in boxes] == ["a", "b"]  # sorted, no dup
+    assert get_followed_box("b").host == "h-new"
+
+
+def test_remove_followed_box() -> None:
+    upsert_followed_box(RemoteBox(name="x", host="h", user="u"))
+    assert remove_followed_box("x") is True
+    assert get_followed_box("x") is None
+    assert remove_followed_box("x") is False  # already gone
 
 
 # ---------------- mirror layout helpers ----------------

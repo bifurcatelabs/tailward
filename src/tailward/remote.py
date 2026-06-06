@@ -21,10 +21,12 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 
 from .config import Config
-from .paths import _first_cwd_in_jsonl, home_dir, project_hash
+from .paths import _first_cwd_in_jsonl, atomic_write_text, home_dir, project_hash
 
 
 def remote_mirror_root(cfg: Config) -> Path | None:
@@ -104,6 +106,103 @@ def discover_remote_projects(cfg: Config) -> list[dict]:
 def default_pull_key() -> Path:
     """The dedicated tailward pull key location (may not exist)."""
     return home_dir() / "keys" / "tailward-pull"
+
+
+# --------------- followed-box list (persistent) ---------------
+#
+# The set of remote boxes tailward follows, persisted in its own file
+# (NOT config.toml — Config stays a flat scalar/list schema; this is an
+# array-of-tables). Consumed by the CLI (`remote add/remove/pull`) and,
+# later, by the interval auto-pull worker.
+
+
+@dataclass
+class RemoteBox:
+    name: str
+    host: str
+    user: str
+    enabled: bool = True
+    port: int = 22
+    remote_path: str = ".claude/projects/"
+    key: str = ""  # path to an SSH key; "" = the user's default credentials
+    interval_seconds: int = 60  # auto-pull cadence (used by the worker)
+
+
+def follow_list_path() -> Path:
+    return home_dir() / "remote_follow.toml"
+
+
+def load_follow_list() -> list[RemoteBox]:
+    """Followed boxes from disk, or [] if none configured."""
+    path = follow_list_path()
+    if not path.exists():
+        return []
+    with open(path, "rb") as f:
+        raw = tomllib.load(f)
+    out: list[RemoteBox] = []
+    for entry in raw.get("remote_follow", []) or []:
+        name = (entry.get("name") or "").strip()
+        if not name:
+            continue
+        out.append(
+            RemoteBox(
+                name=name,
+                host=entry.get("host", ""),
+                user=entry.get("user", ""),
+                enabled=bool(entry.get("enabled", True)),
+                port=int(entry.get("port", 22)),
+                remote_path=entry.get("remote_path", ".claude/projects/"),
+                key=entry.get("key", ""),
+                interval_seconds=int(entry.get("interval_seconds", 60)),
+            )
+        )
+    return out
+
+
+def _toml_str(value: str) -> str:
+    return '"' + str(value).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def save_follow_list(boxes: list[RemoteBox]) -> None:
+    lines = [
+        "# tailward followed remote boxes.",
+        "# Managed by `tailward remote add` / `remote remove`; editable by hand.",
+        "",
+    ]
+    for b in boxes:
+        lines.append("[[remote_follow]]")
+        lines.append(f"name = {_toml_str(b.name)}")
+        lines.append(f"host = {_toml_str(b.host)}")
+        lines.append(f"user = {_toml_str(b.user)}")
+        lines.append(f"enabled = {'true' if b.enabled else 'false'}")
+        lines.append(f"port = {b.port}")
+        lines.append(f"remote_path = {_toml_str(b.remote_path)}")
+        lines.append(f"key = {_toml_str(b.key)}")
+        lines.append(f"interval_seconds = {b.interval_seconds}")
+        lines.append("")
+    atomic_write_text(follow_list_path(), "\n".join(lines))
+
+
+def get_followed_box(name: str) -> RemoteBox | None:
+    return next((b for b in load_follow_list() if b.name == name), None)
+
+
+def upsert_followed_box(box: RemoteBox) -> None:
+    """Add ``box`` to the follow list, replacing any entry with the same name."""
+    boxes = [b for b in load_follow_list() if b.name != box.name]
+    boxes.append(box)
+    boxes.sort(key=lambda b: b.name)
+    save_follow_list(boxes)
+
+
+def remove_followed_box(name: str) -> bool:
+    """Drop the box named ``name``. Returns True if it was present."""
+    boxes = load_follow_list()
+    kept = [b for b in boxes if b.name != name]
+    if len(kept) == len(boxes):
+        return False
+    save_follow_list(kept)
+    return True
 
 
 def build_rsync_cmd(
@@ -191,3 +290,16 @@ def pull_box(
         port=port,
     )
     return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
+def pull_followed(cfg: Config, box: RemoteBox) -> subprocess.CompletedProcess[str]:
+    """Pull a followed box using its stored connection details."""
+    return pull_box(
+        cfg,
+        name=box.name,
+        host=box.host,
+        user=box.user,
+        key=Path(box.key) if box.key else None,
+        port=box.port,
+        remote_path=box.remote_path,
+    )
