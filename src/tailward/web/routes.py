@@ -683,6 +683,13 @@ def mount_web(app: FastAPI) -> None:
                 session_mode_for_project(project_path, box=box)
                 if intent_exists else None
             )
+            # Report the real seeded state — a remote project can be marked
+            # seeded yet still appear here (no ingested session row), so
+            # hardcoding False would mislabel it with a "seed" button.
+            try:
+                seeded = await daemon.ledger.is_project_seeded(ph)
+            except Exception:
+                seeded = False
             out.append({
                 "project_hash": ph,
                 "project_path": project_path,
@@ -693,7 +700,7 @@ def mount_web(app: FastAPI) -> None:
                 "project_dir_exists": bool(pdir),
                 "latest_session_id": None,
                 "session_mode": mode,
-                "seeded": False,
+                "seeded": seeded,
             })
         return JSONResponse({"projects": out})
 
