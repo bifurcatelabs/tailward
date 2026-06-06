@@ -666,6 +666,18 @@ def test_turn_metrics_derived_from_timestamps_and_usage(
         assert row["output_tokens"] == 300
         assert row["cache_read_tokens"] == 9000
 
+        # The turn_metric LiveBus event must carry event_ts from the turn's
+        # own time (last block ≈ T+2.0s), not the insert time — otherwise a
+        # seeded/backlog session's PERF rows collapse onto the ingest
+        # timestamp instead of reconstructing the real timeline.
+        live = _run(daemon.ledger.live_events_for_session(TURN_METRIC_SESSION_ID))
+        tm = [r for r in live if r["event_type"] == "turn_metric"]
+        assert tm, "no turn_metric live event recorded"
+        assert tm[0]["event_ts"] is not None, "turn_metric live event missing event_ts"
+        assert tm[0]["event_ts"].startswith("2026-04-25"), (
+            f"turn_metric event_ts should be the turn's time, got {tm[0]['event_ts']}"
+        )
+
 
 RESTART_SESSION_ID = "session-restart-001"
 

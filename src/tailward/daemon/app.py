@@ -209,7 +209,7 @@ def create_app() -> FastAPI:
             if st is not None:
                 if ev.kind == "assistant_message":
                     if ev.new_turn:
-                        await _close_turn_metric(daemon, st, fs)
+                        await _close_turn_metric(daemon, st, fs, is_backlog)
                         if (
                             ev.message_id
                             and ev.model
@@ -239,7 +239,7 @@ def create_app() -> FastAPI:
                         if ev.stop_reason:
                             st.in_flight_turn["stop_reason"] = ev.stop_reason
                 elif ev.kind == "user_message":
-                    await _close_turn_metric(daemon, st, fs)
+                    await _close_turn_metric(daemon, st, fs, is_backlog)
                     if ev.timestamp:
                         st.last_user_msg_at = ev.timestamp
 
@@ -1096,10 +1096,15 @@ def _ms_between(start, end) -> int | None:
     return int(delta)
 
 
-async def _close_turn_metric(daemon, st, fs) -> None:
+async def _close_turn_metric(daemon, st, fs, is_backlog: bool = False) -> None:
     """If a turn is in-flight, persist its derived metrics to the
     ledger and publish a ``turn_metric`` LiveBus event. Idempotent —
-    safe to call when no turn is in-flight."""
+    safe to call when no turn is in-flight.
+
+    ``is_backlog`` flows from the dispatcher: it suppresses the live
+    broadcast on backlog (seed/prime) replay and selects the turn's own
+    timestamp as ``event_ts`` so a seeded session's PERF rows land at the
+    turn's real time, not at ingest time."""
     turn = st.in_flight_turn
     if not turn:
         return
@@ -1160,6 +1165,10 @@ async def _close_turn_metric(daemon, st, fs) -> None:
         log.exception("turn-metric persist failed for %s", fs.session_id)
         return
 
+    # The turn's own time is its last (or first) content block — use it as
+    # event_ts so the PERF row reconstructs at the right point on a seeded
+    # session's timeline instead of collapsing to ingest time.
+    ts_src = last or first
     try:
         await daemon.live.publish(
             fs.session_id,
@@ -1177,6 +1186,8 @@ async def _close_turn_metric(daemon, st, fs) -> None:
                 "output_tps": output_tps,
                 "cache_hit_ratio": cache_hit_ratio,
             },
+            broadcast=not is_backlog,
+            event_ts=ts_src.timestamp() if ts_src else None,
         )
     except Exception:
         log.exception("turn-metric publish failed for %s", fs.session_id)
