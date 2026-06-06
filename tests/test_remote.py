@@ -86,6 +86,47 @@ async def test_same_path_on_two_sources_stays_distinct(tmp_path: Path) -> None:
         await ledger.close()
 
 
+@pytest.mark.asyncio
+async def test_shared_session_id_across_boxes_is_guarded(tmp_path: Path) -> None:
+    """Two boxes carrying the same session_id must not clobber each other.
+    The first box seen owns the session; the second is skipped (its offset
+    write never happens), so the owning box's tracking stays intact.
+    See KNOWN_LIMITATIONS.md."""
+    box1 = tmp_path / "mirror" / "box1" / "projects"
+    box2 = tmp_path / "mirror" / "box2" / "projects"
+    # Same session_id ("dup") AND same cwd on both boxes — the collision.
+    _write_jsonl(box1 / "-opt-cc" / "dup.jsonl", "/opt/cc")
+    _write_jsonl(box2 / "-opt-cc" / "dup.jsonl", "/opt/cc")
+
+    ledger = Ledger()
+    await ledger.connect()
+    await ledger.mark_project_seeded(project_hash("/opt/cc", box="box1"))
+    await ledger.mark_project_seeded(project_hash("/opt/cc", box="box2"))
+    try:
+        watcher = TranscriptWatcher(
+            StateStore(), ledger,
+            roots=[box1, box2], root_boxes={box1: "box1", box2: "box2"},
+        )
+        await watcher.start()
+        await asyncio.sleep(0.5)
+        await watcher.stop()
+
+        rows = [r for r in await ledger.all_session_state() if r["session_id"] == "dup"]
+        assert len(rows) == 1  # PK guarantees one; assert it's box1's, not clobbered
+        assert rows[0]["box"] == "box1"
+        # The offset row points at box1's file — box2's skipped copy never
+        # overwrote it.
+        async with ledger.conn.execute(
+            "SELECT jsonl_path FROM processed_offset WHERE session_id='dup'"
+        ) as cur:
+            offset_row = await cur.fetchone()
+        assert offset_row is not None
+        assert "box1" in offset_row["jsonl_path"]
+        assert "box2" not in offset_row["jsonl_path"]
+    finally:
+        await ledger.close()
+
+
 # ---------------- mirror layout helpers ----------------
 
 

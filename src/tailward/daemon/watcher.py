@@ -60,6 +60,7 @@ class FileState:
         "project_path",
         "project_hash",
         "box",
+        "collided",
         "last_permission_mode",
         "tool_use_names",
     )
@@ -75,6 +76,11 @@ class FileState:
         # JSONL lives under, so it's set once at FileState creation and
         # folded into every project_hash this file produces.
         self.box: str = ""
+        # Set when this file's session_id is already owned by a different
+        # box (a cross-box session_id collision — see KNOWN_LIMITATIONS.md).
+        # The file is then skipped so it can't clobber the owning box's
+        # session state / offset.
+        self.collided: bool = False
         # Carry-forward state for detecting permission-mode transitions.
         # ``None`` until the first event carrying ``permissionMode``; on
         # subsequent events that carry a different value, the dispatcher
@@ -184,6 +190,19 @@ class TranscriptWatcher:
         if root is None:
             return ""
         return self._root_box.get(root, "")
+
+    @staticmethod
+    def _box_conflict(sess: dict | None, box: str) -> bool:
+        """True when a session_state row exists for this session_id under a
+        *different* box — a cross-box session_id collision.
+
+        Session identity is keyed by session_id alone (unlike project
+        identity, which is box-qualified), so two followed boxes that
+        carry the same session_id would otherwise clobber each other.
+        Rare in practice (Claude Code emits random per-session UUIDs), but
+        possible with copied/templated ``~/.claude`` state. See
+        KNOWN_LIMITATIONS.md."""
+        return sess is not None and (sess.get("box") or "") != (box or "")
 
     def _iter_jsonl(self):
         """Yield every ``*.jsonl`` under all watched roots that exist."""
@@ -456,6 +475,19 @@ class TranscriptWatcher:
                 if candidate_hash != project_hash_value:
                     continue
                 session_id = jsonl.stem
+                # Skip if this session_id is owned by a different box — don't
+                # reset the owning box's offset (see KNOWN_LIMITATIONS.md).
+                try:
+                    sess = await self._ledger.get_session(session_id)
+                except Exception:
+                    sess = None
+                if self._box_conflict(sess, box):
+                    log.warning(
+                        "session_id %s already tracked under box %r; skipping "
+                        "seed of its copy under box %r.",
+                        session_id, sess.get("box") or "", box,
+                    )
+                    continue
                 # Reset offset and forget any cached FileState so
                 # ``_process_file`` reads from byte 0 and re-parses.
                 await self._ledger.set_offset(session_id, str(jsonl), 0)
@@ -488,10 +520,22 @@ class TranscriptWatcher:
                 sess = await self._ledger.get_session(session_id)
             except Exception:
                 sess = None
-            if sess:
+            if self._box_conflict(sess, fs.box):
+                log.warning(
+                    "session_id %s is already tracked under box %r; skipping "
+                    "its copy under box %r so the owning box's data isn't "
+                    "clobbered. Session ids must be unique across followed "
+                    "boxes (see KNOWN_LIMITATIONS.md).",
+                    session_id, sess.get("box") or "", fs.box,
+                )
+                fs.collided = True
+            elif sess:
                 fs.project_path = sess["project_path"]
                 fs.project_hash = sess["project_hash"]
             self._files[path] = fs
+
+        if fs.collided:
+            return
 
         try:
             size = path.stat().st_size
