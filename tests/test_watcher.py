@@ -429,6 +429,45 @@ async def test_watcher_tolerates_nonexistent_root(tmp_path: Path) -> None:
 
 
 @pytest.mark.asyncio
+async def test_add_root_picks_up_new_box_without_restart(tmp_path: Path) -> None:
+    """A box pulled mid-run: add_root re-arms the tail loop and primes the
+    new mirror root, so its sessions ingest without a daemon restart."""
+    local = tmp_path / "claude" / "projects"
+    _write_jsonl_cwd(local / "C--warden" / "a.jsonl", "C:/warden")
+
+    ledger = Ledger()
+    await ledger.connect()
+    await _seed_cwd(ledger, "C:/warden")
+    # The new box's project is seeded under its box-aware hash.
+    await ledger.mark_project_seeded(project_hash("/opt/cc", box="box1"))
+    try:
+        state = StateStore()
+        seen: list[str] = []
+
+        async def capture(ev, fs, is_backlog=False):
+            if fs.session_id:
+                seen.append(fs.session_id)
+
+        watcher = TranscriptWatcher(state, ledger, on_event=capture, roots=[local])
+        await watcher.start()
+        await asyncio.sleep(0.3)
+        assert "a" in seen and "b" not in seen
+
+        # A box gets pulled after the daemon is already running.
+        box = tmp_path / "mirror" / "box1" / "projects"
+        _write_jsonl_cwd(box / "-opt-cc" / "b.jsonl", "/opt/cc")
+        assert not watcher.is_watching(box)
+        watcher.add_root(box, "box1")
+        await asyncio.sleep(0.5)  # let the loop re-arm + prime the new root
+        await watcher.stop()
+
+        assert watcher.is_watching(box)
+        assert "b" in seen, "new box's sessions should ingest without a restart"
+    finally:
+        await ledger.close()
+
+
+@pytest.mark.asyncio
 async def test_single_root_constructor_still_works(tmp_path: Path) -> None:
     """Back-compat: the legacy ``root=`` kwarg yields a single-root watcher."""
     root = tmp_path / "claude" / "projects"

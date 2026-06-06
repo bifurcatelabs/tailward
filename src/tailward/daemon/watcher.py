@@ -153,6 +153,15 @@ class TranscriptWatcher:
         self._files: dict[Path, FileState] = {}
         self._task: asyncio.Task[None] | None = None
         self._stop = asyncio.Event()
+        # Set when the root set changes (a box pulled mid-run via
+        # ``add_root``) — breaks the awatch loop so it re-arms with the new
+        # roots without a daemon restart. ``stop()`` sets it too, to
+        # unblock awatch on shutdown.
+        self._roots_changed = asyncio.Event()
+        # Roots whose existing content has been primed. A root added later
+        # (or one that didn't exist at start) is primed on first sight so
+        # the prime pass isn't re-run across already-primed roots.
+        self._primed_roots: set[Path] = set()
         # Empty list = no constraint (watch everything). See
         # Config.watch_paths / Config.exclude_paths for semantics.
         self._watch_paths = list(watch_paths or ())
@@ -178,6 +187,25 @@ class TranscriptWatcher:
             except ValueError:
                 continue
         return None
+
+    def is_watching(self, root: Path) -> bool:
+        return Path(root) in self._roots
+
+    def add_root(self, root: Path, box: str = "") -> None:
+        """Start tailing an additional projects root (a newly pulled box's
+        mirror) without a daemon restart.
+
+        Appends the root and signals the tail loop to re-arm with the new
+        set. Idempotent — a root already watched is ignored. The new root
+        is primed on the next loop pass; already-watched roots keep their
+        offsets, so re-arming can't re-burst existing sessions."""
+        root = Path(root)
+        if root in self._roots:
+            return
+        self._roots.append(root)
+        if box:
+            self._root_box[root] = box
+        self._roots_changed.set()
 
     def _box_for(self, path: Path) -> str:
         """Remote-provenance box label for the root owning ``path``.
@@ -242,6 +270,8 @@ class TranscriptWatcher:
 
     async def stop(self) -> None:
         self._stop.set()
+        # Unblock any in-flight awatch (its stop_event is _roots_changed).
+        self._roots_changed.set()
         if self._task:
             self._task.cancel()
             try:
@@ -292,34 +322,49 @@ class TranscriptWatcher:
             # exception during prime doesn't leave start() hung.
             self._prime_done.set()
 
-        # ``awatch`` raises if handed a non-existent path, so only watch
-        # roots that exist right now. A remote-mirror root created after
-        # daemon start (first pull of a new box) is picked up on the next
-        # restart — interval auto-discovery is a later phase.
-        watch_roots = [r for r in self._roots if r.exists()]
-        try:
-            async for changes in awatch(
-                *watch_roots,
-                recursive=True,
-                stop_event=self._stop,
-                watch_filter=_jsonl_filter,
-            ):
-                for _change, path_str in changes:
-                    p = Path(path_str)
-                    if p.suffix != ".jsonl":
-                        continue
-                    if not self._path_allowed(p):
-                        continue
-                    # Real-time path: filesystem change after watcher
-                    # start. Events get full worker enqueue.
-                    await self._process_file(p, is_backlog=False)
-        except RuntimeError as e:
-            # watchfiles raises if a watched root disappears mid-run; treat
-            # that as shutdown. Anything else is a real bug — log it so it
-            # doesn't vanish silently.
-            if self._stop.is_set() or not any(r.exists() for r in self._roots):
+        # Tail the existing roots, re-arming when the root set changes (a
+        # box pulled mid-run via ``add_root``) so new mirrors are picked up
+        # without a daemon restart. awatch's stop_event is
+        # ``_roots_changed``, set by add_root and by stop(); ``_stop``
+        # distinguishes a shutdown from a re-arm after awatch returns.
+        # ``awatch`` raises on a non-existent path, so only arm on roots
+        # that exist right now.
+        while not self._stop.is_set():
+            watch_roots = [r for r in self._roots if r.exists()]
+            if not watch_roots:
+                await asyncio.sleep(2.0)
+                continue
+            self._roots_changed.clear()
+            try:
+                async for changes in awatch(
+                    *watch_roots,
+                    recursive=True,
+                    stop_event=self._roots_changed,
+                    watch_filter=_jsonl_filter,
+                ):
+                    for _change, path_str in changes:
+                        p = Path(path_str)
+                        if p.suffix != ".jsonl":
+                            continue
+                        if not self._path_allowed(p):
+                            continue
+                        # Real-time path: filesystem change after watcher
+                        # start. Events get full worker enqueue.
+                        await self._process_file(p, is_backlog=False)
+            except RuntimeError as e:
+                # watchfiles raises if a watched root disappears mid-run;
+                # treat that as shutdown. Anything else is a real bug.
+                if self._stop.is_set() or not any(r.exists() for r in self._roots):
+                    return
+                log.exception(
+                    "transcript watcher exited on unexpected RuntimeError: %s", e
+                )
                 return
-            log.exception("transcript watcher exited on unexpected RuntimeError: %s", e)
+            # awatch returned: shutdown, or the root set changed. On a
+            # change, prime any newly added root before re-arming.
+            if self._stop.is_set():
+                return
+            await self._prime_existing()
 
     async def _prime_existing(self) -> None:
         # Initial scan. Events parsed here predate watcher start, so
@@ -335,22 +380,31 @@ class TranscriptWatcher:
         # early-return on size==offset==0; this preserves the
         # ``self._files`` registration that downstream awatch processing
         # expects on first encounter of a freshly-created file.
-        for jsonl in self._iter_jsonl():
-            if not self._path_allowed(jsonl):
+        #
+        # Primes per-root, skipping roots already primed (so a re-arm after
+        # ``add_root`` primes only the newly added box's mirror, not the
+        # whole set again). A root that doesn't exist yet stays un-primed
+        # until it appears (e.g. a box not pulled yet).
+        for root in list(self._roots):
+            if root in self._primed_roots or not root.exists():
                 continue
-            if self._is_seeded(jsonl):
-                await self._process_file(jsonl, is_backlog=True)
-            else:
-                try:
-                    size = jsonl.stat().st_size
-                except FileNotFoundError:
+            for jsonl in root.rglob("*.jsonl"):
+                if not self._path_allowed(jsonl):
                     continue
-                if size == 0:
-                    # Empty file: register FileState via _process_file
-                    # (which will early-return), no offset write needed.
+                if self._is_seeded(jsonl):
                     await self._process_file(jsonl, is_backlog=True)
                 else:
-                    await self._mark_offset_at_eof(jsonl)
+                    try:
+                        size = jsonl.stat().st_size
+                    except FileNotFoundError:
+                        continue
+                    if size == 0:
+                        # Empty file: register FileState via _process_file
+                        # (which will early-return), no offset write needed.
+                        await self._process_file(jsonl, is_backlog=True)
+                    else:
+                        await self._mark_offset_at_eof(jsonl)
+            self._primed_roots.add(root)
 
     def _is_seeded(self, jsonl_path: Path) -> bool:
         """Check whether the project containing this JSONL has been
